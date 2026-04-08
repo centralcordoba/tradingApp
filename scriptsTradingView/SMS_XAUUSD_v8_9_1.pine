@@ -1,0 +1,1058 @@
+//@version=6
+indicator("SMS Pro XAUUSD v8.9.1", shorttitle="SMS-XAU v8.9.1", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=300)
+
+// ============================================================================
+// SMS PRO XAUUSD v8.5 - PANEL COMPACTO + PATTERN DETECTION
+// ============================================================================
+// CAMBIOS vs v7.2:
+// ✅ NEW 1: NR7 Detection — vela de menor rango de las últimas 7
+// ✅ NEW 2: Inside Bar Detection — vela contenida dentro de la anterior
+// ✅ NEW 3: Bull/Bear Flag Detection — impulso + consolidación en canal
+// ✅ NEW 4: Double Bottom / Double Top — pivots con tolerancia configurable
+// ✅ NEW 5: Falling/Rising Wedge — convergencia de highs y lows
+// ✅ NEW 6: Todos los patrones integrados como confluencia adicional
+// ✅ NEW 7: Panel COMPACTO 8 filas — solo lo esencial activos
+// ✅ MANTIENE: Todos los filtros v7.2 intactos
+// ============================================================================
+
+// ============================================================================
+// INPUTS — HEREDADOS DE v7.2
+// ============================================================================
+
+emaFastLen     = input.int(9, "EMA Rapida", minval=1, group="EMAs")
+emaSlowLen     = input.int(21, "EMA Lenta", minval=1, group="EMAs")
+ema200Len      = input.int(200, "EMA 200", minval=50, group="EMAs")
+showEMA200     = input.bool(true, "Mostrar EMA 200", group="EMAs")
+
+swingLen       = input.int(5, "Swing Lookback", minval=2, maxval=20, group="Structure")
+showBOS        = input.bool(true, "Mostrar BOS", group="Structure")
+showCHOCH      = input.bool(true, "Mostrar CHoCH", group="Structure")
+
+showOB         = input.bool(true, "Mostrar Order Blocks", group="Order Blocks")
+maxOB          = input.int(3, "Max OB visibles", minval=1, maxval=10, group="Order Blocks")
+obMinStrength  = input.float(0.5, "OB Fuerza minima (x ATR)", minval=0.3, maxval=1.5, step=0.1, group="Order Blocks")
+
+showBreakerOB  = input.bool(true, "Mostrar Breaker Blocks", group="Breaker Blocks")
+maxBreaker     = input.int(2, "Max Breaker visibles", minval=1, maxval=5, group="Breaker Blocks")
+
+showFVG        = input.bool(true, "Mostrar FVG", group="FVG")
+fvgMinSize     = input.float(0.15, "Tamano minimo FVG %", minval=0.05, maxval=1.0, group="FVG")
+maxFVG         = input.int(3, "Max FVG visibles", minval=1, maxval=10, group="FVG")
+useFVGConf     = input.bool(true, "Usar FVG como Confluencia", group="FVG")
+
+showSweeps     = input.bool(true, "Mostrar Liquidity Sweeps", group="Liquidez")
+showEQHL       = input.bool(false, "Mostrar Equal H/L", group="Liquidez")
+eqhLookback    = input.int(15, "Lookback EQH/L", minval=5, maxval=50, group="Liquidez")
+filterSweeps   = input.bool(true, "Filtrar Sweeps (solo en KZ)", group="Liquidez")
+showInducement = input.bool(true, "Mostrar Inducement", group="Liquidez")
+
+showKillZones  = input.bool(true, "Mostrar Kill Zones", group="Kill Zones")
+onlyTradeKZ    = input.bool(true, "Solo senales en Kill Zone", group="Kill Zones")
+showTokyoKZ    = input.bool(false, "Incluir Tokyo KZ", group="Kill Zones")
+
+showFib        = input.bool(true, "Mostrar Fib 50%", group="Fibonacci")
+fibLookback    = input.int(30, "Lookback", minval=10, maxval=100, group="Fibonacci")
+showPDLevels   = input.bool(true, "Mostrar Premium/Discount", group="Fibonacci")
+
+showSignals    = input.bool(true, "Mostrar Senales", group="Senales")
+minConfluence  = input.int(5, "Minimo Confluencias", minval=3, maxval=15, group="Senales")
+showLabels     = input.bool(true, "Mostrar Labels SL/TP", group="Senales")
+cooldownBars   = input.int(20, "Cooldown entre senales (barras)", minval=5, maxval=50, group="Senales")
+requireMTFalign = input.bool(true, "Bloquear senales contra MTF", group="Senales")
+minQualityScore = input.int(0, "Score minimo calidad", minval=0, maxval=3, group="Senales")
+requireHardConf = input.bool(true, "Requerir min 1 Hard Confluence", group="Senales")
+minBodyATR     = input.float(0.3, "Body minimo vs ATR", minval=0.1, maxval=1.0, step=0.1, group="Senales")
+requireEMACross = input.bool(true, "Requerir EMA9 en direccion", group="Senales")
+blockOverhead   = input.bool(true, "Bloquear LONG debajo de Bear OB/FVG", group="Senales")
+blockCongestion = input.bool(true, "Bloquear senales en congestion", group="Senales")
+
+atrLen         = input.int(14, "Periodo ATR", minval=5, maxval=50, group="ATR & Risk")
+atrMult        = input.float(1.5, "Multiplicador SL", minval=0.5, maxval=3.0, group="ATR & Risk")
+rrRatio        = input.float(2.0, "Ratio R:R", minval=1.0, maxval=5.0, group="ATR & Risk")
+useOBforSL     = input.bool(true, "Usar OB para SL", group="ATR & Risk")
+
+useRSIConf     = input.bool(true, "Usar RSI como Confluencia", group="RSI Filter")
+rsiLen         = input.int(14, "Periodo RSI", minval=5, maxval=21, group="RSI Filter")
+rsiOB          = input.int(70, "Sobrecompra", minval=60, maxval=85, group="RSI Filter")
+rsiOS          = input.int(30, "Sobreventa", minval=15, maxval=40, group="RSI Filter")
+
+useMTFConf     = input.bool(true, "Usar MTF como Confluencia", group="MTF")
+mtfTF          = input.timeframe("30", "Temporalidad Superior", group="MTF")
+mtfEmaFLen     = input.int(9, "EMA Rapida HTF", minval=1, group="MTF")
+mtfEmaSLen     = input.int(21, "EMA Lenta HTF", minval=1, group="MTF")
+showMTFEmas    = input.bool(false, "Mostrar EMAs HTF", group="MTF")
+
+useVolConf     = input.bool(true, "Usar Volumen como Confluencia", group="Volume")
+volLen         = input.int(20, "Periodo promedio volumen", minval=5, maxval=50, group="Volume")
+volMultiplier  = input.float(1.3, "Multiplicador vol. significativo", minval=1.0, maxval=3.0, step=0.1, group="Volume")
+showVolProfile = input.bool(true, "Mostrar VWAP Session", group="Volume")
+vwapDevMult    = input.float(1.0, "VWAP Desviacion", minval=0.5, maxval=3.0, step=0.25, group="Volume")
+useVWAPConf    = input.bool(true, "Usar VWAP como Confluencia", group="Volume")
+
+useMomQuality  = input.bool(true, "Evaluar Momentum", group="Momentum")
+momRangeMult   = input.float(1.5, "Mult. Rango vs Promedio", minval=1.0, maxval=3.0, step=0.1, group="Momentum")
+momCloseRatio  = input.float(0.7, "Cierre cerca extremo", minval=0.5, maxval=0.95, step=0.05, group="Momentum")
+momAvgLen      = input.int(20, "Periodo promedio rango", minval=5, maxval=50, group="Momentum")
+
+showBELevels   = input.bool(true, "Mostrar BE 1:1", group="BE Levels")
+beLevelExtend  = input.int(20, "Barras extension", minval=5, maxval=50, group="BE Levels")
+showTP2Level   = input.bool(false, "Mostrar TP2 parcial", group="BE Levels")
+
+spreadPips     = input.float(3.0, "Spread ($)", minval=0.5, maxval=10.0, group="Spread")
+addSpreadToSL  = input.bool(true, "Agregar spread al SL", group="Spread")
+spreadBuffer   = input.float(1.0, "Buffer adicional ($)", minval=0.0, maxval=5.0, group="Spread")
+
+enableAlerts   = input.bool(true, "Habilitar Alertas", group="Alertas")
+alertOnSweeps  = input.bool(false, "Alertas Sweeps", group="Alertas")
+alertOnCHoCH   = input.bool(true, "Alertas CHoCH", group="Alertas")
+alertOnBOS     = input.bool(false, "Alertas BOS", group="Alertas")
+alertMinConf   = input.int(5, "Min. confluencias para alerta", minval=3, maxval=11, group="Alertas")
+alertOnlyKZ    = input.bool(true, "Solo alertar en Kill Zone", group="Alertas")
+alertOnlyStrong = input.bool(false, "Solo alertar STRONG+", group="Alertas")
+
+showPanel      = input.bool(true, "Mostrar Panel Info", group="Visual")
+
+// ============================================================================
+// INPUTS — NUEVOS v8.0 PATRONES
+// ============================================================================
+
+showPatterns   = input.bool(true, "Mostrar Patrones", group="Patrones v8")
+showNR7        = input.bool(true, "Mostrar NR7", group="Patrones v8", tooltip="Vela de menor rango de las ultimas 7 — precede expansion de volatilidad")
+showInsideBar  = input.bool(true, "Mostrar Inside Bar", group="Patrones v8", tooltip="Vela contenida dentro del rango de la anterior — compresion antes de movimiento")
+showFlag       = input.bool(true, "Mostrar Flag/Banderin", group="Patrones v8", tooltip="Impulso + consolidacion en canal — continuacion de tendencia")
+flagImpulseLen = input.int(4, "Min velas de impulso (Flag)", minval=2, maxval=8, group="Patrones v8")
+flagConsolLen  = input.int(6, "Max velas consolidacion (Flag)", minval=3, maxval=12, group="Patrones v8")
+showDoubleTop  = input.bool(true, "Mostrar Doble Techo/Suelo", group="Patrones v8", tooltip="Dos toques de nivel similar con tolerancia configurable")
+dblTolerance   = input.float(0.3, "Tolerancia Doble T/S (%)", minval=0.1, maxval=1.0, step=0.1, group="Patrones v8", tooltip="% de diferencia maxima entre los dos picos/suelos")
+dblLookback    = input.int(20, "Lookback Doble T/S (barras)", minval=10, maxval=50, group="Patrones v8")
+showWedge      = input.bool(true, "Mostrar Cuna", group="Patrones v8", tooltip="Convergencia de highs y lows — señal de agotamiento")
+wedgeLookback  = input.int(15, "Lookback Cuna (barras)", minval=8, maxval=30, group="Patrones v8")
+usePatternConf = input.bool(true, "Patrones como Confluencia", group="Patrones v8", tooltip="Suma +1 al score cuando hay patron activo en direccion correcta")
+
+// ============================================================================
+// COLORES
+// ============================================================================
+
+bullColor      = color.rgb(0, 230, 118)
+bearColor      = color.rgb(255, 82, 82)
+bosColor       = color.rgb(0, 188, 212)
+chochColor     = color.rgb(255, 152, 0)
+obBullColor    = color.new(color.rgb(38, 166, 154), 80)
+obBearColor    = color.new(color.rgb(239, 83, 80), 80)
+fvgBullColor   = color.new(color.rgb(0, 150, 255), 80)
+fvgBearColor   = color.new(color.rgb(255, 150, 0), 80)
+breakerBullCol = color.new(color.rgb(0, 200, 255), 75)
+breakerBearCol = color.new(color.rgb(255, 100, 200), 75)
+vwapColor      = color.rgb(255, 235, 59)
+
+// Colores patrones v8
+nr7Color       = color.rgb(186, 104, 200)    // Violeta
+insideBarColor = color.rgb(100, 181, 246)    // Azul claro
+flagBullColor  = color.rgb(0, 230, 118)      // Verde
+flagBearColor  = color.rgb(255, 82, 82)      // Rojo
+dblTopColor    = color.rgb(255, 152, 0)      // Naranja
+dblBotColor    = color.rgb(0, 230, 118)      // Verde
+wedgeUpColor   = color.rgb(255, 235, 59)     // Amarillo
+wedgeDnColor   = color.rgb(255, 235, 59)     // Amarillo
+
+// ============================================================================
+// CALCULOS BASE
+// ============================================================================
+
+emaFast  = ta.ema(close, emaFastLen)
+emaSlow  = ta.ema(close, emaSlowLen)
+ema200   = ta.ema(close, ema200Len)
+atrValue = ta.atr(atrLen)
+rsiValue = ta.rsi(close, rsiLen)
+
+mtfEmaFast  = request.security(syminfo.tickerid, mtfTF, ta.ema(close, mtfEmaFLen), lookahead=barmerge.lookahead_off)
+mtfEmaSlow  = request.security(syminfo.tickerid, mtfTF, ta.ema(close, mtfEmaSLen), lookahead=barmerge.lookahead_off)
+mtfClose    = request.security(syminfo.tickerid, mtfTF, close, lookahead=barmerge.lookahead_off)
+mtfHigh     = request.security(syminfo.tickerid, mtfTF, high, lookahead=barmerge.lookahead_off)
+mtfLow      = request.security(syminfo.tickerid, mtfTF, low, lookahead=barmerge.lookahead_off)
+mtfRSI      = request.security(syminfo.tickerid, mtfTF, ta.rsi(close, rsiLen), lookahead=barmerge.lookahead_off)
+mtfTrendUp  = mtfEmaFast > mtfEmaSlow and mtfClose > mtfEmaSlow
+mtfTrendDn  = mtfEmaFast < mtfEmaSlow and mtfClose < mtfEmaSlow
+mtfTrendName = mtfTrendUp ? "BULL" : mtfTrendDn ? "BEAR" : "MIX"
+
+totalSpreadBuf = addSpreadToSL ? (spreadPips + spreadBuffer) : 0
+
+trendUp    = emaFast > emaSlow
+trendDown  = emaFast < emaSlow
+htfTrendUp = close > ema200
+htfTrendDn = close < ema200
+
+bodySize   = math.abs(close - open)
+candleRange = high - low
+upperWick  = high - math.max(close, open)
+lowerWick  = math.min(close, open) - low
+isBullCandle = close > open
+isBearCandle = close < open
+
+avgRange = ta.sma(high - low, momAvgLen)
+isMomCandle = candleRange > avgRange * momRangeMult
+bullCloseStr = candleRange > 0 ? (close - low) / candleRange : 0
+bearCloseStr = candleRange > 0 ? (high - close) / candleRange : 0
+isStrongBullClose = bullCloseStr >= momCloseRatio and isBullCandle
+isStrongBearClose = bearCloseStr >= momCloseRatio and isBearCandle
+isStrongBull = isMomCandle and isStrongBullClose
+isStrongBear = isMomCandle and isStrongBearClose
+
+vol = volume
+avgVol = ta.sma(vol, volLen)
+isHighVol = vol > avgVol * volMultiplier
+isLowVol = vol < avgVol * 0.5
+volRatio = avgVol > 0 ? vol / avgVol : 1.0
+vDelta = candleRange > 0 ? (close - low) / candleRange * 2 - 1 : 0
+bullVolConf = isHighVol and vDelta > 0.3 and isBullCandle
+bearVolConf = isHighVol and vDelta < -0.3 and isBearCandle
+
+var float vwapSum = 0.0
+var float vwapVolSum = 0.0
+var float vwapSqSum = 0.0
+var bool newSession = false
+
+utcHourVwap = hour(time, "UTC")
+newSession := (utcHourVwap == 22 and utcHourVwap[1] != 22) or (na(vwapSum))
+
+if newSession
+    vwapSum := 0.0
+    vwapVolSum := 0.0
+    vwapSqSum := 0.0
+
+typicalPrice = (high + low + close) / 3
+vwapSum := vwapSum + typicalPrice * vol
+vwapVolSum := vwapVolSum + vol
+vwapSqSum := vwapSqSum + typicalPrice * typicalPrice * vol
+
+sessionVwap = vwapVolSum > 0 ? vwapSum / vwapVolSum : close
+vwapVariance = vwapVolSum > 0 ? (vwapSqSum / vwapVolSum) - (sessionVwap * sessionVwap) : 0
+vwapStdDev = math.sqrt(math.max(vwapVariance, 0))
+vwapUpper = sessionVwap + vwapStdDev * vwapDevMult
+vwapLower = sessionVwap - vwapStdDev * vwapDevMult
+
+priceAboveVwap = close > sessionVwap
+priceBelowVwap = close < sessionVwap
+priceNearVwap = math.abs(close - sessionVwap) < atrValue * 0.3
+
+// ============================================================================
+// KILL ZONES
+// ============================================================================
+
+utcHour = hour(time, "UTC")
+utcMin  = minute(time)
+
+// ── VENTANA OPERATIVA v8.9.1 ──────────────────────────────────────────────
+// Ventana horaria DESACTIVADA — señales evaluadas las 24h
+// El filtro de calidad (Conf, Overhead, Zona, MTF) es el control principal
+estHour = (utcHour >= 4) ? (utcHour - 4) : (utcHour + 20)
+estMin  = minute(time)
+
+inNYCleanKZ = true   // Sin restricción horaria
+inTokyoKZ   = false
+inLondonKZ  = false
+inAnyKZ     = true   // Siempre activo
+
+bgcolor(na)
+
+kzName = "24H ACTIVO"
+
+// ============================================================================
+// MARKET STRUCTURE
+// ============================================================================
+
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var float lastSL = na
+var float prevSH = na
+var float prevSL = na
+var int trendDir = 0
+
+if not na(swingHigh)
+    prevSH := lastSH
+    lastSH := swingHigh
+if not na(swingLow)
+    prevSL := lastSL
+    lastSL := swingLow
+
+crossOverHigh  = ta.crossover(close, nz(lastSH, high))
+crossUnderLow  = ta.crossunder(close, nz(lastSL, low))
+
+bos_bull  = not na(lastSH) and crossOverHigh and trendDir == 1
+bos_bear  = not na(lastSL) and crossUnderLow and trendDir == -1
+choch_bull = not na(lastSH) and crossOverHigh and trendDir == -1
+choch_bear = not na(lastSL) and crossUnderLow and trendDir == 1
+
+if choch_bull or bos_bull
+    trendDir := 1
+if choch_bear or bos_bear
+    trendDir := -1
+
+bos_bull_c  = showBOS and bos_bull and barstate.isconfirmed
+bos_bear_c  = showBOS and bos_bear and barstate.isconfirmed
+choch_bull_c = showCHOCH and choch_bull and barstate.isconfirmed
+choch_bear_c = showCHOCH and choch_bear and barstate.isconfirmed
+
+bos_bull_conf  = bos_bull and barstate.isconfirmed
+bos_bear_conf  = bos_bear and barstate.isconfirmed
+choch_bull_conf = choch_bull and barstate.isconfirmed
+choch_bear_conf = choch_bear and barstate.isconfirmed
+
+if bos_bull_c
+    label.new(bar_index, low, "BOS", style=label.style_label_up, color=bosColor, textcolor=color.white, size=size.tiny)
+if bos_bear_c
+    label.new(bar_index, high, "BOS", style=label.style_label_down, color=bosColor, textcolor=color.white, size=size.tiny)
+if choch_bull_c
+    label.new(bar_index, low, "CHoCH", style=label.style_label_up, color=chochColor, textcolor=color.white, size=size.small)
+if choch_bear_c
+    label.new(bar_index, high, "CHoCH", style=label.style_label_down, color=chochColor, textcolor=color.white, size=size.small)
+
+// ============================================================================
+// ORDER BLOCKS
+// ============================================================================
+
+var array<box> bullOBBoxes    = array.new<box>()
+var array<box> bearOBBoxes    = array.new<box>()
+var array<float> bullOBTops   = array.new<float>()
+var array<float> bullOBBottoms = array.new<float>()
+var array<float> bearOBTops   = array.new<float>()
+var array<float> bearOBBottoms = array.new<float>()
+
+bullOB = isBearCandle[1] and isBullCandle and close > high[1] and (close - open) > atrValue * obMinStrength
+bearOB = isBullCandle[1] and isBearCandle and close < low[1] and (open - close) > atrValue * obMinStrength
+
+if showOB and bullOB and barstate.isconfirmed
+    if array.size(bullOBBoxes) >= maxOB
+        oldBox = array.shift(bullOBBoxes)
+        box.delete(oldBox)
+        array.shift(bullOBTops)
+        array.shift(bullOBBottoms)
+    newBox = box.new(bar_index - 1, high[1], bar_index + 30, low[1], bgcolor=obBullColor, border_color=bullColor, border_width=1)
+    array.push(bullOBBoxes, newBox)
+    array.push(bullOBTops, high[1])
+    array.push(bullOBBottoms, low[1])
+
+if showOB and bearOB and barstate.isconfirmed
+    if array.size(bearOBBoxes) >= maxOB
+        oldBox = array.shift(bearOBBoxes)
+        box.delete(oldBox)
+        array.shift(bearOBTops)
+        array.shift(bearOBBottoms)
+    newBox = box.new(bar_index - 1, high[1], bar_index + 30, low[1], bgcolor=obBearColor, border_color=bearColor, border_width=1)
+    array.push(bearOBBoxes, newBox)
+    array.push(bearOBTops, high[1])
+    array.push(bearOBBottoms, low[1])
+
+// ============================================================================
+// BREAKER BLOCKS
+// ============================================================================
+
+var array<box> bullBreakerBoxes = array.new<box>()
+var array<box> bearBreakerBoxes = array.new<box>()
+var array<float> bullBreakerTops = array.new<float>()
+var array<float> bullBreakerBots = array.new<float>()
+var array<float> bearBreakerTops = array.new<float>()
+var array<float> bearBreakerBots = array.new<float>()
+
+if array.size(bullOBBoxes) > 0
+    for i = array.size(bullOBBoxes) - 1 to 0
+        if i < array.size(bullOBBottoms) and close < array.get(bullOBBottoms, i)
+            if showBreakerOB and array.size(bearBreakerBoxes) < maxBreaker
+                bTop = array.get(bullOBTops, i)
+                bBot = array.get(bullOBBottoms, i)
+                brkBox = box.new(bar_index, bTop, bar_index + 40, bBot, bgcolor=breakerBearCol, border_color=color.rgb(255, 100, 200), border_width=1, border_style=line.style_dashed)
+                array.push(bearBreakerBoxes, brkBox)
+                array.push(bearBreakerTops, bTop)
+                array.push(bearBreakerBots, bBot)
+            box.delete(array.get(bullOBBoxes, i))
+            array.remove(bullOBBoxes, i)
+            array.remove(bullOBTops, i)
+            array.remove(bullOBBottoms, i)
+
+if array.size(bearOBBoxes) > 0
+    for i = array.size(bearOBBoxes) - 1 to 0
+        if i < array.size(bearOBTops) and close > array.get(bearOBTops, i)
+            if showBreakerOB and array.size(bullBreakerBoxes) < maxBreaker
+                bTop = array.get(bearOBTops, i)
+                bBot = array.get(bearOBBottoms, i)
+                brkBox = box.new(bar_index, bTop, bar_index + 40, bBot, bgcolor=breakerBullCol, border_color=color.rgb(0, 200, 255), border_width=1, border_style=line.style_dashed)
+                array.push(bullBreakerBoxes, brkBox)
+                array.push(bullBreakerTops, bTop)
+                array.push(bullBreakerBots, bBot)
+            box.delete(array.get(bearOBBoxes, i))
+            array.remove(bearOBBoxes, i)
+            array.remove(bearOBTops, i)
+            array.remove(bearOBBottoms, i)
+
+// ============================================================================
+// FVG
+// ============================================================================
+
+var array<box> bullFVGBoxes = array.new<box>()
+var array<box> bearFVGBoxes = array.new<box>()
+var array<float> bullFVGTops = array.new<float>()
+var array<float> bullFVGBots = array.new<float>()
+var array<float> bearFVGTops = array.new<float>()
+var array<float> bearFVGBots = array.new<float>()
+
+fvgBullCond = low > high[2] and (low - high[2]) / high[2] * 100 >= fvgMinSize
+fvgBearCond = high < low[2] and (low[2] - high) / low[2] * 100 >= fvgMinSize
+
+if showFVG and fvgBullCond and barstate.isconfirmed
+    if array.size(bullFVGBoxes) >= maxFVG
+        oldBox = array.shift(bullFVGBoxes)
+        box.delete(oldBox)
+        array.shift(bullFVGTops)
+        array.shift(bullFVGBots)
+    newBox = box.new(bar_index - 2, low, bar_index + 20, high[2], bgcolor=fvgBullColor, border_color=color.rgb(0, 150, 255), border_width=1)
+    array.push(bullFVGBoxes, newBox)
+    array.push(bullFVGTops, low)
+    array.push(bullFVGBots, high[2])
+
+if showFVG and fvgBearCond and barstate.isconfirmed
+    if array.size(bearFVGBoxes) >= maxFVG
+        oldBox = array.shift(bearFVGBoxes)
+        box.delete(oldBox)
+        array.shift(bearFVGTops)
+        array.shift(bearFVGBots)
+    newBox = box.new(bar_index - 2, low[2], bar_index + 20, high, bgcolor=fvgBearColor, border_color=color.rgb(255, 150, 0), border_width=1)
+    array.push(bearFVGBoxes, newBox)
+    array.push(bearFVGTops, low[2])
+    array.push(bearFVGBots, high)
+
+isInBullFVG = false
+isInBearFVG = false
+if array.size(bullFVGBots) > 0
+    for i = 0 to array.size(bullFVGBots) - 1
+        if close >= array.get(bullFVGBots, i) and close <= array.get(bullFVGTops, i)
+            isInBullFVG := true
+if array.size(bearFVGBots) > 0
+    for i = 0 to array.size(bearFVGBots) - 1
+        if close >= array.get(bearFVGBots, i) and close <= array.get(bearFVGTops, i)
+            isInBearFVG := true
+
+// ============================================================================
+// FIBONACCI / PREMIUM-DISCOUNT
+// ============================================================================
+
+var float fibHigh = na
+var float fibLow  = na
+var float fibMid  = na
+
+if barstate.islast or barstate.isconfirmed
+    fibHigh := ta.highest(high, fibLookback)
+    fibLow  := ta.lowest(low, fibLookback)
+    fibMid  := (fibHigh + fibLow) / 2
+
+fibRange = nz(fibHigh, high) - nz(fibLow, low)
+inPremium     = close > nz(fibMid, close)
+inDiscount    = close < nz(fibMid, close)
+inDeepPrem    = close > nz(fibLow, low) + fibRange * 0.75
+inDeepDisc    = close < nz(fibLow, low) + fibRange * 0.25
+
+zonaName = inDeepPrem ? "VENDE YA" : inPremium ? "VENDE" : inDeepDisc ? "COMPRA YA" : "COMPRA"
+
+if showFib and showPDLevels
+    if barstate.islast
+        line.new(bar_index - fibLookback, fibMid, bar_index + 5, fibMid, color=color.new(color.white, 60), style=line.style_dashed, width=1)
+
+// ============================================================================
+// LIQUIDITY SWEEPS
+// ============================================================================
+
+prevHighSH = ta.highest(high, eqhLookback)[1]
+prevLowSL  = ta.lowest(low, eqhLookback)[1]
+
+sweepHigh = high > prevHighSH and close < prevHighSH and isHighVol
+sweepLow  = low < prevLowSL  and close > prevLowSL  and isHighVol
+
+showSweepHLabel = showSweeps and sweepHigh and (not filterSweeps or inAnyKZ)
+showSweepLLabel = showSweeps and sweepLow  and (not filterSweeps or inAnyKZ)
+
+if showSweepHLabel
+    label.new(bar_index, high, "SW", style=label.style_label_down, color=color.rgb(255, 82, 82, 30), textcolor=color.white, size=size.tiny)
+if showSweepLLabel
+    label.new(bar_index, low, "SW", style=label.style_label_up, color=color.rgb(0, 230, 118, 30), textcolor=color.white, size=size.tiny)
+
+// Inducement
+var float inducementHigh = na
+var float inducementLow  = na
+inducementBull = showInducement and not na(lastSL) and low < lastSL and close > lastSL
+inducementBear = showInducement and not na(lastSH) and high > lastSH and close < lastSH
+
+if inducementBull
+    label.new(bar_index, low, "IDM", style=label.style_label_up, color=color.new(color.purple, 40), textcolor=color.white, size=size.tiny)
+if inducementBear
+    label.new(bar_index, high, "IDM", style=label.style_label_down, color=color.new(color.purple, 40), textcolor=color.white, size=size.tiny)
+
+// Equal Highs/Lows
+if showEQHL
+    isEQH = math.abs(high - high[eqhLookback]) / high * 100 < 0.1
+    isEQL = math.abs(low - low[eqhLookback]) / low * 100 < 0.1
+    if isEQH
+        line.new(bar_index - eqhLookback, high[eqhLookback], bar_index, high, color=color.rgb(255, 82, 82, 50), style=line.style_dotted)
+    if isEQL
+        line.new(bar_index - eqhLookback, low[eqhLookback], bar_index, low, color=color.rgb(0, 230, 118, 50), style=line.style_dotted)
+
+// ============================================================================
+// VWAP VISUAL
+// ============================================================================
+
+plot(showVolProfile ? sessionVwap : na, "VWAP", color=vwapColor, linewidth=1)
+plot(showVolProfile ? vwapUpper : na, "VWAP+", color=color.new(vwapColor, 70), linewidth=1, style=plot.style_circles)
+plot(showVolProfile ? vwapLower : na, "VWAP-", color=color.new(vwapColor, 70), linewidth=1, style=plot.style_circles)
+
+// ============================================================================
+// EMA PLOTS
+// ============================================================================
+
+plot(emaFast, "EMA9", color=color.new(bullColor, 30), linewidth=1)
+plot(emaSlow, "EMA21", color=color.new(bearColor, 30), linewidth=1)
+plot(showEMA200 ? ema200 : na, "EMA200", color=color.new(color.white, 50), linewidth=1)
+
+// ============================================================================
+// ██████████████████████████████████████████████████████████████████████████
+// PATRONES v8.2 — MTF FILTER + COOLDOWN
+// ██████████████████████████████████████████████████████████████████████████
+// ============================================================================
+
+// Cooldown trackers — evitan repetición en barras consecutivas
+var int lastNR7Bar      = -999
+var int lastIBBar       = -999
+nr7Cooldown = 8   // ~40 min en M5 — un NR7 cada 40 min es informativo
+ibCooldown  = 6   // ~30 min en M5
+
+// ----------------------------------------------------------------------------
+// PATRÓN 1: NR7 — Narrow Range 7
+// v8.2: cooldown de 8 barras entre detecciones
+// ----------------------------------------------------------------------------
+
+currentRange = high - low
+nr7Condition = currentRange < math.min(high[1]-low[1], math.min(high[2]-low[2], math.min(high[3]-low[3], math.min(high[4]-low[4], math.min(high[5]-low[5], high[6]-low[6])))))
+// v8.3: not congestionZone — NR7 en rango sucio no predice expansión real
+nr7NoChop = not (blockCongestion and array.size(bullOBTops) > 0 and array.size(bearOBTops) > 0)
+isNR7 = showPatterns and showNR7 and nr7Condition and (bar_index - lastNR7Bar) >= nr7Cooldown and nr7NoChop
+
+if isNR7 and barstate.isconfirmed
+    lastNR7Bar := bar_index
+    label.new(bar_index, low - atrValue * 0.3, "EXPLOS!", style=label.style_label_up, color=color.new(nr7Color, 20), textcolor=color.white, size=size.tiny, tooltip="EXPLOSION INMINENTE: Vela de minimo rango — movimiento fuerte proximo.")
+
+// ----------------------------------------------------------------------------
+// PATRÓN 2: INSIDE BAR
+// v8.3: cooldown + not congestionZone
+// ----------------------------------------------------------------------------
+
+// v8.3: not congestionZone — IB en rango sucio es ruido, no compresión real
+ibNoChop = not (blockCongestion and array.size(bullOBTops) > 0 and array.size(bearOBTops) > 0)
+isInsideBar = showPatterns and showInsideBar and high < high[1] and low > low[1] and (bar_index - lastIBBar) >= ibCooldown and ibNoChop and barstate.isconfirmed
+
+if isInsideBar
+    lastIBBar := bar_index
+    label.new(bar_index, high + atrValue * 0.2, "DECIS!", style=label.style_label_down, color=color.new(insideBarColor, 20), textcolor=color.white, size=size.tiny, tooltip="DECISION INMINENTE: Vela contenida — el mercado va a elegir direccion.")
+
+// ----------------------------------------------------------------------------
+// PATRÓN 3: BULL FLAG / BEAR FLAG
+// Impulso fuerte seguido de consolidación en canal
+// Bull Flag: impulso alcista + corrección bajista leve
+// Bear Flag: impulso bajista + rebote alcista leve
+// ----------------------------------------------------------------------------
+
+// Detectar impulso previo
+bullImpulse = true
+bearImpulse = true
+
+for i = 1 to flagImpulseLen
+    if i <= bar_index
+        if not (close[i] > open[i])
+            bullImpulse := false
+        if not (close[i] < open[i])
+            bearImpulse := false
+
+// Detectar consolidación (canal estrecho post-impulso)
+consolHigh = ta.highest(high, flagConsolLen)
+consolLow  = ta.lowest(low, flagConsolLen)
+consolRange = consolHigh - consolLow
+avgConsolRange = ta.sma(high - low, flagConsolLen)
+isTightConsol = consolRange < avgConsolRange * 2.5
+
+// v8.2: FLAG+ requiere MTF30 BULL — no genera señal alcista si M30 es bajista
+// v8.2: FLAG- requiere MTF30 BEAR — no genera señal bajista si M30 es alcista
+bullFlag = showPatterns and showFlag and bullImpulse and isTightConsol and trendUp and mtfTrendUp and barstate.isconfirmed
+bearFlag = showPatterns and showFlag and bearImpulse and isTightConsol and trendDown and mtfTrendDn and barstate.isconfirmed
+
+if bullFlag
+    label.new(bar_index, low - atrValue * 0.5, "SUBE!", style=label.style_label_up, color=color.new(flagBullColor, 20), textcolor=color.white, size=size.tiny, tooltip="CONTINUA ARRIBA: Impulso alcista + consolidacion — continuacion LONG esperada.")
+
+if bearFlag
+    label.new(bar_index, high + atrValue * 0.5, "BAJA!", style=label.style_label_down, color=color.new(flagBearColor, 20), textcolor=color.white, size=size.tiny, tooltip="CONTINUA ABAJO: Impulso bajista + consolidacion — continuacion SHORT esperada.")
+
+// ----------------------------------------------------------------------------
+// PATRÓN 4: DOUBLE TOP / DOUBLE BOTTOM
+// Dos toques de nivel similar separados por un valley/peak intermedio
+// Double Top: resistencia doble = señal bajista
+// Double Bottom: soporte doble = señal alcista
+// ----------------------------------------------------------------------------
+
+// Double Top: dos highs similares
+recentHigh1 = ta.highest(high, dblLookback)
+var float prevHighPeak = na
+var int prevHighBar = 0
+
+// Buscar el pivot high más reciente previo
+if not na(swingHigh)
+    prevHighPeak := swingHigh
+    prevHighBar := bar_index
+
+tolPct = dblTolerance / 100
+// v8.2: 2TOP requiere MTF30 BEAR — solo válido en contexto bajista M30
+isDoubleTop = showPatterns and showDoubleTop and not na(prevHighPeak) and not na(swingHigh) and math.abs(swingHigh - prevHighPeak) / prevHighPeak <= tolPct and (bar_index - prevHighBar) >= 5 and isBearCandle and mtfTrendDn and barstate.isconfirmed
+
+// Double Bottom: dos lows similares
+var float prevLowPeak = na
+var int prevLowBar = 0
+
+if not na(swingLow)
+    prevLowPeak := swingLow
+    prevLowBar := bar_index
+
+// v8.2: 2BOT requiere MTF30 BULL — solo válido en contexto alcista M30
+isDoubleBottom = showPatterns and showDoubleTop and not na(prevLowPeak) and not na(swingLow) and math.abs(swingLow - prevLowPeak) / prevLowPeak <= tolPct and (bar_index - prevLowBar) >= 5 and isBullCandle and mtfTrendUp and barstate.isconfirmed
+
+if isDoubleTop
+    label.new(bar_index, high + atrValue * 0.8, "BAJA!", style=label.style_label_down, color=color.new(dblTopColor, 20), textcolor=color.white, size=size.tiny, tooltip="BAJA DESDE AQUI: Dos rechazos en mismo nivel — precio va a bajar.")
+
+if isDoubleBottom
+    label.new(bar_index, low - atrValue * 0.8, "SUBE!", style=label.style_label_up, color=color.new(dblBotColor, 20), textcolor=color.white, size=size.tiny, tooltip="SUBE DESDE AQUI: Dos rebotes en mismo nivel — precio va a subir.")
+
+// ----------------------------------------------------------------------------
+// PATRÓN 5: FALLING WEDGE / RISING WEDGE
+// Convergencia de highs y lows — agotamiento del movimiento
+// Falling Wedge (cuña descendente): señal alcista
+// Rising Wedge (cuña ascendente): señal bajista
+// ----------------------------------------------------------------------------
+
+// Calcular pendientes de highs y lows en el lookback
+highSlope = (ta.highest(high, wedgeLookback) - ta.highest(high, wedgeLookback / 2)) / (wedgeLookback / 2)
+lowSlope  = (ta.lowest(low, wedgeLookback) - ta.lowest(low, wedgeLookback / 2)) / (wedgeLookback / 2)
+
+// v8.2: FW+ requiere MTF30 BEAR — cuña descendente solo válida en bajista M30
+fallingWedge = showPatterns and showWedge and highSlope < 0 and lowSlope < 0 and lowSlope > highSlope and mtfTrendDn and barstate.isconfirmed
+
+// v8.2: RW- requiere MTF30 BULL — cuña ascendente solo válida en alcista M30
+risingWedge = showPatterns and showWedge and highSlope > 0 and lowSlope > 0 and highSlope < lowSlope and mtfTrendUp and barstate.isconfirmed
+
+if fallingWedge
+    label.new(bar_index, low - atrValue * 1.0, "EXPLOS!", style=label.style_label_up, color=color.new(wedgeDnColor, 20), textcolor=color.black, size=size.tiny, tooltip="COMPRESION EXTREMA alcista: Rango cerrándose — explosion al alza inminente.")
+
+if risingWedge
+    label.new(bar_index, high + atrValue * 1.0, "EXPLOS!", style=label.style_label_down, color=color.new(wedgeUpColor, 20), textcolor=color.black, size=size.tiny, tooltip="COMPRESION EXTREMA bajista: Rango cerrándose — explosion a la baja inminente.")
+
+// ----------------------------------------------------------------------------
+// CONFLUENCIA DE PATRONES — Integración al score v8
+// ----------------------------------------------------------------------------
+
+// Patron alcista activo (suma +1 a confLong)
+bullPatternActive = usePatternConf and (isInsideBar or isNR7 or bullFlag or isDoubleBottom or fallingWedge)
+bearPatternActive = usePatternConf and (isInsideBar or isNR7 or bearFlag or isDoubleTop or risingWedge)
+
+// Nombre del patrón activo para el panel
+bullPatternName = isNR7 ? "EXPLOSION INMINENTE" : isInsideBar ? "DECISION INMINENTE" : bullFlag ? "CONTINUA ARRIBA" : isDoubleBottom ? "SUBE DESDE AQUI" : fallingWedge ? "COMPRESION EXTREMA" : "---"
+bearPatternName = isNR7 ? "EXPLOSION INMINENTE" : isInsideBar ? "DECISION INMINENTE" : bearFlag ? "CONTINUA ABAJO" : isDoubleTop ? "BAJA DESDE AQUI" : risingWedge ? "COMPRESION EXTREMA" : "---"
+
+// ============================================================================
+// OVERHEAD / UNDERLYING SUPPORT FILTERS (v7.2)
+// FIX v8.9.1: Buffer reducido de 2.0x a 0.5x ATR para Bear OB
+//             y de 1.5x a 0.5x ATR para Bear FVG
+//             Evita bloquear LONGs $16-24 por debajo de resistencias lejanas
+// ============================================================================
+
+overheadResist = false
+underlyingSupp = false
+
+if blockOverhead
+    if array.size(bearOBTops) > 0
+        for i = 0 to array.size(bearOBTops) - 1
+            if i < array.size(bearOBBottoms)
+                obTop = array.get(bearOBTops, i)
+                obBot = array.get(bearOBBottoms, i)
+                if close < obTop and close > obBot - atrValue * 0.5
+                    overheadResist := true
+    if array.size(bearFVGBots) > 0
+        for i = 0 to array.size(bearFVGBots) - 1
+            if i < array.size(bearFVGTops)
+                fTop = array.get(bearFVGTops, i)
+                fBot = array.get(bearFVGBots, i)
+                if close < fTop and close > fBot - atrValue * 0.5
+                    overheadResist := true
+
+    if array.size(bullOBTops) > 0
+        for i = 0 to array.size(bullOBTops) - 1
+            if i < array.size(bullOBBottoms)
+                obTop = array.get(bullOBTops, i)
+                obBot = array.get(bullOBBottoms, i)
+                if close > obBot and close < obTop + atrValue * 0.5
+                    underlyingSupp := true
+
+// ============================================================================
+// CONGESTION ZONE FILTER (v7.2)
+// ============================================================================
+
+congestionZone = false
+if blockCongestion and array.size(bullOBTops) > 0 and array.size(bearOBBottoms) > 0
+    for bi = 0 to array.size(bullOBTops) - 1
+        for bri = 0 to array.size(bearOBBottoms) - 1
+            if bi < array.size(bullOBBottoms) and bri < array.size(bearOBTops)
+                bTop = array.get(bullOBTops, bi)
+                bBot = array.get(bullOBBottoms, bi)
+                brTop = array.get(bearOBTops, bri)
+                brBot = array.get(bearOBBottoms, bri)
+                overlap = math.min(bTop, brTop) - math.max(bBot, brBot)
+                if overlap > 0 or math.abs(bTop - brBot) < atrValue * 1.5
+                    congestionZone := true
+
+// ============================================================================
+// EMA CROSS FILTER (v7.2)
+// ============================================================================
+
+emaCrossLong  = requireEMACross ? (emaFast > emaSlow) : true
+emaCrossShort = requireEMACross ? (emaFast < emaSlow) : true
+
+// ============================================================================
+// CONFLUENCE SCORING v8 — ACTUALIZADO CON PATRONES
+// ============================================================================
+
+getNearestBullOBBottom() =>
+    result = close - atrValue * atrMult
+    if array.size(bullOBBottoms) > 0
+        nearest = 999999.0
+        for i = 0 to array.size(bullOBBottoms) - 1
+            val = array.get(bullOBBottoms, i)
+            if val < close and math.abs(close - val) < math.abs(close - nearest)
+                nearest := val
+        if nearest < 999999.0
+            result := nearest
+    result
+
+getNearestBearOBTop() =>
+    result = close + atrValue * atrMult
+    if array.size(bearOBTops) > 0
+        nearest = 0.0
+        for i = 0 to array.size(bearOBTops) - 1
+            val = array.get(bearOBTops, i)
+            if val > close and (nearest == 0.0 or math.abs(close - val) < math.abs(close - nearest))
+                nearest := val
+        if nearest > 0.0
+            result := nearest
+    result
+
+// --- Hard Confluences (2pts cada una) ---
+hardLongOB      = array.size(bullOBBottoms) > 0
+hardLongFVG     = isInBullFVG and useFVGConf
+hardLongSweep   = sweepLow
+hardLongStruct  = bos_bull_conf or choch_bull_conf
+hardLongBreaker = array.size(bullBreakerTops) > 0
+hardLongVol     = bullVolConf and useVolConf
+
+hardShortOB     = array.size(bearOBTops) > 0
+hardShortFVG    = isInBearFVG and useFVGConf
+hardShortSweep  = sweepHigh
+hardShortStruct = bos_bear_conf or choch_bear_conf
+hardShortBreaker = array.size(bearBreakerTops) > 0
+hardShortVol    = bearVolConf and useVolConf
+
+hardCountLong  = (hardLongOB ? 2 : 0) + (hardLongFVG ? 2 : 0) + (hardLongSweep ? 2 : 0) + (hardLongStruct ? 2 : 0) + (hardLongBreaker ? 2 : 0) + (hardLongVol ? 2 : 0)
+hardCountShort = (hardShortOB ? 2 : 0) + (hardShortFVG ? 2 : 0) + (hardShortSweep ? 2 : 0) + (hardShortStruct ? 2 : 0) + (hardShortBreaker ? 2 : 0) + (hardShortVol ? 2 : 0)
+
+hasHardConfLong  = requireHardConf ? (hardCountLong >= 2) : true
+hasHardConfShort = requireHardConf ? (hardCountShort >= 2) : true
+
+// --- Soft Confluences (1pt cada una) ---
+softLongEMA    = trendUp ? 1 : 0
+softLongZone   = inDiscount ? 1 : 0
+softLongRSI    = (useRSIConf and rsiValue < rsiOS) ? 1 : 0
+softLongVWAP   = (useVWAPConf and priceBelowVwap) ? 1 : 0
+softLongMTF    = (useMTFConf and mtfTrendUp) ? 1 : 0
+softLongMom    = (useMomQuality and isStrongBull) ? 1 : 0
+softLongPattern = bullPatternActive ? 1 : 0  // ← NUEVO v8
+
+softShortEMA   = trendDown ? 1 : 0
+softShortZone  = inPremium ? 1 : 0
+softShortRSI   = (useRSIConf and rsiValue > rsiOB) ? 1 : 0
+softShortVWAP  = (useVWAPConf and priceAboveVwap) ? 1 : 0
+softShortMTF   = (useMTFConf and mtfTrendDn) ? 1 : 0
+softShortMom   = (useMomQuality and isStrongBear) ? 1 : 0
+softShortPattern = bearPatternActive ? 1 : 0  // ← NUEVO v8
+
+softScoreLong  = softLongEMA + softLongZone + softLongRSI + softLongVWAP + softLongMTF + softLongMom + softLongPattern
+softScoreShort = softShortEMA + softShortZone + softShortRSI + softShortVWAP + softShortMTF + softShortMom + softShortPattern
+
+confLong  = hardCountLong + softScoreLong
+confShort = hardCountShort + softScoreShort
+
+// ============================================================================
+// QUALITY SCORE
+// ============================================================================
+
+qualityLong  = confLong >= 14 ? 3 : confLong >= 10 ? 2 : confLong >= 5 ? 1 : 0
+qualityShort = confShort >= 14 ? 3 : confShort >= 10 ? 2 : confShort >= 5 ? 1 : 0
+
+qualityNameLong  = qualityLong == 3 ? "PREMIUM" : qualityLong == 2 ? "STRONG" : qualityLong == 1 ? "NORMAL" : "LOW"
+qualityNameShort = qualityShort == 3 ? "PREMIUM" : qualityShort == 2 ? "STRONG" : qualityShort == 1 ? "NORMAL" : "LOW"
+
+// ============================================================================
+// SIGNAL GENERATION
+// ============================================================================
+
+var int lastLongBar  = 0
+var int lastShortBar = 0
+
+emaCrossLongOK  = not requireEMACross or emaCrossLong
+emaCrossShortOK = not requireEMACross or emaCrossShort
+mtfAlignLong    = not requireMTFalign or (mtfTrendUp or not mtfTrendDn)
+mtfAlignShort   = not requireMTFalign or (mtfTrendDn or not mtfTrendUp)
+
+longCondition  = trendUp and emaCrossLongOK and hasHardConfLong and confLong >= minConfluence and qualityLong >= minQualityScore and mtfAlignLong and not overheadResist and not congestionZone and (not onlyTradeKZ or inAnyKZ) and (bar_index - lastLongBar >= cooldownBars) and isStrongBull
+shortCondition = trendDown and emaCrossShortOK and hasHardConfShort and confShort >= minConfluence and qualityShort >= minQualityScore and mtfAlignShort and not underlyingSupp and not congestionZone and (not onlyTradeKZ or inAnyKZ) and (bar_index - lastShortBar >= cooldownBars) and isStrongBear
+
+longSignal  = showSignals and longCondition  and barstate.isconfirmed
+shortSignal = showSignals and shortCondition and barstate.isconfirmed
+
+if longSignal
+    lastLongBar := bar_index
+if shortSignal
+    lastShortBar := bar_index
+
+// ============================================================================
+// SL / TP / BE CALCULATION
+// ============================================================================
+
+slLongCalc  = useOBforSL ? getNearestBullOBBottom() - totalSpreadBuf : close - (atrValue * atrMult) - totalSpreadBuf
+tpLongCalc  = close + ((close - slLongCalc) * rrRatio)
+slShortCalc = useOBforSL ? getNearestBearOBTop() + totalSpreadBuf : close + (atrValue * atrMult) + totalSpreadBuf
+tpShortCalc = close - ((slShortCalc - close) * rrRatio)
+
+slLongDollars  = close - slLongCalc
+tpLongDollars  = tpLongCalc - close
+slShortDollars = slShortCalc - close
+tpShortDollars = close - tpShortCalc
+
+beLongCalc  = close + (close - slLongCalc)
+beShortCalc = close - (slShortCalc - close)
+
+// ============================================================================
+// SIGNAL LABELS
+// ============================================================================
+
+if longSignal and showLabels
+    qualStr = qualityLong == 3 ? " ★ PREMIUM" : qualityLong == 2 ? " ⚡ STRONG" : " ✓NORMAL"
+    volStr  = bullVolConf ? " +VOL" : ""
+    patStr  = bullPatternActive ? " [" + bullPatternName + "]" : ""
+    lbl = label.new(bar_index, low,
+         "LONG " + str.tostring(confLong) + "/19 (" + str.tostring(mtfTF) + ")" + qualStr + volStr + patStr + "\n" +
+         "SL[OB]: " + str.tostring(slLongCalc, "#.##") + " ($" + str.tostring(slLongDollars, "#.#") + ")\n" +
+         "BE: " + str.tostring(beLongCalc, "#.##") + " ($" + str.tostring(slLongDollars, "#.#") + ")\n" +
+         "TP: " + str.tostring(tpLongCalc, "#.##") + " ($" + str.tostring(tpLongDollars, "#.#") + ")",
+         style=label.style_label_up, color=color.new(bullColor, 20), textcolor=color.white, size=size.small)
+
+if shortSignal and showLabels
+    qualStr = qualityShort == 3 ? " ★ PREMIUM" : qualityShort == 2 ? " ⚡ STRONG" : " ✓NORMAL"
+    volStr  = bearVolConf ? " +VOL" : ""
+    patStr  = bearPatternActive ? " [" + bearPatternName + "]" : ""
+    lbl = label.new(bar_index, high,
+         "SHORT " + str.tostring(confShort) + "/19 (" + str.tostring(mtfTF) + ")" + qualStr + volStr + patStr + "\n" +
+         "SL[OB]: " + str.tostring(slShortCalc, "#.##") + " ($" + str.tostring(slShortDollars, "#.#") + ")\n" +
+         "BE: " + str.tostring(beShortCalc, "#.##") + " ($" + str.tostring(slShortDollars, "#.#") + ")\n" +
+         "TP: " + str.tostring(tpShortCalc, "#.##") + " ($" + str.tostring(tpShortDollars, "#.#") + ")",
+         style=label.style_label_down, color=color.new(bearColor, 20), textcolor=color.white, size=size.small)
+
+// ============================================================================
+// BE LEVELS
+// ============================================================================
+
+if showBELevels and longSignal
+    line.new(bar_index, beLongCalc, bar_index + beLevelExtend, beLongCalc, color=color.new(bullColor, 50), style=line.style_dashed, width=1)
+    label.new(bar_index + beLevelExtend, beLongCalc, "BE 1:1", style=label.style_label_left, color=color.new(bullColor, 60), textcolor=color.white, size=size.tiny)
+
+if showBELevels and shortSignal
+    line.new(bar_index, beShortCalc, bar_index + beLevelExtend, beShortCalc, color=color.new(bearColor, 50), style=line.style_dashed, width=1)
+    label.new(bar_index + beLevelExtend, beShortCalc, "BE 1:1", style=label.style_label_left, color=color.new(bearColor, 60), textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// PANEL v8.1 — COMPACTO 8 FILAS
+// Filosofia: lo que el trader necesita leer en 2 segundos
+// Todo lo demas se calcula internamente pero no se muestra
+// ============================================================================
+
+if showPanel
+    panel = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 55), border_width=1, border_color=color.new(color.white, 75), frame_width=1, frame_color=color.new(color.white, 60))
+
+    // --- Row 0: Header ---
+    table.cell(panel, 0, 0, "SMS-XAU v8.9", text_color=color.white, text_size=size.tiny, bgcolor=color.new(color.blue, 50))
+    table.cell(panel, 1, 0, "PRO", text_color=color.yellow, text_size=size.tiny, bgcolor=color.new(color.blue, 50))
+
+    // --- Row 1: MTF Lock — direccion permitida ---
+    lockTxt = mtfTrendUp ? "SOLO COMPRA" : mtfTrendDn ? "SOLO VENTA" : "SIN DIRECCION"
+    lockCol = mtfTrendUp ? color.lime : mtfTrendDn ? color.rgb(255, 82, 82) : color.yellow
+    table.cell(panel, 0, 1, "MTF Lock", text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 1, 1, lockTxt, text_color=lockCol, text_size=size.tiny)
+
+    // --- Row 2: EMA Cross — alineacion local ---
+    emaTxt = (emaFast > emaSlow) ? "M5 ACOMPANA" : "M5 CONTRA"
+    emaCol = (emaFast > emaSlow) ? color.lime : color.rgb(255, 82, 82)
+    table.cell(panel, 0, 2, "EMA Cross", text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 1, 2, emaTxt, text_color=emaCol, text_size=size.tiny)
+
+    // --- Row 3: Overhead / Congestion — vetos combinados ---
+    anyBlock = overheadResist or congestionZone
+    blockTxt = overheadResist and congestionZone ? "TODO BLOQUEADO" : overheadResist ? "RESISTENCIA ARRIBA" : congestionZone ? "ZONA TRAMPA" : "CAMINO LIBRE"
+    blockCol = anyBlock ? color.rgb(255, 82, 82) : color.lime
+    table.cell(panel, 0, 3, "Overhead", text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 1, 3, blockTxt, text_color=blockCol, text_size=size.tiny)
+
+    // --- Row 4: Zona Premium/Discount ---
+    zonaCol = inDeepDisc ? color.lime : inDiscount ? color.rgb(0, 230, 118) : inDeepPrem ? color.rgb(255, 82, 82) : color.orange
+    table.cell(panel, 0, 4, "Zona", text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 1, 4, zonaName, text_color=zonaCol, text_size=size.tiny)
+
+    // --- Row 5: Conf (L y S en una sola fila) ---
+    lconfCol = confLong >= 14 ? color.lime : confLong >= 10 ? color.rgb(0, 200, 100) : confLong >= 5 ? color.yellow : color.gray
+    sconfCol = confShort >= 14 ? color.rgb(255, 82, 82) : confShort >= 10 ? color.rgb(255, 100, 100) : confShort >= 5 ? color.yellow : color.gray
+    // Mostrar el conf relevante segun MTF Lock
+    confDisplayTxt = mtfTrendUp ? str.tostring(confLong) + "/19 (L)" : mtfTrendDn ? str.tostring(confShort) + "/19 (S)" : str.tostring(confLong) + "L / " + str.tostring(confShort) + "S"
+    confDisplayCol = mtfTrendUp ? lconfCol : mtfTrendDn ? sconfCol : color.white
+    table.cell(panel, 0, 5, "Conf", text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 1, 5, confDisplayTxt, text_color=confDisplayCol, text_size=size.tiny)
+
+    // --- Row 6: Patron activo (nuevo v8) ---
+    patDisplayTxt = bearPatternActive ? bearPatternName : bullPatternActive ? bullPatternName : "---"
+    patDisplayCol = bearPatternActive ? color.rgb(255, 82, 82) : bullPatternActive ? color.lime : color.gray
+    table.cell(panel, 0, 6, "Patron", text_color=color.gray, text_size=size.tiny)
+    table.cell(panel, 1, 6, patDisplayTxt, text_color=patDisplayCol, text_size=size.tiny)
+
+    // --- Row 7: STATUS — la decision final, mas grande ---
+    canLong  = confLong >= minConfluence and hasHardConfLong and trendUp and emaCrossLong and not overheadResist and not congestionZone and inAnyKZ
+    canShort = confShort >= minConfluence and hasHardConfShort and trendDown and emaCrossShort and not underlyingSupp and not congestionZone and inAnyKZ
+    statusTxt = canLong ? "LONG OK" : canShort ? "SHORT OK" : "WAIT"
+    statusCol = canLong ? color.lime : canShort ? color.rgb(255, 82, 82) : color.yellow
+    statusBg  = canLong ? color.new(color.green, 70) : canShort ? color.new(color.red, 70) : color.new(color.orange, 80)
+    table.cell(panel, 0, 7, "Status", text_color=color.white, text_size=size.small, bgcolor=statusBg)
+    table.cell(panel, 1, 7, statusTxt, text_color=statusCol, text_size=size.small, bgcolor=statusBg)
+
+// ============================================================================
+// ALERTAS v8
+// ============================================================================
+
+fvgLongTxt  = isInBullFVG ? "SI" : "NO"
+fvgShortTxt = isInBearFVG ? "SI" : "NO"
+volLongTxt  = bullVolConf ? "HIGH" : "normal"
+volShortTxt = bearVolConf ? "HIGH" : "normal"
+
+// JSON payload — consumido directamente por backend FastAPI /webhook/tradingview
+longMessage = '{"signal":"LONG","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period +
+     '","price":' + str.tostring(close, "#.##") +
+     ',"sl":' + str.tostring(slLongCalc, "#.##") +
+     ',"be":' + str.tostring(beLongCalc, "#.##") +
+     ',"tp":' + str.tostring(tpLongCalc, "#.##") +
+     ',"conf":' + str.tostring(confLong) +
+     ',"conf_max":19' +
+     ',"quality":"' + qualityNameLong + '"' +
+     ',"pattern":"' + bullPatternName + '"' +
+     ',"fvg":' + (isInBullFVG ? "true" : "false") +
+     ',"vol_high":' + (bullVolConf ? "true" : "false") +
+     ',"vol_ratio":' + str.tostring(volRatio, "#.##") +
+     ',"rsi":' + str.tostring(rsiValue, "#.#") +
+     ',"kz":"' + kzName + '"' +
+     ',"mtf":"' + mtfTrendName + '"' +
+     ',"zona":"' + zonaName + '"' +
+     ',"overhead":' + (overheadResist ? "true" : "false") +
+     ',"congestion":' + (congestionZone ? "true" : "false") +
+     ',"ema9":' + str.tostring(emaFast, "#.##") +
+     ',"ema21":' + str.tostring(emaSlow, "#.##") +
+     ',"atr":' + str.tostring(atrValue, "#.##") +
+     ',"swing_high":' + str.tostring(nz(lastSH, high), "#.##") +
+     ',"swing_low":' + str.tostring(nz(lastSL, low), "#.##") +
+     ',"high":' + str.tostring(high, "#.##") +
+     ',"low":' + str.tostring(low, "#.##") + '}'
+
+shortMessage = '{"signal":"SHORT","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period +
+     '","price":' + str.tostring(close, "#.##") +
+     ',"sl":' + str.tostring(slShortCalc, "#.##") +
+     ',"be":' + str.tostring(beShortCalc, "#.##") +
+     ',"tp":' + str.tostring(tpShortCalc, "#.##") +
+     ',"conf":' + str.tostring(confShort) +
+     ',"conf_max":19' +
+     ',"quality":"' + qualityNameShort + '"' +
+     ',"pattern":"' + bearPatternName + '"' +
+     ',"fvg":' + (isInBearFVG ? "true" : "false") +
+     ',"vol_high":' + (bearVolConf ? "true" : "false") +
+     ',"vol_ratio":' + str.tostring(volRatio, "#.##") +
+     ',"rsi":' + str.tostring(rsiValue, "#.#") +
+     ',"kz":"' + kzName + '"' +
+     ',"mtf":"' + mtfTrendName + '"' +
+     ',"zona":"' + zonaName + '"' +
+     ',"overhead":' + (underlyingSupp ? "true" : "false") +
+     ',"congestion":' + (congestionZone ? "true" : "false") +
+     ',"ema9":' + str.tostring(emaFast, "#.##") +
+     ',"ema21":' + str.tostring(emaSlow, "#.##") +
+     ',"atr":' + str.tostring(atrValue, "#.##") +
+     ',"swing_high":' + str.tostring(nz(lastSH, high), "#.##") +
+     ',"swing_low":' + str.tostring(nz(lastSL, low), "#.##") +
+     ',"high":' + str.tostring(high, "#.##") +
+     ',"low":' + str.tostring(low, "#.##") + '}'
+
+alertConfLong  = confLong >= alertMinConf
+alertConfShort = confShort >= alertMinConf
+alertKZFilter  = alertOnlyKZ ? inAnyKZ : true
+alertQualLong  = alertOnlyStrong ? qualityLong >= 2 : true
+alertQualShort = alertOnlyStrong ? qualityShort >= 2 : true
+
+if enableAlerts and longSignal and alertConfLong and alertKZFilter and alertQualLong
+    alert(longMessage, alert.freq_once_per_bar_close)
+
+if enableAlerts and shortSignal and alertConfShort and alertKZFilter and alertQualShort
+    alert(shortMessage, alert.freq_once_per_bar_close)
+
+if enableAlerts and alertOnCHoCH and choch_bull_c
+    alert("CHoCH ALCISTA XAUUSD @ " + str.tostring(close, "#.##") + " | KZ: " + kzName, alert.freq_once_per_bar_close)
+
+if enableAlerts and alertOnCHoCH and choch_bear_c
+    alert("CHoCH BAJISTA XAUUSD @ " + str.tostring(close, "#.##") + " | KZ: " + kzName, alert.freq_once_per_bar_close)
+
+if enableAlerts and alertOnBOS and bos_bull_c
+    alert("BOS ALCISTA XAUUSD @ " + str.tostring(close, "#.##") + " | KZ: " + kzName, alert.freq_once_per_bar_close)
+
+if enableAlerts and alertOnBOS and bos_bear_c
+    alert("BOS BAJISTA XAUUSD @ " + str.tostring(close, "#.##") + " | KZ: " + kzName, alert.freq_once_per_bar_close)
+
+if enableAlerts and alertOnSweeps and showSweepHLabel
+    alert("SWEEP HIGHS XAUUSD @ " + str.tostring(close, "#.##") + " - SHORT posible | KZ: " + kzName, alert.freq_once_per_bar_close)
+
+if enableAlerts and alertOnSweeps and showSweepLLabel
+    alert("SWEEP LOWS XAUUSD @ " + str.tostring(close, "#.##") + " - LONG posible | KZ: " + kzName, alert.freq_once_per_bar_close)
+
+// ============================================================================
+// ALERTCONDITIONS
+// ============================================================================
+
+alertcondition(longSignal, title="LONG Signal", message="LONG XAUUSD v8.3")
+alertcondition(shortSignal, title="SHORT Signal", message="SHORT XAUUSD v8.3")
+alertcondition(longSignal and qualityLong >= 2, title="LONG STRONG+", message="LONG STRONG XAUUSD v8.0")
+alertcondition(shortSignal and qualityShort >= 2, title="SHORT STRONG+", message="SHORT STRONG XAUUSD v8.0")
+alertcondition(longSignal and qualityLong >= 3, title="LONG PREMIUM", message="LONG PREMIUM XAUUSD v8.0")
+alertcondition(shortSignal and qualityShort >= 3, title="SHORT PREMIUM", message="SHORT PREMIUM XAUUSD v8.0")
+alertcondition(isNR7, title="NR7 Detectado", message="NR7 XAUUSD - Expansion inminente")
+alertcondition(isInsideBar, title="Inside Bar", message="Inside Bar XAUUSD - Compresion detectada")
+alertcondition(bullFlag, title="Bull Flag", message="Bull Flag XAUUSD - Continuacion LONG")
+alertcondition(bearFlag, title="Bear Flag", message="Bear Flag XAUUSD - Continuacion SHORT")
+alertcondition(isDoubleTop, title="Doble Techo", message="Doble Techo XAUUSD - SHORT potencial")
+alertcondition(isDoubleBottom, title="Doble Suelo", message="Doble Suelo XAUUSD - LONG potencial")
+alertcondition(fallingWedge, title="Falling Wedge", message="Falling Wedge XAUUSD - LONG potencial")
+alertcondition(risingWedge, title="Rising Wedge", message="Rising Wedge XAUUSD - SHORT potencial")
+alertcondition(choch_bull_c, title="CHoCH BULL", message="CHoCH Alcista XAUUSD")
+alertcondition(choch_bear_c, title="CHoCH BEAR", message="CHoCH Bajista XAUUSD")
+alertcondition(bos_bull_c, title="BOS BULL", message="BOS Alcista XAUUSD")
+alertcondition(bos_bear_c, title="BOS BEAR", message="BOS Bajista XAUUSD")
+alertcondition(showSweepHLabel, title="SWEEP HIGH", message="Sweep Highs XAUUSD")
+alertcondition(showSweepLLabel, title="SWEEP LOW", message="Sweep Lows XAUUSD")

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+backend/signals.db
+node_modules/
+.next/
+out/
+.env
+.env.local
