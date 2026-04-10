@@ -9,9 +9,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: DATABASE_URL
+        sync: false
       - key: USE_AI
         value: "0"
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
-        value: anthropic/claude-3.5-sonnet
+        value: anthropic/claude-sonnet-4

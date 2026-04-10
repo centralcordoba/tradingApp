@@ -173,8 +173,8 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs · Inspe
 
 ## Estado actual / decisiones tomadas
 
-- **DB**: SQLite local. Decisión consciente del usuario para empezar; migración a Supabase Postgres pendiente.
-- **Hosting**: todo local + ngrok. Decisión consciente; deploy a Render pendiente.
+- **DB**: Dual — SQLite local (dev) o PostgreSQL/Supabase (prod). Se detecta con `DATABASE_URL` en env.
+- **Hosting**: Render free tier (backend) + Supabase free tier (DB). Local sigue funcionando sin cambios.
 - **IA OpenRouter**: implementada pero opcional, off por defecto hasta que el usuario quiera probarla.
 - **Tracking de resultados**: ya implementado (botones W/L/BE en cada fila + breakdowns en stats).
 - **Multi-símbolo**: ya soportado (tabs en frontend, breakdown by_symbol en stats, filtros en /signals).
@@ -182,8 +182,8 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs · Inspe
 
 ## Próximos pasos posibles (mencionados, no hechos)
 
-- Migrar SQLite → Supabase Postgres.
-- Deploy backend en Render (eliminar dependencia de ngrok y de PC encendido).
+- ~~Migrar SQLite → Supabase Postgres~~ ✓ (storage.py dual-mode).
+- ~~Deploy backend en Render~~ ✓ (render.yaml configurado, falta primer deploy).
 - Notificaciones a Telegram cuando llega ENTER.
 - Calculadora de tamaño de posición integrada (capital + % riesgo → lotes).
 - Filtros por hora / kill zone configurables.

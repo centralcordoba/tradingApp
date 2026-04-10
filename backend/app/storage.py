@@ -1,91 +1,164 @@
-"""SQLite storage para historial de señales, decisiones y resultados."""
-import sqlite3
+"""Storage dual: PostgreSQL (Supabase) si DATABASE_URL existe, SQLite local si no."""
 import json
+import os
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
 
-DB_PATH = Path(__file__).resolve().parent.parent / "signals.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# ---------------------------------------------------------------------------
+# Capa de conexión
+# ---------------------------------------------------------------------------
+
+if DATABASE_URL:
+    import psycopg2
+    import psycopg2.pool
+    import psycopg2.extras
+
+    _pool: psycopg2.pool.SimpleConnectionPool | None = None
+
+    def _get_pool() -> psycopg2.pool.SimpleConnectionPool:
+        global _pool
+        if _pool is None or _pool.closed:
+            _pool = psycopg2.pool.SimpleConnectionPool(1, 5, DATABASE_URL)
+        return _pool
+
+    class _PgContext:
+        """Context manager que saca conexión del pool y hace commit/rollback."""
+        def __enter__(self):
+            self.conn = _get_pool().getconn()
+            self.conn.autocommit = False
+            self.cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            return self.cur
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if exc_type:
+                self.conn.rollback()
+            else:
+                self.conn.commit()
+            self.cur.close()
+            _get_pool().putconn(self.conn)
+
+    def _db():
+        return _PgContext()
+
+    _PH = "%s"  # placeholder
+
+else:
+    DB_PATH = Path(__file__).resolve().parent.parent / "signals.db"
+
+    class _SqliteContext:
+        def __enter__(self):
+            self.conn = sqlite3.connect(str(DB_PATH))
+            self.conn.row_factory = sqlite3.Row
+            self.cur = self.conn.cursor()
+            return self.cur
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if exc_type:
+                self.conn.rollback()
+            else:
+                self.conn.commit()
+            self.cur.close()
+            self.conn.close()
+
+    def _db():
+        return _SqliteContext()
+
+    _PH = "?"  # placeholder
 
 
-def _conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _ensure_column(c, table: str, col: str, ddl: str) -> None:
-    cols = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
-    if col not in cols:
-        c.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
-
+# ---------------------------------------------------------------------------
+# Init
+# ---------------------------------------------------------------------------
 
 def init_db() -> None:
-    with _conn() as c:
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                received_at TEXT NOT NULL,
-                signal_json TEXT NOT NULL,
-                response_json TEXT NOT NULL,
-                decision TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                side TEXT NOT NULL
-            )
-            """
-        )
-        # columnas añadidas en v0.2 (tracking de resultados)
-        _ensure_column(c, "signals", "result", "result TEXT")            # WIN | LOSS | BE | NULL
-        _ensure_column(c, "signals", "exit_price", "exit_price REAL")
-        _ensure_column(c, "signals", "pnl", "pnl REAL")
-        _ensure_column(c, "signals", "closed_at", "closed_at TEXT")
-        _ensure_column(c, "signals", "source", "source TEXT")            # ai | heuristic
+    if DATABASE_URL:
+        with _db() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    id SERIAL PRIMARY KEY,
+                    received_at TEXT NOT NULL,
+                    signal_json TEXT NOT NULL,
+                    response_json TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    result TEXT,
+                    exit_price DOUBLE PRECISION,
+                    pnl DOUBLE PRECISION,
+                    closed_at TEXT,
+                    source TEXT
+                )
+            """)
+    else:
+        with _db() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    received_at TEXT NOT NULL,
+                    signal_json TEXT NOT NULL,
+                    response_json TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL
+                )
+            """)
+            # columnas añadidas progresivamente (SQLite no soporta IF NOT EXISTS en ALTER)
+            cur.execute("PRAGMA table_info(signals)")
+            cols = {r["name"] for r in cur.fetchall()}
+            for col, ddl in [
+                ("result", "result TEXT"),
+                ("exit_price", "exit_price REAL"),
+                ("pnl", "pnl REAL"),
+                ("closed_at", "closed_at TEXT"),
+                ("source", "source TEXT"),
+            ]:
+                if col not in cols:
+                    cur.execute(f"ALTER TABLE signals ADD COLUMN {ddl}")
 
+
+# ---------------------------------------------------------------------------
+# CRUD
+# ---------------------------------------------------------------------------
 
 def save_signal(signal_dict: dict, response_dict: dict) -> int:
-    with _conn() as c:
-        cur = c.execute(
-            "INSERT INTO signals (received_at, signal_json, response_json, decision, symbol, side, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                datetime.utcnow().isoformat(),
-                json.dumps(signal_dict),
-                json.dumps(response_dict),
-                response_dict.get("decision", "?"),
-                signal_dict.get("symbol", "?"),
-                signal_dict.get("signal", "?"),
-                response_dict.get("source", "heuristic"),
-            ),
+    ph = _PH
+    with _db() as cur:
+        sql = (
+            f"INSERT INTO signals (received_at, signal_json, response_json, decision, symbol, side, source) "
+            f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})"
         )
-        return cur.lastrowid
+        params = (
+            datetime.utcnow().isoformat(),
+            json.dumps(signal_dict),
+            json.dumps(response_dict),
+            response_dict.get("decision", "?"),
+            signal_dict.get("symbol", "?"),
+            signal_dict.get("signal", "?"),
+            response_dict.get("source", "heuristic"),
+        )
+        if DATABASE_URL:
+            cur.execute(sql + " RETURNING id", params)
+            return cur.fetchone()["id"]
+        else:
+            cur.execute(sql, params)
+            return cur.lastrowid
 
 
 def list_signals(limit: int = 100, symbol: Optional[str] = None) -> List[dict]:
-    with _conn() as c:
+    ph = _PH
+    with _db() as cur:
         if symbol:
-            rows = c.execute(
-                "SELECT * FROM signals WHERE symbol = ? ORDER BY id DESC LIMIT ?",
-                (symbol, limit),
-            ).fetchall()
+            sql = f"SELECT * FROM signals WHERE symbol = {ph} ORDER BY id DESC LIMIT {ph}"
+            _exec(cur, sql, (symbol, limit))
         else:
-            rows = c.execute(
-                "SELECT * FROM signals ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
+            sql = f"SELECT * FROM signals ORDER BY id DESC LIMIT {ph}"
+            _exec(cur, sql, (limit,))
+        rows = _fetchall(cur)
     return [_row_to_dict(r) for r in rows]
-
-
-def _row_to_dict(r: sqlite3.Row) -> dict:
-    return {
-        "id": r["id"],
-        "received_at": r["received_at"],
-        "signal": json.loads(r["signal_json"]),
-        "response": json.loads(r["response_json"]),
-        "result": r["result"],
-        "exit_price": r["exit_price"],
-        "pnl": r["pnl"],
-        "closed_at": r["closed_at"],
-        "source": r["source"],
-    }
 
 
 def set_result(
@@ -93,12 +166,13 @@ def set_result(
     result: str,
     exit_price: Optional[float] = None,
 ) -> Optional[dict]:
-    """Marca el resultado de una señal. Calcula PnL automáticamente si no se pasa exit_price."""
     if result not in ("WIN", "LOSS", "BE"):
         raise ValueError("result debe ser WIN, LOSS o BE")
 
-    with _conn() as c:
-        row = c.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+    ph = _PH
+    with _db() as cur:
+        _exec(cur, f"SELECT * FROM signals WHERE id = {ph}", (signal_id,))
+        row = _fetchone(cur)
         if row is None:
             return None
 
@@ -108,13 +182,12 @@ def set_result(
         sl = float(sig.get("sl", 0))
         tp = float(sig.get("tp", 0))
 
-        # Si no nos dan exit_price, lo inferimos del resultado y la dirección
         if exit_price is None:
             if result == "WIN":
                 exit_price = tp
             elif result == "LOSS":
                 exit_price = sl
-            else:  # BE
+            else:
                 exit_price = entry
 
         if side in ("LONG", "BUY"):
@@ -124,24 +197,27 @@ def set_result(
         else:
             pnl = 0.0
 
-        c.execute(
-            "UPDATE signals SET result=?, exit_price=?, pnl=?, closed_at=? WHERE id=?",
+        _exec(
+            cur,
+            f"UPDATE signals SET result={ph}, exit_price={ph}, pnl={ph}, closed_at={ph} WHERE id={ph}",
             (result, exit_price, pnl, datetime.utcnow().isoformat(), signal_id),
         )
-        row = c.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
+        _exec(cur, f"SELECT * FROM signals WHERE id = {ph}", (signal_id,))
+        row = _fetchone(cur)
         return _row_to_dict(row)
 
 
 def distinct_symbols() -> List[str]:
-    with _conn() as c:
-        rows = c.execute("SELECT DISTINCT symbol FROM signals ORDER BY symbol").fetchall()
+    with _db() as cur:
+        _exec(cur, "SELECT DISTINCT symbol FROM signals ORDER BY symbol", ())
+        rows = _fetchall(cur)
     return [r["symbol"] for r in rows if r["symbol"]]
 
 
 def stats() -> dict:
-    """Métricas agregadas para el dashboard."""
-    with _conn() as c:
-        rows = [_row_to_dict(r) for r in c.execute("SELECT * FROM signals").fetchall()]
+    with _db() as cur:
+        _exec(cur, "SELECT * FROM signals", ())
+        rows = [_row_to_dict(r) for r in _fetchall(cur)]
 
     closed = [r for r in rows if r["result"] in ("WIN", "LOSS", "BE")]
 
@@ -151,7 +227,6 @@ def stats() -> dict:
         losses = sum(1 for r in items if r["result"] == "LOSS")
         be = sum(1 for r in items if r["result"] == "BE")
         pnl = sum((r["pnl"] or 0) for r in items)
-        # win-rate excluye BE del denominador (más representativo)
         decided = wins + losses
         wr = (wins / decided) if decided else 0.0
         return {
@@ -179,4 +254,35 @@ def stats() -> dict:
         "by_zona": _bucket(lambda r: r["signal"].get("zona")),
         "by_mtf": _bucket(lambda r: r["signal"].get("mtf")),
         "by_pattern": _bucket(lambda r: r["signal"].get("pattern")),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Helpers internos para abstraer diferencias sqlite3.Row vs RealDictCursor
+# ---------------------------------------------------------------------------
+
+def _exec(cur, sql, params):
+    cur.execute(sql, params)
+
+
+def _fetchall(cur) -> list:
+    return cur.fetchall()
+
+
+def _fetchone(cur):
+    return cur.fetchone()
+
+
+def _row_to_dict(r) -> dict:
+    d = dict(r)
+    return {
+        "id": d["id"],
+        "received_at": d["received_at"],
+        "signal": json.loads(d["signal_json"]),
+        "response": json.loads(d["response_json"]),
+        "result": d.get("result"),
+        "exit_price": d.get("exit_price"),
+        "pnl": d.get("pnl"),
+        "closed_at": d.get("closed_at"),
+        "source": d.get("source"),
     }
