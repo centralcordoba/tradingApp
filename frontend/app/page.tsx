@@ -35,7 +35,48 @@ type Signal = {
   result: "WIN" | "LOSS" | "BE" | null;
   pnl: number | null;
   source: string | null;
+  journal_respected_plan?: string | null;
+  journal_closed_early?: string | null;
+  journal_emotion?: string | null;
 };
+
+type Emotion = "confianza" | "miedo" | "fomo" | "venganza";
+type JournalDraft = {
+  signalId: number;
+  result: "WIN" | "LOSS" | "BE";
+  respected_plan: "yes" | "no" | null;
+  closed_early: "yes" | "no" | null;
+  emotion: Emotion | null;
+};
+
+type NewsWarning = {
+  title: string;
+  country: string;
+  impact: string;
+  date_utc: string;
+  minutes_until: number;
+  status: "past" | "imminent" | "upcoming";
+};
+
+type CalendarEvent = {
+  title: string;
+  country: string;
+  impact: string;
+  date_utc: string;
+  time_madrid: string;
+  forecast?: string | null;
+  previous?: string | null;
+};
+
+function todayMadrid(): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(new Date()); // YYYY-MM-DD
+}
 
 type Agg = { n: number; wins: number; losses: number; be: number; win_rate: number; pnl: number };
 type Stats = {
@@ -54,21 +95,31 @@ export default function Home() {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [filter, setFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
+  const [journal, setJournal] = useState<JournalDraft | null>(null);
+  const [newsWarnings, setNewsWarnings] = useState<NewsWarning[]>([]);
+  const [calendarDate, setCalendarDate] = useState<string>(todayMadrid);
+  const [calendarOpen, setCalendarOpen] = useState<boolean>(false);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
 
   const load = useCallback(async () => {
     try {
       const url = filter === "ALL" ? `${API}/signals?limit=100` : `${API}/signals?limit=100&symbol=${filter}`;
-      const [sR, stR, syR] = await Promise.all([
+      const [sR, stR, syR, nR] = await Promise.all([
         fetch(url, { cache: "no-store" }),
         fetch(`${API}/stats`, { cache: "no-store" }),
         fetch(`${API}/symbols`, { cache: "no-store" }),
+        fetch(`${API}/news/warnings`, { cache: "no-store" }),
       ]);
       setItems(await sR.json());
       setStats(await stR.json());
       setSymbols(await syR.json());
+      const nj = await nR.json();
+      setNewsWarnings(nj.warnings || []);
     } catch {
       setItems([]);
       setStats(null);
+      setNewsWarnings([]);
     } finally {
       setLoading(false);
     }
@@ -80,12 +131,41 @@ export default function Home() {
     return () => clearInterval(id);
   }, [load]);
 
-  const mark = async (id: number, result: "WIN" | "LOSS" | "BE") => {
-    await fetch(`${API}/signals/${id}/result`, {
+  const loadCalendar = useCallback(async (date: string) => {
+    setCalendarLoading(true);
+    try {
+      const r = await fetch(`${API}/news/calendar?date=${date}&impact=high`, { cache: "no-store" });
+      const j = await r.json();
+      setCalendarEvents(j.events || []);
+    } catch {
+      setCalendarEvents([]);
+    } finally {
+      setCalendarLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (calendarOpen) loadCalendar(calendarDate);
+  }, [calendarOpen, calendarDate, loadCalendar]);
+
+  const openJournal = (id: number, result: "WIN" | "LOSS" | "BE") => {
+    setJournal({ signalId: id, result, respected_plan: null, closed_early: null, emotion: null });
+  };
+
+  const submitJournal = async (skip: boolean) => {
+    if (!journal) return;
+    const body: Record<string, unknown> = { result: journal.result };
+    if (!skip) {
+      if (journal.respected_plan) body.journal_respected_plan = journal.respected_plan;
+      if (journal.closed_early) body.journal_closed_early = journal.closed_early;
+      if (journal.emotion) body.journal_emotion = journal.emotion;
+    }
+    await fetch(`${API}/signals/${journal.signalId}/result`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ result }),
+      body: JSON.stringify(body),
     });
+    setJournal(null);
     load();
   };
 
@@ -99,6 +179,14 @@ export default function Home() {
         <button className="refresh" onClick={load}>Refrescar</button>
       </div>
 
+      {newsWarnings.length > 0 && (
+        <div className="news-banner">
+          {newsWarnings.map((w, i) => (
+            <NewsBannerItem key={`${w.date_utc}-${i}`} warning={w} />
+          ))}
+        </div>
+      )}
+
       {stats && (
         <div className="stats">
           <StatCard label="Total" value={stats.total_signals} />
@@ -109,6 +197,47 @@ export default function Home() {
           <StatCard label="PnL ($)" value={stats.overall.pnl.toFixed(2)} accent={stats.overall.pnl >= 0 ? "good" : "bad"} />
         </div>
       )}
+
+      <div className="calendar-section">
+        <button className="calendar-toggle" onClick={() => setCalendarOpen(!calendarOpen)}>
+          📅 Calendario económico {calendarOpen ? "▲" : "▼"}
+        </button>
+        {calendarOpen && (
+          <div className="calendar-body">
+            <div className="calendar-controls">
+              <input
+                type="date"
+                value={calendarDate}
+                onChange={(e) => setCalendarDate(e.target.value)}
+                className="calendar-date"
+              />
+              <button className="calendar-today" onClick={() => setCalendarDate(todayMadrid())}>Hoy</button>
+              <span className="calendar-tz">hora Madrid</span>
+            </div>
+            {calendarLoading ? (
+              <div className="calendar-empty">Cargando…</div>
+            ) : calendarEvents.length === 0 ? (
+              <div className="calendar-empty">Sin eventos high-impact este día</div>
+            ) : (
+              <table className="calendar-table">
+                <tbody>
+                  {calendarEvents.map((e, i) => (
+                    <tr key={`${e.date_utc}-${i}`}>
+                      <td className="cal-time">{e.time_madrid}</td>
+                      <td><span className="cal-country">{e.country}</span></td>
+                      <td className="cal-title">{e.title}</td>
+                      <td className="cal-nums">
+                        {e.forecast && <span>F: <b>{e.forecast}</b></span>}
+                        {e.previous && <span className="cal-prev">P: {e.previous}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="tabs">
         <button className={filter === "ALL" ? "tab active" : "tab"} onClick={() => setFilter("ALL")}>TODOS</button>
@@ -180,9 +309,9 @@ export default function Home() {
                     </span>
                   ) : (
                     <div className="actions">
-                      <button className="btn-win"  onClick={() => mark(it.id, "WIN")}>W</button>
-                      <button className="btn-loss" onClick={() => mark(it.id, "LOSS")}>L</button>
-                      <button className="btn-be"   onClick={() => mark(it.id, "BE")}>BE</button>
+                      <button className="btn-win"  onClick={() => openJournal(it.id, "WIN")}>W</button>
+                      <button className="btn-loss" onClick={() => openJournal(it.id, "LOSS")}>L</button>
+                      <button className="btn-be"   onClick={() => openJournal(it.id, "BE")}>BE</button>
                     </div>
                   )}
                 </td>
@@ -191,6 +320,118 @@ export default function Home() {
           </tbody>
         </table>
       )}
+
+      {journal && (
+        <JournalModal
+          draft={journal}
+          onChange={setJournal}
+          onSave={() => submitJournal(false)}
+          onSkip={() => submitJournal(true)}
+          onClose={() => setJournal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function NewsBannerItem({ warning }: { warning: NewsWarning }) {
+  const { status, minutes_until, title, country } = warning;
+  const when = new Date(warning.date_utc);
+  const hhmm = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const timing =
+    status === "past"
+      ? `hace ${Math.abs(minutes_until)} min`
+      : status === "imminent"
+      ? `en ${minutes_until} min · INMINENTE`
+      : `en ${minutes_until} min`;
+
+  return (
+    <div className={`news-item news-${status}`}>
+      <span className="news-icon">⚠️</span>
+      <span className="news-country">{country}</span>
+      <span className="news-title">{title}</span>
+      <span className="news-time">{hhmm} · {timing}</span>
+    </div>
+  );
+}
+
+function JournalModal({
+  draft, onChange, onSave, onSkip, onClose,
+}: {
+  draft: JournalDraft;
+  onChange: (d: JournalDraft) => void;
+  onSave: () => void;
+  onSkip: () => void;
+  onClose: () => void;
+}) {
+  const emotions: { key: Emotion; label: string; color: string }[] = [
+    { key: "confianza", label: "Confianza", color: "#4ade80" },
+    { key: "miedo",     label: "Miedo",     color: "#60a5fa" },
+    { key: "fomo",      label: "FOMO",      color: "#facc15" },
+    { key: "venganza",  label: "Venganza",  color: "#f87171" },
+  ];
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <span className={`badge ${draft.result}`}>{draft.result}</span>
+            <span className="modal-title">Post-mortem del trade</span>
+          </div>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="modal-body">
+          <div className="modal-q">
+            <label>¿Respetaste el plan de entrada?</label>
+            <div className="modal-options">
+              <button
+                className={`modal-opt ${draft.respected_plan === "yes" ? "selected good" : ""}`}
+                onClick={() => onChange({ ...draft, respected_plan: "yes" })}
+              >Sí</button>
+              <button
+                className={`modal-opt ${draft.respected_plan === "no" ? "selected bad" : ""}`}
+                onClick={() => onChange({ ...draft, respected_plan: "no" })}
+              >No</button>
+            </div>
+          </div>
+
+          <div className="modal-q">
+            <label>¿Cerraste antes del TP/SL?</label>
+            <div className="modal-options">
+              <button
+                className={`modal-opt ${draft.closed_early === "no" ? "selected good" : ""}`}
+                onClick={() => onChange({ ...draft, closed_early: "no" })}
+              >No, dejé correr</button>
+              <button
+                className={`modal-opt ${draft.closed_early === "yes" ? "selected bad" : ""}`}
+                onClick={() => onChange({ ...draft, closed_early: "yes" })}
+              >Sí, cerré antes</button>
+            </div>
+          </div>
+
+          <div className="modal-q">
+            <label>Emoción dominante</label>
+            <div className="modal-options">
+              {emotions.map((e) => (
+                <button
+                  key={e.key}
+                  className={`modal-opt ${draft.emotion === e.key ? "selected" : ""}`}
+                  style={draft.emotion === e.key ? { borderColor: e.color, color: e.color } : undefined}
+                  onClick={() => onChange({ ...draft, emotion: e.key })}
+                >{e.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <button className="modal-skip" onClick={onSkip}>Saltar</button>
+          <button className="modal-save" onClick={onSave}>Guardar</button>
+        </div>
+      </div>
     </div>
   );
 }

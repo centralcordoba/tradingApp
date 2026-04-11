@@ -61,3 +61,136 @@ tr:hover { background: #11151d; }
 .badge.WIN  { background: #0d3b22; color: #4ade80; }
 .badge.LOSS { background: #3b0d0d; color: #f87171; }
 .badge.BE   { background: #3b2e0d; color: #facc15; }
+
+/* News warning banner */
+.news-banner {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 16px;
+}
+.news-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 8px;
+  border: 1px solid #3b2e0d; background: #1a1505;
+  font-size: 13px;
+}
+.news-item.news-imminent {
+  border-color: #b91c1c; background: #1f0808;
+  animation: pulse 2s ease-in-out infinite;
+}
+.news-item.news-past {
+  border-color: #1c2230; background: #0f131b;
+  opacity: 0.75;
+}
+.news-icon { font-size: 16px; }
+.news-country {
+  background: #3b2e0d; color: #facc15;
+  padding: 2px 8px; border-radius: 4px;
+  font-weight: 700; font-size: 11px; letter-spacing: .5px;
+}
+.news-item.news-imminent .news-country {
+  background: #3b0d0d; color: #f87171;
+}
+.news-title { flex: 1; color: #e6e8eb; font-weight: 600; }
+.news-time { color: #8a92a3; font-size: 12px; }
+.news-item.news-imminent .news-time { color: #f87171; font-weight: 700; }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(185, 28, 28, 0); }
+}
+
+/* Calendario económico (sección compacta) */
+.calendar-section { margin-bottom: 16px; }
+.calendar-toggle {
+  background: #11151d; color: #b8becc; border: 1px solid #1c2230;
+  padding: 8px 14px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600;
+}
+.calendar-toggle:hover { background: #1c2230; color: #e6e8eb; }
+.calendar-body {
+  margin-top: 8px; background: #0f131b; border: 1px solid #1c2230;
+  border-radius: 8px; padding: 14px;
+}
+.calendar-controls {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+}
+.calendar-date {
+  background: #11151d; color: #e6e8eb; border: 1px solid #2a3142;
+  padding: 6px 10px; border-radius: 6px; font-size: 12px;
+  color-scheme: dark;
+}
+.calendar-today {
+  background: #1c2230; color: #60a5fa; border: 1px solid #2563eb;
+  padding: 6px 12px; border-radius: 6px; cursor: pointer;
+  font-size: 11px; font-weight: 700;
+}
+.calendar-today:hover { background: #1e3a5f; }
+.calendar-tz { color: #8a92a3; font-size: 11px; margin-left: auto; }
+.calendar-empty { color: #8a92a3; font-size: 12px; padding: 12px 0; }
+.calendar-table { width: 100%; font-size: 12px; }
+.calendar-table td {
+  padding: 6px 8px; border-bottom: 1px solid #1c2230;
+}
+.calendar-table tr:last-child td { border-bottom: none; }
+.cal-time { color: #60a5fa; font-weight: 700; font-family: ui-monospace, monospace; width: 60px; }
+.cal-country {
+  background: #1c2230; color: #facc15;
+  padding: 2px 6px; border-radius: 4px;
+  font-weight: 700; font-size: 10px;
+}
+.cal-title { color: #e6e8eb; }
+.cal-nums { color: #8a92a3; font-size: 11px; text-align: right; white-space: nowrap; }
+.cal-nums b { color: #e6e8eb; }
+.cal-prev { margin-left: 8px; opacity: 0.7; }
+
+/* Modal journal post-mortem */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; backdrop-filter: blur(2px);
+}
+.modal {
+  background: #0f131b; border: 1px solid #2a3142; border-radius: 10px;
+  width: 100%; max-width: 480px; padding: 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #1c2230;
+}
+.modal-title { margin-left: 10px; font-weight: 700; font-size: 14px; color: #e6e8eb; }
+.modal-close {
+  background: transparent; border: none; color: #8a92a3;
+  font-size: 24px; cursor: pointer; line-height: 1; padding: 0 6px;
+}
+.modal-close:hover { color: #e6e8eb; }
+.modal-body { display: flex; flex-direction: column; gap: 16px; }
+.modal-q label {
+  display: block; color: #8a92a3; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px;
+}
+.modal-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.modal-opt {
+  background: #11151d; color: #b8becc; border: 1px solid #1c2230;
+  padding: 8px 14px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600; transition: all 0.15s;
+}
+.modal-opt:hover { background: #1c2230; color: #e6e8eb; }
+.modal-opt.selected { background: #1c2230; border-color: #60a5fa; color: #60a5fa; }
+.modal-opt.selected.good { border-color: #4ade80; color: #4ade80; }
+.modal-opt.selected.bad  { border-color: #f87171; color: #f87171; }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid #1c2230;
+}
+.modal-skip {
+  background: transparent; color: #8a92a3; border: 1px solid #2a3142;
+  padding: 8px 16px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 600;
+}
+.modal-skip:hover { color: #e6e8eb; }
+.modal-save {
+  background: #2563eb; color: #fff; border: none;
+  padding: 8px 18px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; font-weight: 700;
+}
+.modal-save:hover { background: #3b82f6; }

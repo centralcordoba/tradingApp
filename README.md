@@ -15,32 +15,100 @@ win-rate por símbolo, calidad, decisión y fuente (heurística vs IA).
 TradingView (Pine)
     │  alerta dispara → JSON
     ▼
-ngrok (túnel público)
+Render (backend público, URL fija)
     │
     ▼
-FastAPI backend  ──→  SQLite (signals.db)
-    │  ▲
+FastAPI backend  ──→  Supabase PostgreSQL (nube)
+    │  ▲                    ó SQLite (dev local)
     │  └─── (opcional) OpenRouter LLM refina la decisión
     ▼
 Next.js frontend (dashboard + tracking)
 ```
 
-- **`backend/`** — FastAPI, motor de decisión, persistencia SQLite, endpoint webhook.
+- **`backend/`** — FastAPI, motor de decisión, persistencia dual (PostgreSQL en prod / SQLite en dev), endpoint webhook.
 - **`frontend/`** — Next.js, dashboard con tabla, tabs por símbolo, stats agregadas, botones W/L/BE.
 - **`scriptsTradingView/`** — Pine scripts modificados para emitir JSON al webhook.
+
+### Modos de ejecución
+
+| Modo | DB | Webhook URL | Cuándo usarlo |
+|---|---|---|---|
+| **Producción** | Supabase PostgreSQL (via `DATABASE_URL`) | `https://tu-servicio.onrender.com/webhook/tradingview` | Trading real, señales 24/7 |
+| **Local** | SQLite (`backend/signals.db`) | `http://127.0.0.1:8000/webhook/tradingview` (vía ngrok si necesitas TradingView) | Desarrollo y pruebas |
 
 ---
 
 ## Requisitos
 
+### Para desarrollo local
 - Python 3.11+
 - Node.js 18+
-- ngrok (cuenta gratis: https://ngrok.com)
+
+### Para producción (cloud)
+- Cuenta en [Render](https://render.com) (free tier)
+- Cuenta en [Supabase](https://supabase.com) (free tier)
 - Cuenta de TradingView con plan que permita alertas con webhook (Pro+)
 
 ---
 
-## Setup inicial (solo la primera vez)
+## Opción 1: Deploy en producción (Render + Supabase)
+
+### 1) Configurar Supabase
+
+1. Crea un proyecto en [Supabase](https://supabase.com/dashboard) (plan Free, compute Micro).
+2. Ve a **SQL Editor** y ejecuta el contenido de `backend/supabase_init.sql`.
+3. Ve a **Connect** → **Transaction pooler** → copia el connection string:
+   ```
+   postgresql://postgres.XXXX:[PASSWORD]@aws-0-REGION.pooler.supabase.com:6543/postgres
+   ```
+
+### 2) Deploy en Render
+
+1. Sube el repo a GitHub.
+2. En [Render](https://dashboard.render.com) → **New +** → **Web Service** → conecta el repo.
+3. Configura:
+   - **Root Directory**: `backend`
+   - **Runtime**: Python
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - **Plan**: Free
+4. En **Environment Variables** agrega:
+
+   | Key | Value |
+   |---|---|
+   | `DATABASE_URL` | Tu connection string de Supabase (transaction pooler) |
+   | `PYTHON_VERSION` | `3.11.9` |
+   | `USE_AI` | `0` (o `1` para activar IA) |
+   | `OPENROUTER_API_KEY` | Tu key de OpenRouter (solo si `USE_AI=1`) |
+   | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` |
+
+5. Click **Create Web Service** → espera ~2-3 min.
+6. Verifica: `https://tu-servicio.onrender.com/health` → `{"ok": true}`
+
+### 3) Conectar TradingView
+
+1. Edita cada alerta → **Notifications** → **Webhook URL**:
+   ```
+   https://tu-servicio.onrender.com/webhook/tradingview
+   ```
+
+### 4) Frontend local apuntando a producción
+
+Crea `frontend/.env.local`:
+```
+NEXT_PUBLIC_API_URL=https://tu-servicio.onrender.com
+```
+
+### 5) Anti cold-start (recomendado)
+
+Render free apaga el servicio tras 15 min de inactividad. Para evitar que TradingView reciba timeout:
+
+1. Crea cuenta gratis en [UptimeRobot](https://uptimerobot.com) o [cron-job.org](https://cron-job.org).
+2. Configura un monitor HTTP que haga GET a `https://tu-servicio.onrender.com/health` cada 5 minutos.
+
+---
+
+## Opción 2: Setup local (desarrollo / pruebas)
 
 ### 1) Backend
 
@@ -56,11 +124,11 @@ pip install -r requirements.txt
 
 ```
 OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+OPENROUTER_MODEL=anthropic/claude-sonnet-4
 USE_AI=1
 ```
 
-Sin estas variables, el motor funciona en modo heurística pura (sin IA).
+Sin `DATABASE_URL`, usa SQLite automáticamente. Sin `OPENROUTER_API_KEY`, usa heurística pura.
 
 ### 2) Frontend
 
@@ -69,94 +137,51 @@ cd frontend
 npm install
 ```
 
-(opcional) Si quieres apuntar el frontend a un backend remoto, crea `frontend/.env.local`:
+### 3) Levantar (2 terminales)
 
-```
-NEXT_PUBLIC_API_URL=https://tu-backend.com
-```
-
-Por defecto usa `http://localhost:8000`.
-
-### 3) ngrok
-
-1. Descarga `ngrok.exe` desde https://ngrok.com/download
-2. Crea cuenta gratis y copia tu authtoken de https://dashboard.ngrok.com/get-started/your-authtoken
-3. Regístralo (una sola vez):
-
-```bash
-ngrok.exe config add-authtoken TU_TOKEN
-```
-
----
-
-## Cómo levantar el proyecto
-
-Necesitas **3 terminales** corriendo a la vez.
-
-### Terminal 1 — Backend
-
+**Terminal 1 — Backend:**
 ```bash
 cd backend
 .venv\Scripts\activate
 uvicorn app.main:app --reload
 ```
-
 Verifica: http://127.0.0.1:8000/health → `{"ok":true}`
-Docs API: http://127.0.0.1:8000/docs
 
-### Terminal 2 — Frontend
-
+**Terminal 2 — Frontend:**
 ```bash
 cd frontend
 npm run dev
 ```
-
 Abre: http://localhost:3000
 
-### Terminal 3 — ngrok
+### 4) ngrok (solo si necesitas webhook de TradingView en local)
 
 ```bash
 ngrok.exe http 8000
 ```
 
-Copia la URL `https://xxx-xxx.ngrok-free.dev` que aparece en `Forwarding`.
-
-> ⚠️ Esa URL **cambia cada vez que reinicias ngrok** en el plan free. Si la cambias,
-> tienes que actualizar el webhook en TradingView.
-
-Inspector de requests en vivo: http://127.0.0.1:4040
+> La URL cambia cada vez que reinicias ngrok en el plan free.
 
 ---
 
-## Conectar TradingView (una sola vez por símbolo)
-
-Tienes que crear una alerta por cada par. Repite el proceso en el chart de
-**XAUUSD** y en el de **EURUSD** con sus respectivos scripts.
+## Conectar TradingView
 
 1. Aplica el script Pine modificado (`SMS_XAUUSD_v8_9_1.pine` o `SMS_EURUSD_v8_10_1.pine`) al chart.
-2. Click en el icono del **reloj** → **Create Alert** (o `Alt+A`).
-3. **Condition** (primer dropdown): selecciona el indicador (`SMS-XAU v8.9.1`).
-4. **Segundo dropdown**: selecciona **`Any alert() function call`** ⚠️ crítico.
-   - Esto hace que TradingView mande exactamente el JSON que el script genera.
-5. **Alert name**: algo como `XAUUSD → Backend`.
-6. **Expiration**: marca **Open-ended** si está disponible.
-7. Pestaña **Notifications** → checkbox **Webhook URL** → pega:
-   ```
-   https://TU-URL-NGROK.ngrok-free.dev/webhook/tradingview
-   ```
-8. **Create**.
-
-Repite para EURUSD usando la misma URL de webhook.
+2. **Create Alert** (`Alt+A`).
+3. **Condition**: selecciona el indicador → **`Any alert() function call`**.
+4. **Notifications** → **Webhook URL** → pega tu URL:
+   - Producción: `https://tu-servicio.onrender.com/webhook/tradingview`
+   - Local: `https://TU-URL-NGROK.ngrok-free.dev/webhook/tradingview`
+5. **Create**.
 
 ---
 
-## Probar el flujo sin esperar a TradingView
+## Probar sin TradingView
 
-### Desde `/docs` (más fácil)
+### Desde `/docs`
 
-1. Abre http://127.0.0.1:8000/docs
-2. Expande **`POST /analyze`** → **Try it out**
-3. Pega:
+1. Abre `https://tu-servicio.onrender.com/docs` (o `http://127.0.0.1:8000/docs` en local)
+2. Expande **`POST /analyze`** → **Try it out** → pega:
 
 ```json
 {
@@ -178,7 +203,7 @@ Repite para EURUSD usando la misma URL de webhook.
 }
 ```
 
-4. **Execute** → debe devolver `decision: ENTER` y aparecer en el dashboard.
+3. **Execute** → debe devolver `decision: ENTER` y aparecer en el dashboard.
 
 ### Desde PowerShell
 
@@ -191,7 +216,7 @@ $body = @{
   rsi=62; mtf="BEAR"; zona="VENDE"
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/webhook/tradingview" -Method POST -ContentType "application/json" -Body $body
+Invoke-RestMethod -Uri "https://tu-servicio.onrender.com/webhook/tradingview" -Method POST -ContentType "application/json" -Body $body
 ```
 
 ---
@@ -201,22 +226,67 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/webhook/tradingview" -Method POST 
 1. Cuando llega una señal, aparece automáticamente en la tabla (auto-refresh 5s).
 2. **Tabs arriba** filtran por símbolo (`TODOS / XAUUSD / EURUSD`).
 3. La columna **Decisión** marca:
-   - 🟢 **ENTER** — setup alineado, R:R favorable. Operar.
-   - 🟡 **WAIT** — contexto aceptable pero falta confirmación.
-   - 🔴 **AVOID** — setup débil, extendido o contraproducente.
+   - **ENTER** — setup alineado, R:R favorable. Operar.
+   - **WAIT** — contexto aceptable pero falta confirmación.
+   - **AVOID** — setup débil, extendido o contraproducente.
 4. Cuando cierres el trade en tu broker, marca el resultado con los botones:
    - **W** (verde) → WIN
    - **L** (rojo) → LOSS
    - **BE** (amarillo) → break-even
-5. Las **stats arriba** se actualizan en vivo: win rate global, PnL acumulado,
-   y desgloses por símbolo/decisión/fuente/calidad para descubrir qué tipos de
-   setup realmente ganan en tu instrumento.
+5. Las **stats** se actualizan en vivo: win rate global, PnL acumulado,
+   y desgloses por símbolo/decisión/fuente/calidad.
+
+---
+
+## News warnings (calendario económico)
+
+El backend **no bloquea** señales por noticias, pero muestra un **banner de aviso** en el dashboard cuando hay una noticia **high-impact** próxima o recién publicada. Fuente: [ForexFactory](https://www.forexfactory.com/) (feed JSON gratis), cacheado 1h en memoria.
+
+**Mapeo símbolo → monedas** (para el endpoint `/news` y `/news/warnings?currencies=...`):
+- `XAUUSD`, `XAGUSD` → USD (oro/plata cotizan en USD)
+- `EURUSD` → EUR, USD
+- `GBPUSD` → GBP, USD
+- Genérico: códigos de 3 letras del símbolo
+
+**Ventana por defecto**: banner visible desde 30 min antes del evento hasta 5 min después. Configurable vía:
+
+```
+NEWS_FILTER_ENABLED=1        # 0 para ocultar todos los avisos
+NEWS_WINDOW_BEFORE_MIN=30
+NEWS_WINDOW_AFTER_MIN=5
+```
+
+**Estados del banner**:
+- `upcoming` — más de 5 min antes del evento (amarillo)
+- `imminent` — faltan ≤5 min o está ocurriendo ahora (rojo, pulsante)
+- `past` — ya pasó pero sigue en la ventana de después (gris tenue)
+
+**Endpoints**:
+- `GET /news/warnings` — avisos activos ahora (los que el frontend muestra). Query opcional: `?currencies=USD,EUR`
+- `GET /news/calendar?date=2026-04-10&impact=high` — eventos de un día específico, horas en hora Madrid
+- `GET /news?symbol=XAUUSD&hours=24` — próximas noticias high-impact para un símbolo
+
+El dashboard tiene una **sección colapsable "📅 Calendario económico"** con date picker que permite consultar cualquier día con las horas en hora Madrid.
+
+---
+
+## Kill zones (hora Madrid)
+
+El scalping XAUUSD/EURUSD es rentable casi exclusivamente dentro de las ventanas de máxima liquidez. Fuera de estas horas, el spread sube y los movimientos son ruido. Madrid está **+1h respecto a London** (ambas siguen DST europeo simultáneamente) y **+6h respecto a NY**.
+
+| Kill zone | Hora Madrid | Hora London | Hora NY | Por qué importa |
+|---|---|---|---|---|
+| **London open** | 08:00 – 11:00 | 07:00 – 10:00 | 02:00 – 05:00 | Primera expansión del día, activa stops de Asia |
+| **NY AM (golden hour)** | 14:30 – 17:00 | 13:30 – 16:00 | 08:30 – 11:00 | Overlap London/NY, máxima liquidez del día |
+| **NY PM** | 20:00 – 22:00 | 19:00 – 21:00 | 14:00 – 16:00 | Último push del día, cierre NY |
+
+> **Evitar**: 22:00 – 08:00 Madrid (Asia/rollover). Spreads altos, movimientos erráticos. Toda señal que llegue fuera de kill zones se degrada automáticamente a WAIT (pendiente de implementar como veto duro).
 
 ---
 
 ## Lógica del motor de decisión
 
-**Vetos duros (descartan al instante → AVOID):**
+**Vetos duros (→ AVOID):**
 
 - LONG en zona `VENDE YA` o MTF30 BEAR o RSI ≥ 78 o resistencia inmediata
 - SHORT en zona `COMPRA YA` o MTF30 BULL o RSI ≤ 22 o soporte inmediato
@@ -241,19 +311,17 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/webhook/tradingview" -Method POST 
 
 ---
 
-## Endpoints del backend
+## Endpoints
 
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/health` | Healthcheck |
 | `POST` | `/analyze?ai=1` | Evalúa una señal estructurada (Pydantic) |
-| `POST` | `/webhook/tradingview?ai=1` | Webhook que TradingView llama (acepta JSON o texto) |
+| `POST` | `/webhook/tradingview?ai=1` | Webhook para TradingView (JSON o texto) |
 | `GET` | `/signals?limit=100&symbol=XAUUSD` | Lista señales (filtrable) |
 | `GET` | `/symbols` | Símbolos únicos vistos |
 | `POST` | `/signals/{id}/result` | Marca resultado: `{"result":"WIN\|LOSS\|BE","exit_price":opc}` |
 | `GET` | `/stats` | Métricas agregadas (overall + breakdowns) |
-
-`?ai=1` activa el refinamiento opcional vía OpenRouter (requiere `OPENROUTER_API_KEY`).
 
 ---
 
@@ -266,12 +334,15 @@ tradingApp/
 │   │   ├── main.py            # FastAPI: rutas
 │   │   ├── schemas.py         # Pydantic: TVSignal, AnalyzeResponse
 │   │   ├── decision_engine.py # Vetos + scoring → decisión
+│   │   ├── entry_planner.py   # Plan operativo (pullback, retest, sweep...)
 │   │   ├── tv_parser.py       # Parser tolerante (JSON o texto)
 │   │   ├── ai_client.py       # OpenRouter (opcional)
-│   │   └── storage.py         # SQLite + stats
+│   │   └── storage.py         # Dual: PostgreSQL (Supabase) o SQLite (local)
 │   ├── requirements.txt
+│   ├── render.yaml            # Config de deploy para Render
+│   ├── supabase_init.sql      # SQL para crear tabla en Supabase
 │   ├── .env.example
-│   └── signals.db             # se crea solo
+│   └── signals.db             # solo en modo local (se crea solo)
 ├── frontend/
 │   ├── app/
 │   │   ├── page.tsx           # Dashboard
@@ -297,25 +368,38 @@ o arranca uvicorn con `--host 0.0.0.0`.
 → PowerShell tiene `curl` como alias de `Invoke-WebRequest`. Usa `curl.exe` o
 `Invoke-RestMethod` (ver sección de pruebas).
 
-**TradingView no llega al backend**
+**TradingView no llega al backend (producción)**
+→ Verifica que el servicio en Render esté activo (no dormido). Abre `/health` en el navegador.
+
+**TradingView no llega al backend (local)**
 → Verifica en http://127.0.0.1:4040 si el request está llegando a ngrok.
-Si no, la URL del webhook en la alerta está mal o ngrok se reinició y cambió de URL.
 
 **La señal aparece pero todo dice AVOID**
 → Es la decisión correcta del motor: faltan confluencias o hay un veto duro
 (ver columna "Razón"). No es un bug.
 
-**Reinicio backend y se borran las señales**
-→ La DB SQLite (`backend/signals.db`) persiste entre reinicios. Si la borraste
-manualmente o estás corriendo uvicorn desde otra carpeta, se crea una nueva.
+**Render tarda en responder la primera vez**
+→ El free tier apaga el servicio tras 15 min de inactividad. El primer request tras
+el apagado tarda ~30-50s (cold start). Configura un ping externo para evitarlo
+(ver sección Anti cold-start).
+
+---
+
+## Costos
+
+| Servicio | Plan | Costo |
+|---|---|---|
+| Supabase | Free (Micro compute, 500MB DB) | $0/mes |
+| Render | Free (se apaga tras 15min inactivo) | $0/mes |
+| UptimeRobot | Free (para anti cold-start) | $0/mes |
+| **Total** | | **$0/mes** |
 
 ---
 
 ## Próximos pasos posibles
 
-- Migrar SQLite a Postgres (Supabase) para historial permanente entre dispositivos.
-- Deploy del backend en Render/Fly.io para no depender de ngrok ni del PC encendido.
 - Notificaciones a Telegram cuando llega un ENTER.
+- Calculadora de tamaño de posición integrada (capital + % riesgo → lotes).
 - Filtros por hora del día / kill zone.
 - Gráfico de equity curve.
 - Backtest del motor sobre el historial acumulado.

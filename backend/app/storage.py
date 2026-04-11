@@ -93,6 +93,13 @@ def init_db() -> None:
                     source TEXT
                 )
             """)
+            # Migración idempotente para journal (PostgreSQL)
+            for col, ddl in [
+                ("journal_respected_plan", "TEXT"),
+                ("journal_closed_early", "TEXT"),
+                ("journal_emotion", "TEXT"),
+            ]:
+                cur.execute(f"ALTER TABLE signals ADD COLUMN IF NOT EXISTS {col} {ddl}")
     else:
         with _db() as cur:
             cur.execute("""
@@ -115,6 +122,9 @@ def init_db() -> None:
                 ("pnl", "pnl REAL"),
                 ("closed_at", "closed_at TEXT"),
                 ("source", "source TEXT"),
+                ("journal_respected_plan", "journal_respected_plan TEXT"),
+                ("journal_closed_early", "journal_closed_early TEXT"),
+                ("journal_emotion", "journal_emotion TEXT"),
             ]:
                 if col not in cols:
                     cur.execute(f"ALTER TABLE signals ADD COLUMN {ddl}")
@@ -165,6 +175,9 @@ def set_result(
     signal_id: int,
     result: str,
     exit_price: Optional[float] = None,
+    journal_respected_plan: Optional[str] = None,
+    journal_closed_early: Optional[str] = None,
+    journal_emotion: Optional[str] = None,
 ) -> Optional[dict]:
     if result not in ("WIN", "LOSS", "BE"):
         raise ValueError("result debe ser WIN, LOSS o BE")
@@ -199,12 +212,25 @@ def set_result(
 
         _exec(
             cur,
-            f"UPDATE signals SET result={ph}, exit_price={ph}, pnl={ph}, closed_at={ph} WHERE id={ph}",
-            (result, exit_price, pnl, datetime.utcnow().isoformat(), signal_id),
+            f"UPDATE signals SET result={ph}, exit_price={ph}, pnl={ph}, closed_at={ph}, "
+            f"journal_respected_plan={ph}, journal_closed_early={ph}, journal_emotion={ph} "
+            f"WHERE id={ph}",
+            (
+                result, exit_price, pnl, datetime.utcnow().isoformat(),
+                journal_respected_plan, journal_closed_early, journal_emotion,
+                signal_id,
+            ),
         )
         _exec(cur, f"SELECT * FROM signals WHERE id = {ph}", (signal_id,))
         row = _fetchone(cur)
         return _row_to_dict(row)
+
+
+def delete_signal(signal_id: int) -> bool:
+    ph = _PH
+    with _db() as cur:
+        cur.execute(f"DELETE FROM signals WHERE id = {ph}", (signal_id,))
+        return cur.rowcount > 0
 
 
 def distinct_symbols() -> List[str]:
@@ -285,4 +311,7 @@ def _row_to_dict(r) -> dict:
         "pnl": d.get("pnl"),
         "closed_at": d.get("closed_at"),
         "source": d.get("source"),
+        "journal_respected_plan": d.get("journal_respected_plan"),
+        "journal_closed_early": d.get("journal_closed_early"),
+        "journal_emotion": d.get("journal_emotion"),
     }

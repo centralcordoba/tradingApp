@@ -17,3 +17,9 @@ services:
         sync: false
       - key: OPENROUTER_MODEL
         value: anthropic/claude-sonnet-4
+      - key: NEWS_FILTER_ENABLED
+        value: "1"
+      - key: NEWS_WINDOW_BEFORE_MIN
+        value: "30"
+      - key: NEWS_WINDOW_AFTER_MIN
+        value: "5"
