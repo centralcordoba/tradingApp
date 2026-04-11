@@ -35,6 +35,7 @@ type Signal = {
   result: "WIN" | "LOSS" | "BE" | null;
   pnl: number | null;
   source: string | null;
+  taken?: "yes" | "no" | null;
   journal_respected_plan?: string | null;
   journal_closed_early?: string | null;
   journal_emotion?: string | null;
@@ -44,6 +45,7 @@ type Emotion = "confianza" | "miedo" | "fomo" | "venganza";
 type JournalDraft = {
   signalId: number;
   result: "WIN" | "LOSS" | "BE";
+  taken: "yes" | "no" | null;
   respected_plan: "yes" | "no" | null;
   closed_early: "yes" | "no" | null;
   emotion: Emotion | null;
@@ -84,10 +86,17 @@ type Stats = {
   closed: number;
   open: number;
   overall: Agg;
+  overall_taken?: Agg;
+  overall_rated?: Agg;
+  execution_rate?: number;
   by_decision: Record<string, Agg>;
   by_source: Record<string, Agg>;
   by_quality: Record<string, Agg>;
+  by_emotion?: Record<string, Agg>;
+  by_respected_plan?: Record<string, Agg>;
 };
+
+const EMPTY_AGG: Agg = { n: 0, wins: 0, losses: 0, be: 0, win_rate: 0, pnl: 0 };
 
 export default function Home() {
   const [items, setItems] = useState<Signal[]>([]);
@@ -149,16 +158,16 @@ export default function Home() {
   }, [calendarOpen, calendarDate, loadCalendar]);
 
   const openJournal = (id: number, result: "WIN" | "LOSS" | "BE") => {
-    setJournal({ signalId: id, result, respected_plan: null, closed_early: null, emotion: null });
+    setJournal({ signalId: id, result, taken: null, respected_plan: null, closed_early: null, emotion: null });
   };
 
-  const submitJournal = async (skip: boolean) => {
-    if (!journal) return;
-    const body: Record<string, unknown> = { result: journal.result };
-    if (!skip) {
-      if (journal.respected_plan) body.journal_respected_plan = journal.respected_plan;
-      if (journal.closed_early) body.journal_closed_early = journal.closed_early;
-      if (journal.emotion) body.journal_emotion = journal.emotion;
+  const submitJournal = async () => {
+    if (!journal || !journal.taken) return;
+    const body: Record<string, unknown> = { result: journal.result, taken: journal.taken };
+    if (journal.taken === "yes") {
+      body.journal_respected_plan = journal.respected_plan;
+      body.journal_closed_early = journal.closed_early;
+      body.journal_emotion = journal.emotion;
     }
     await fetch(`${API}/signals/${journal.signalId}/result`, {
       method: "POST",
@@ -188,14 +197,37 @@ export default function Home() {
       )}
 
       {stats && (
-        <div className="stats">
-          <StatCard label="Total" value={stats.total_signals} />
-          <StatCard label="Cerradas" value={stats.closed} />
-          <StatCard label="Abiertas" value={stats.open} />
-          <StatCard label="Win rate" value={`${(stats.overall.win_rate * 100).toFixed(0)}%`} accent />
-          <StatCard label={`W/L/BE`} value={`${stats.overall.wins}/${stats.overall.losses}/${stats.overall.be}`} />
-          <StatCard label="PnL ($)" value={stats.overall.pnl.toFixed(2)} accent={stats.overall.pnl >= 0 ? "good" : "bad"} />
-        </div>
+        <>
+          <div className="stats">
+            <StatCard label="Total" value={stats.total_signals} />
+            <StatCard label="Cerradas" value={stats.closed} />
+            <StatCard label="Abiertas" value={stats.open} />
+            <StatCard label="Win rate" value={`${(stats.overall.win_rate * 100).toFixed(0)}%`} accent />
+            <StatCard label={`W/L/BE`} value={`${stats.overall.wins}/${stats.overall.losses}/${stats.overall.be}`} />
+            <StatCard label="PnL ($)" value={stats.overall.pnl.toFixed(2)} accent={stats.overall.pnl >= 0 ? "good" : "bad"} />
+          </div>
+          <div className="stats-split">
+            <SplitCard
+              title="Ejecutadas"
+              subtitle="PnL real de las que operaste"
+              agg={stats.overall_taken ?? EMPTY_AGG}
+              variant="taken"
+            />
+            <SplitCard
+              title="Calificadas"
+              subtitle="Edge del sistema sin ejecución"
+              agg={stats.overall_rated ?? EMPTY_AGG}
+              variant="rated"
+            />
+            <div className="split-card exec-rate">
+              <div className="card-label">Execution rate</div>
+              <div className="card-value">{((stats.execution_rate ?? 0) * 100).toFixed(0)}%</div>
+              <div className="split-sub">
+                {(stats.overall_taken ?? EMPTY_AGG).n} ejecutadas / {stats.closed} evaluadas
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       <div className="calendar-section">
@@ -304,9 +336,13 @@ export default function Home() {
                 </td>
                 <td>
                   {it.result ? (
-                    <span className={`badge ${it.result}`}>
-                      {it.result} {it.pnl != null && `(${it.pnl >= 0 ? "+" : ""}${it.pnl.toFixed(1)})`}
-                    </span>
+                    <div className="result-cell">
+                      <span className={`badge ${it.result}`}>
+                        {it.result} {it.pnl != null && `(${it.pnl >= 0 ? "+" : ""}${it.pnl.toFixed(1)})`}
+                      </span>
+                      {it.taken === "yes" && <span className="taken-badge exec">EJEC</span>}
+                      {it.taken === "no" && <span className="taken-badge rated">CAL</span>}
+                    </div>
                   ) : (
                     <div className="actions">
                       <button className="btn-win"  onClick={() => openJournal(it.id, "WIN")}>W</button>
@@ -325,8 +361,7 @@ export default function Home() {
         <JournalModal
           draft={journal}
           onChange={setJournal}
-          onSave={() => submitJournal(false)}
-          onSkip={() => submitJournal(true)}
+          onSave={submitJournal}
           onClose={() => setJournal(null)}
         />
       )}
@@ -357,12 +392,11 @@ function NewsBannerItem({ warning }: { warning: NewsWarning }) {
 }
 
 function JournalModal({
-  draft, onChange, onSave, onSkip, onClose,
+  draft, onChange, onSave, onClose,
 }: {
   draft: JournalDraft;
   onChange: (d: JournalDraft) => void;
   onSave: () => void;
-  onSkip: () => void;
   onClose: () => void;
 }) {
   const emotions: { key: Emotion; label: string; color: string }[] = [
@@ -372,64 +406,97 @@ function JournalModal({
     { key: "venganza",  label: "Venganza",  color: "#f87171" },
   ];
 
+  const isTaken = draft.taken === "yes";
+  const canSave =
+    draft.taken === "no" ||
+    (isTaken && draft.respected_plan && draft.closed_early && draft.emotion);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
             <span className={`badge ${draft.result}`}>{draft.result}</span>
-            <span className="modal-title">Post-mortem del trade</span>
+            <span className="modal-title">
+              {draft.taken === null
+                ? "¿Operaste esta señal?"
+                : isTaken
+                ? "Post-mortem del trade"
+                : "Calificando señal (no operada)"}
+            </span>
           </div>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
         <div className="modal-body">
           <div className="modal-q">
-            <label>¿Respetaste el plan de entrada?</label>
+            <label>¿Operaste esta señal?</label>
             <div className="modal-options">
               <button
-                className={`modal-opt ${draft.respected_plan === "yes" ? "selected good" : ""}`}
-                onClick={() => onChange({ ...draft, respected_plan: "yes" })}
-              >Sí</button>
+                className={`modal-opt ${draft.taken === "yes" ? "selected good" : ""}`}
+                onClick={() => onChange({ ...draft, taken: "yes" })}
+              >Sí, la operé</button>
               <button
-                className={`modal-opt ${draft.respected_plan === "no" ? "selected bad" : ""}`}
-                onClick={() => onChange({ ...draft, respected_plan: "no" })}
-              >No</button>
+                className={`modal-opt ${draft.taken === "no" ? "selected accent" : ""}`}
+                onClick={() => onChange({ ...draft, taken: "no", respected_plan: null, closed_early: null, emotion: null })}
+              >No, solo calificar</button>
             </div>
+            {draft.taken === "no" && (
+              <div className="modal-hint">
+                Calificando: resultado hipotético del setup sin entrar. Sirve para medir el edge del sistema.
+              </div>
+            )}
           </div>
 
-          <div className="modal-q">
-            <label>¿Cerraste antes del TP/SL?</label>
-            <div className="modal-options">
-              <button
-                className={`modal-opt ${draft.closed_early === "no" ? "selected good" : ""}`}
-                onClick={() => onChange({ ...draft, closed_early: "no" })}
-              >No, dejé correr</button>
-              <button
-                className={`modal-opt ${draft.closed_early === "yes" ? "selected bad" : ""}`}
-                onClick={() => onChange({ ...draft, closed_early: "yes" })}
-              >Sí, cerré antes</button>
-            </div>
-          </div>
+          {isTaken && (
+            <>
+              <div className="modal-q">
+                <label>¿Respetaste el plan de entrada?</label>
+                <div className="modal-options">
+                  <button
+                    className={`modal-opt ${draft.respected_plan === "yes" ? "selected good" : ""}`}
+                    onClick={() => onChange({ ...draft, respected_plan: "yes" })}
+                  >Sí</button>
+                  <button
+                    className={`modal-opt ${draft.respected_plan === "no" ? "selected bad" : ""}`}
+                    onClick={() => onChange({ ...draft, respected_plan: "no" })}
+                  >No</button>
+                </div>
+              </div>
 
-          <div className="modal-q">
-            <label>Emoción dominante</label>
-            <div className="modal-options">
-              {emotions.map((e) => (
-                <button
-                  key={e.key}
-                  className={`modal-opt ${draft.emotion === e.key ? "selected" : ""}`}
-                  style={draft.emotion === e.key ? { borderColor: e.color, color: e.color } : undefined}
-                  onClick={() => onChange({ ...draft, emotion: e.key })}
-                >{e.label}</button>
-              ))}
-            </div>
-          </div>
+              <div className="modal-q">
+                <label>¿Cerraste antes del TP/SL?</label>
+                <div className="modal-options">
+                  <button
+                    className={`modal-opt ${draft.closed_early === "no" ? "selected good" : ""}`}
+                    onClick={() => onChange({ ...draft, closed_early: "no" })}
+                  >No, dejé correr</button>
+                  <button
+                    className={`modal-opt ${draft.closed_early === "yes" ? "selected bad" : ""}`}
+                    onClick={() => onChange({ ...draft, closed_early: "yes" })}
+                  >Sí, cerré antes</button>
+                </div>
+              </div>
+
+              <div className="modal-q">
+                <label>Emoción dominante</label>
+                <div className="modal-options">
+                  {emotions.map((e) => (
+                    <button
+                      key={e.key}
+                      className={`modal-opt ${draft.emotion === e.key ? "selected" : ""}`}
+                      style={draft.emotion === e.key ? { borderColor: e.color, color: e.color } : undefined}
+                      onClick={() => onChange({ ...draft, emotion: e.key })}
+                    >{e.label}</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="modal-foot">
-          <button className="modal-skip" onClick={onSkip}>Saltar</button>
-          <button className="modal-save" onClick={onSave}>Guardar</button>
+          <button className="modal-save" onClick={onSave} disabled={!canSave}>Guardar</button>
         </div>
       </div>
     </div>
@@ -442,6 +509,40 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
     <div className={`card ${cls}`}>
       <div className="card-label">{label}</div>
       <div className="card-value">{value}</div>
+    </div>
+  );
+}
+
+function SplitCard({
+  title, subtitle, agg, variant,
+}: {
+  title: string;
+  subtitle: string;
+  agg: Agg;
+  variant: "taken" | "rated";
+}) {
+  const pnlCls = agg.pnl >= 0 ? "good" : "bad";
+  return (
+    <div className={`split-card split-${variant}`}>
+      <div className="split-head">
+        <div className="split-title">{title}</div>
+        <div className="split-n">{agg.n}</div>
+      </div>
+      <div className="split-sub">{subtitle}</div>
+      <div className="split-metrics">
+        <div className="split-metric">
+          <span className="split-metric-label">WR</span>
+          <span className="split-metric-value">{(agg.win_rate * 100).toFixed(0)}%</span>
+        </div>
+        <div className="split-metric">
+          <span className="split-metric-label">W/L/BE</span>
+          <span className="split-metric-value">{agg.wins}/{agg.losses}/{agg.be}</span>
+        </div>
+        <div className="split-metric">
+          <span className="split-metric-label">PnL</span>
+          <span className={`split-metric-value ${pnlCls}`}>{agg.pnl.toFixed(2)}</span>
+        </div>
+      </div>
     </div>
   );
 }

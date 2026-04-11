@@ -38,6 +38,38 @@ tr:hover { background: #11151d; }
 .card.good .card-value { color: #4ade80; }
 .card.bad  .card-value { color: #f87171; }
 
+/* Split stats: Ejecutadas vs Calificadas vs Execution rate */
+.stats-split {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;
+  margin-bottom: 20px;
+}
+.split-card {
+  background: #11151d; border: 1px solid #1c2230; border-radius: 8px; padding: 14px;
+}
+.split-taken { border-left: 3px solid #4ade80; }
+.split-rated { border-left: 3px solid #60a5fa; }
+.split-card.exec-rate { border-left: 3px solid #facc15; text-align: left; }
+.split-card.exec-rate .card-value { font-size: 26px; margin-top: 4px; }
+.split-head { display: flex; justify-content: space-between; align-items: baseline; }
+.split-title { color: #e6e8eb; font-weight: 700; font-size: 13px; }
+.split-n { color: #8a92a3; font-size: 11px; }
+.split-sub { color: #8a92a3; font-size: 10px; margin-top: 2px; margin-bottom: 10px; }
+.split-metrics { display: flex; gap: 14px; }
+.split-metric { display: flex; flex-direction: column; }
+.split-metric-label { color: #8a92a3; font-size: 10px; text-transform: uppercase; }
+.split-metric-value { color: #e6e8eb; font-size: 15px; font-weight: 700; }
+.split-metric-value.good { color: #4ade80; }
+.split-metric-value.bad  { color: #f87171; }
+
+/* Badge ejecutada / calificada en tabla */
+.result-cell { display: flex; align-items: center; gap: 6px; }
+.taken-badge {
+  display: inline-block; padding: 2px 6px; border-radius: 3px;
+  font-size: 9px; font-weight: 700; letter-spacing: .5px;
+}
+.taken-badge.exec  { background: #0d3b22; color: #4ade80; border: 1px solid #16a34a; }
+.taken-badge.rated { background: #0d1f3b; color: #60a5fa; border: 1px solid #2563eb; }
+
 .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
 .tab { background: #11151d; color: #8a92a3; border: 1px solid #1c2230; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
 .tab:hover { background: #1c2230; color: #e6e8eb; }
@@ -178,19 +210,20 @@ tr:hover { background: #11151d; }
 .modal-opt.selected { background: #1c2230; border-color: #60a5fa; color: #60a5fa; }
 .modal-opt.selected.good { border-color: #4ade80; color: #4ade80; }
 .modal-opt.selected.bad  { border-color: #f87171; color: #f87171; }
+.modal-opt.selected.accent { border-color: #60a5fa; color: #60a5fa; }
+.modal-hint {
+  margin-top: 6px; padding: 8px 10px;
+  background: #0d1f3b; border-left: 2px solid #2563eb;
+  color: #b8becc; font-size: 11px; border-radius: 4px;
+}
 .modal-foot {
   display: flex; justify-content: flex-end; gap: 8px;
   margin-top: 18px; padding-top: 14px; border-top: 1px solid #1c2230;
 }
-.modal-skip {
-  background: transparent; color: #8a92a3; border: 1px solid #2a3142;
-  padding: 8px 16px; border-radius: 6px; cursor: pointer;
-  font-size: 12px; font-weight: 600;
-}
-.modal-skip:hover { color: #e6e8eb; }
 .modal-save {
   background: #2563eb; color: #fff; border: none;
   padding: 8px 18px; border-radius: 6px; cursor: pointer;
   font-size: 12px; font-weight: 700;
 }
-.modal-save:hover { background: #3b82f6; }
+.modal-save:hover:not(:disabled) { background: #3b82f6; }
+.modal-save:disabled { background: #1c2230; color: #4a5262; cursor: not-allowed; }

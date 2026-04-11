@@ -93,11 +93,12 @@ def init_db() -> None:
                     source TEXT
                 )
             """)
-            # Migración idempotente para journal (PostgreSQL)
+            # Migración idempotente para journal + taken (PostgreSQL)
             for col, ddl in [
                 ("journal_respected_plan", "TEXT"),
                 ("journal_closed_early", "TEXT"),
                 ("journal_emotion", "TEXT"),
+                ("taken", "TEXT"),
             ]:
                 cur.execute(f"ALTER TABLE signals ADD COLUMN IF NOT EXISTS {col} {ddl}")
     else:
@@ -125,6 +126,7 @@ def init_db() -> None:
                 ("journal_respected_plan", "journal_respected_plan TEXT"),
                 ("journal_closed_early", "journal_closed_early TEXT"),
                 ("journal_emotion", "journal_emotion TEXT"),
+                ("taken", "taken TEXT"),
             ]:
                 if col not in cols:
                     cur.execute(f"ALTER TABLE signals ADD COLUMN {ddl}")
@@ -175,12 +177,15 @@ def set_result(
     signal_id: int,
     result: str,
     exit_price: Optional[float] = None,
+    taken: Optional[str] = None,
     journal_respected_plan: Optional[str] = None,
     journal_closed_early: Optional[str] = None,
     journal_emotion: Optional[str] = None,
 ) -> Optional[dict]:
     if result not in ("WIN", "LOSS", "BE"):
         raise ValueError("result debe ser WIN, LOSS o BE")
+    if taken is not None and taken not in ("yes", "no"):
+        raise ValueError("taken debe ser 'yes', 'no' o None")
 
     ph = _PH
     with _db() as cur:
@@ -213,11 +218,11 @@ def set_result(
         _exec(
             cur,
             f"UPDATE signals SET result={ph}, exit_price={ph}, pnl={ph}, closed_at={ph}, "
-            f"journal_respected_plan={ph}, journal_closed_early={ph}, journal_emotion={ph} "
+            f"taken={ph}, journal_respected_plan={ph}, journal_closed_early={ph}, journal_emotion={ph} "
             f"WHERE id={ph}",
             (
                 result, exit_price, pnl, datetime.utcnow().isoformat(),
-                journal_respected_plan, journal_closed_early, journal_emotion,
+                taken, journal_respected_plan, journal_closed_early, journal_emotion,
                 signal_id,
             ),
         )
@@ -246,6 +251,8 @@ def stats() -> dict:
         rows = [_row_to_dict(r) for r in _fetchall(cur)]
 
     closed = [r for r in rows if r["result"] in ("WIN", "LOSS", "BE")]
+    taken = [r for r in closed if r.get("taken") == "yes"]
+    rated = [r for r in closed if r.get("taken") == "no"]
 
     def _agg(items: list[dict]) -> dict:
         n = len(items)
@@ -260,18 +267,23 @@ def stats() -> dict:
             "win_rate": round(wr, 3), "pnl": round(pnl, 2),
         }
 
-    def _bucket(key_fn) -> dict:
+    def _bucket(key_fn, items=None) -> dict:
         out: dict[str, list] = {}
-        for r in closed:
+        for r in items if items is not None else closed:
             k = key_fn(r) or "unknown"
             out.setdefault(k, []).append(r)
         return {k: _agg(v) for k, v in out.items()}
+
+    execution_rate = round(len(taken) / len(closed), 3) if closed else 0.0
 
     return {
         "total_signals": len(rows),
         "closed": len(closed),
         "open": len(rows) - len(closed),
         "overall": _agg(closed),
+        "overall_taken": _agg(taken),
+        "overall_rated": _agg(rated),
+        "execution_rate": execution_rate,
         "by_symbol": _bucket(lambda r: r["signal"].get("symbol")),
         "by_decision": _bucket(lambda r: r["response"].get("decision")),
         "by_source": _bucket(lambda r: r["source"]),
@@ -280,6 +292,8 @@ def stats() -> dict:
         "by_zona": _bucket(lambda r: r["signal"].get("zona")),
         "by_mtf": _bucket(lambda r: r["signal"].get("mtf")),
         "by_pattern": _bucket(lambda r: r["signal"].get("pattern")),
+        "by_emotion": _bucket(lambda r: r.get("journal_emotion"), items=taken),
+        "by_respected_plan": _bucket(lambda r: r.get("journal_respected_plan"), items=taken),
     }
 
 
@@ -311,6 +325,7 @@ def _row_to_dict(r) -> dict:
         "pnl": d.get("pnl"),
         "closed_at": d.get("closed_at"),
         "source": d.get("source"),
+        "taken": d.get("taken"),
         "journal_respected_plan": d.get("journal_respected_plan"),
         "journal_closed_early": d.get("journal_closed_early"),
         "journal_emotion": d.get("journal_emotion"),

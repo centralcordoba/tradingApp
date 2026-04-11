@@ -10,23 +10,28 @@ Contexto operativo del proyecto para futuras sesiones de Claude Code.
 
 ## Stack
 
-- **Backend**: FastAPI + SQLite (`backend/`). Python 3.11+.
-- **Frontend**: Next.js 14 App Router + TypeScript (`frontend/`). Local, conectado a `http://127.0.0.1:8000`.
+- **Backend**: FastAPI (`backend/`). Python 3.11+. Desplegado en **Render free tier** (URL: `https://tradingapp-2glz.onrender.com`).
+- **DB**: Dual-mode — **Supabase PostgreSQL** en producción (via `DATABASE_URL` + transaction pooler), **SQLite** en dev local si no hay `DATABASE_URL`. `storage.py` detecta y ramifica.
+- **Frontend**: Next.js 14 App Router + TypeScript (`frontend/`). Corre local pero apunta a Render via `NEXT_PUBLIC_API_URL` en `.env.local`.
 - **Pine scripts**: `scriptsTradingView/SMS_XAUUSD_v8_9_1.pine` y `SMS_EURUSD_v8_10_1.pine` (modificados para emitir JSON al webhook).
-- **Túnel público**: ngrok free (URL cambia en cada reinicio). Hay una tarea pendiente de migrar a Render + Supabase.
-- **IA opcional**: OpenRouter (Claude/cualquier modelo) refina la decisión heurística si `USE_AI=1` y `OPENROUTER_API_KEY` están en `backend/.env`. Sin API key, motor heurístico puro.
+- **IA opcional**: OpenRouter (Claude/cualquier modelo) refina la decisión heurística si `USE_AI=1` y `OPENROUTER_API_KEY` están en env. Sin API key, motor heurístico puro.
+- **News feed**: ForexFactory (JSON público gratis, sin key). `news_client.py` cachea 1h en memoria.
 
 ## Arquitectura del flujo
 
 ```
-TradingView (Pine) ─alert()→ ngrok ─POST→ FastAPI ─→ SQLite
-                                          │
-                                          ├─→ decision_engine (vetos + score)
-                                          ├─→ entry_planner (plan operativo)
-                                          └─→ ai_client (OpenRouter, opcional)
+TradingView (Pine) ─alert()→ Render (URL fija) ─POST→ FastAPI ─→ Supabase PostgreSQL
+                                                      │
+                                                      ├─→ decision_engine (vetos + score)
+                                                      ├─→ entry_planner (plan operativo)
+                                                      ├─→ news_client (warnings, NO bloquea)
+                                                      └─→ ai_client (OpenRouter, opcional)
 
-Frontend Next.js ←─polling 5s── /signals, /stats, /symbols
-                  ──POST W/L/BE──→ /signals/{id}/result
+Frontend Next.js (local) ←─polling 5s── Render
+                         ├── /signals, /stats, /symbols
+                         ├── /news/warnings (banner avisos activos)
+                         ├── /news/calendar (sección colapsable, hora Madrid)
+                         └── POST W/L/BE ─→ /signals/{id}/result (con journal opcional)
 ```
 
 ## Estructura
@@ -41,20 +46,25 @@ tradingApp/
 │   │   ├── entry_planner.py    # Genera plan operativo (PULLBACK/RETEST/MOMENTUM/SWEEP)
 │   │   ├── tv_parser.py        # Acepta JSON o texto legacy multilínea
 │   │   ├── ai_client.py        # OpenRouter via urllib (sin deps extra)
-│   │   └── storage.py          # SQLite + stats agregadas + tracking de resultados
+│   │   ├── news_client.py      # ForexFactory fetch + cache + warnings por ventana
+│   │   └── storage.py          # Dual-mode: PostgreSQL (Supabase) / SQLite
 │   ├── requirements.txt
+│   ├── render.yaml             # Config deploy Render
+│   ├── supabase_init.sql       # SQL inicial para tabla signals en Supabase
 │   ├── .env.example
-│   └── signals.db              # se crea en startup
+│   └── signals.db              # solo en dev local
 ├── frontend/
-│   └── app/
-│       ├── page.tsx            # Dashboard con tabs por símbolo, stats, plan visible
-│       ├── layout.tsx
-│       └── globals.css
+│   ├── app/
+│   │   ├── page.tsx            # Dashboard + banner news + modal journal + calendario
+│   │   ├── layout.tsx
+│   │   └── globals.css
+│   ├── .env.local              # NEXT_PUBLIC_API_URL → Render
+│   └── .env.local.example
 ├── scriptsTradingView/
-│   ├── SMS_XAUUSD_v8_9_1.pine  # alert() emite JSON con todos los campos
-│   └── SMS_EURUSD_v8_10_1.pine # idem (5 decimales)
-├── README.md                   # Guía de usuario para levantar todo
-└── CLAUDE.md                   # Este archivo
+│   ├── SMS_XAUUSD_v8_9_1.pine
+│   └── SMS_EURUSD_v8_10_1.pine
+├── README.md
+└── CLAUDE.md
 ```
 
 ## Lógica del motor de decisión
@@ -64,6 +74,8 @@ tradingApp/
 - LONG en zona `VENDE YA`, MTF30 BEAR, RSI ≥ 78, overhead/resistencia inmediata.
 - SHORT en zona `COMPRA YA`, MTF30 BULL, RSI ≤ 22, soporte inmediato.
 - `conf < 5`, `congestion = true`.
+
+**Nota**: el filtro de noticias **NO es un veto**. Las señales que caen en ventana de noticia high-impact se evalúan normalmente; el frontend muestra un banner de aviso pero no bloquea. Decisión explícita del usuario.
 
 ### Score (después de pasar vetos)
 
@@ -97,6 +109,47 @@ Calcula `wait_zone`, `trigger_price`, `invalidation` e `instructions` operativas
 
 **Filosofía pro scalper aplicada**: nunca entrar en la vela de señal si está extendida; los pros esperan pullback al EMA9, retest del nivel roto, o sweep + reversión.
 
+## News warnings (ForexFactory)
+
+**Comportamiento**: aviso visual, no veto. Banner en el dashboard cuando hay high-impact news en ventana.
+
+- **Fuente**: `https://nfs.faireconomy.media/ff_calendar_thisweek.json` (free, sin auth)
+- **Cache**: 1h en memoria (`news_client._cache`). Si falla fetch, mantiene cache viejo o devuelve `[]`.
+- **Ventana default**: 30 min antes, 5 min después del evento (`NEWS_WINDOW_BEFORE_MIN`, `NEWS_WINDOW_AFTER_MIN`).
+- **Mapeo símbolo → monedas**: `XAUUSD/XAGUSD → USD`, `EURUSD → EUR+USD`, genérico parte el string en 2 códigos de 3 letras.
+- **Estados del banner**: `upcoming` (amarillo), `imminent` (rojo pulsante, ≤5min), `past` (gris tenue, ya pasó pero en ventana).
+- **Desactivar**: `NEWS_FILTER_ENABLED=0`.
+
+**Calendario económico en frontend**: sección colapsable con date picker + hora Madrid (vía `zoneinfo` + `tzdata`). Carga perezosa al abrir la sección. Requiere `tzdata` en `requirements.txt` porque Windows Python no trae la base IANA.
+
+## Taken vs Rated + Journal post-mortem
+
+Concepto clave: separar **calidad del sistema** (rated) de **calidad de ejecución** (taken).
+
+Al marcar W/L/BE se abre un **modal obligatorio** (sin botón Saltar). Primera pregunta: **¿Operaste esta señal?**
+
+- **No, solo calificar** → se guarda `taken='no'`. Solo se pide el resultado (WIN/LOSS/BE). No se pide journal. Mide el **edge del sistema** sin ruido de ejecución. Muchas señales entran aquí.
+- **Sí, la operé** → se guarda `taken='yes'` y obliga a contestar:
+  1. ¿Respetaste el plan? (Sí/No)
+  2. ¿Cerraste antes del TP/SL? (Sí/No)
+  3. Emoción dominante (Confianza / Miedo / FOMO / Venganza)
+
+El botón **Guardar** queda deshabilitado hasta que todos los campos requeridos estén completos.
+
+**Stats divididas** (en `/stats`):
+- `overall` — todas las cerradas (legacy, incluye null)
+- `overall_taken` — solo `taken='yes'` (PnL real de ejecuciones)
+- `overall_rated` — solo `taken='no'` (PnL hipotético, edge del sistema)
+- `execution_rate` — `len(taken) / len(closed)` (cuántas ejecutas de las que evalúas)
+- `by_emotion`, `by_respected_plan` — breakdowns solo sobre taken (calificadas no tienen journal)
+
+**Lectura como trader pro**:
+- Si `overall_rated.WR > overall_taken.WR` → el sistema tiene edge, tu ejecución lo destruye (entries tardías, cierres tempranos, emoción)
+- Si ambas son similares y bajas → el sistema es débil
+- Si `execution_rate` es muy bajo → demasiado selectivo o indeciso
+
+**Tabla de señales**: badge `EJEC` (verde) o `CAL` (azul) junto al resultado para distinguir visualmente.
+
 ## Esquema TVSignal (lo que envía el Pine)
 
 Campos obligatorios: `signal`, `symbol`, `price`, `sl`, `be`, `tp`, `conf`, `quality`.
@@ -118,29 +171,59 @@ Valores categóricos esperados:
 | POST | `/webhook/tradingview?ai=0\|1` | Recibe del Pine, parsea JSON o texto legacy |
 | GET | `/signals?limit=100&symbol=XAUUSD` | Lista paginada filtrable por símbolo |
 | GET | `/symbols` | Símbolos únicos vistos (para tabs del frontend) |
-| POST | `/signals/{id}/result` | Body `{result, exit_price?}` — marca WIN/LOSS/BE y calcula PnL |
+| POST | `/signals/{id}/result` | Body `{result, exit_price?, journal_*?}` — marca WIN/LOSS/BE + journal |
+| DELETE | `/signals/{id}` | Borra una señal (para limpiar data sucia) |
 | GET | `/stats` | Agregados: overall + by_symbol/decision/source/quality/side/zona/mtf/pattern |
+| GET | `/news?symbol=X&hours=24` | Próximas high-impact news relevantes al símbolo |
+| GET | `/news/warnings?currencies=USD,EUR&now=ISO` | Warnings activos (frontend polea cada 5s). `now` para simular |
+| GET | `/news/calendar?date=YYYY-MM-DD&impact=high` | Eventos de un día en hora Madrid |
 
 `?ai=1` activa el refinamiento OpenRouter (si está configurado). El motor heurístico siempre corre primero; si la IA falla, cae a heurística.
 
-## SQLite — tabla `signals`
+## Tabla `signals` (idéntica en SQLite y PostgreSQL)
 
-```sql
-id INTEGER PK
-received_at TEXT
-signal_json TEXT      -- JSON completo de TVSignal
-response_json TEXT    -- JSON completo de AnalyzeResponse (incluye plan)
-decision TEXT         -- ENTER | WAIT | AVOID
-symbol TEXT
-side TEXT             -- LONG | SHORT
-result TEXT           -- WIN | LOSS | BE | NULL
-exit_price REAL
-pnl REAL
-closed_at TEXT
-source TEXT           -- heuristic | ai
+```
+id                        SERIAL/INTEGER PK
+received_at               TEXT            -- ISO UTC
+signal_json               TEXT            -- JSON completo de TVSignal
+response_json             TEXT            -- JSON completo de AnalyzeResponse (incluye plan)
+decision                  TEXT            -- ENTER | WAIT | AVOID
+symbol                    TEXT
+side                      TEXT            -- LONG | SHORT
+result                    TEXT            -- WIN | LOSS | BE | NULL
+exit_price                REAL/DOUBLE
+pnl                       REAL/DOUBLE
+closed_at                 TEXT
+source                    TEXT            -- heuristic | ai
+taken                     TEXT            -- yes (ejecutada) | no (solo calificada) | NULL
+journal_respected_plan    TEXT            -- yes | no | NULL (solo si taken=yes)
+journal_closed_early      TEXT            -- yes | no | NULL (solo si taken=yes)
+journal_emotion           TEXT            -- confianza | miedo | fomo | venganza | NULL (solo si taken=yes)
 ```
 
-Migración automática con `_ensure_column` idempotente en `init_db()` — al añadir columnas nuevas en el futuro, no rompe DBs viejas.
+**Migración automática** en `init_db()`:
+- PostgreSQL usa `ALTER TABLE ADD COLUMN IF NOT EXISTS` idempotente
+- SQLite hace `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` condicional
+
+Al añadir columnas nuevas en el futuro, agregarlas a la lista en ambos branches de `init_db()`.
+
+## Variables de entorno
+
+```bash
+# DB (vacío = SQLite local)
+DATABASE_URL=postgresql://postgres.XXX:PASS@aws-1-us-east-2.pooler.supabase.com:6543/postgres
+
+# OpenRouter (opcional)
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=anthropic/claude-sonnet-4
+OPENROUTER_REFERER=http://localhost
+USE_AI=0
+
+# News warnings
+NEWS_FILTER_ENABLED=1
+NEWS_WINDOW_BEFORE_MIN=30
+NEWS_WINDOW_AFTER_MIN=5
+```
 
 ## Convenciones del usuario
 
@@ -148,53 +231,61 @@ Migración automática con `_ensure_column` idempotente en `init_db()` — al a�
 - **Estilo de código**: directo, sin comentarios obvios, sin abstracciones especulativas. Ya hay una decisión validada de evitar over-engineering.
 - **Stack del usuario**: Windows 11, PowerShell. **Cuidado con `curl`** en PowerShell — es alias de `Invoke-WebRequest`. Usar `curl.exe` o `Invoke-RestMethod` con `@{}` y `ConvertTo-Json`.
 - **`localhost` vs `127.0.0.1`**: en su Windows, `localhost` resolvía a IPv6 y uvicorn solo escucha IPv4 por defecto → usar `127.0.0.1` o arrancar uvicorn con `--host 0.0.0.0`.
+- **Horario del usuario**: opera en hora Madrid. Todas las horas visibles en UI (calendario económico) se muestran en `Europe/Madrid`.
 
-## Cómo se levanta (3 terminales)
+## Cómo se levanta
 
+### Producción (actual)
+- **Backend**: Render auto-despliega en cada push a `main`
+- **Frontend**: local (`npm run dev`) apuntando a Render via `.env.local`
+- **DB**: Supabase (persistente, se mantiene entre redeploys)
+- **TradingView webhook**: `https://tradingapp-2glz.onrender.com/webhook/tradingview`
+
+### Dev local (opcional)
 ```bash
-# 1) Backend
+# 1) Backend local (usa SQLite si no hay DATABASE_URL)
 cd backend && .venv\Scripts\activate && uvicorn app.main:app --reload
 
-# 2) Frontend
+# 2) Frontend (apuntar a localhost temporalmente: editar .env.local)
 cd frontend && npm run dev
 
-# 3) ngrok (URL pública para TradingView)
+# 3) ngrok si quieres recibir webhooks de TradingView en local
 ngrok.exe http 8000
 ```
 
-Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs · Inspector ngrok: http://127.0.0.1:4040
-
-## Cómo se conecta TradingView
-
-1. Aplicar el Pine modificado al chart (XAU o EUR).
-2. Crear alerta → Condition = indicador + **`Any alert() function call`** (crítico, hace que TV mande exactamente el JSON del `alert()`).
-3. Notifications → Webhook URL = `https://TU-NGROK.ngrok-free.dev/webhook/tradingview`.
-4. Message vacío. Trigger lo controla el Pine internamente con `alert.freq_once_per_bar_close`.
+Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 
 ## Estado actual / decisiones tomadas
 
-- **DB**: Dual — SQLite local (dev) o PostgreSQL/Supabase (prod). Se detecta con `DATABASE_URL` en env.
-- **Hosting**: Render free tier (backend) + Supabase free tier (DB). Local sigue funcionando sin cambios.
-- **IA OpenRouter**: implementada pero opcional, off por defecto hasta que el usuario quiera probarla.
-- **Tracking de resultados**: ya implementado (botones W/L/BE en cada fila + breakdowns en stats).
-- **Multi-símbolo**: ya soportado (tabs en frontend, breakdown by_symbol en stats, filtros en /signals).
-- **Entry planner**: ya implementado, funciona si el Pine envía los campos contextuales (`ema9`, `atr`, etc.).
+- **Deploy producción**: ✓ Backend en Render, DB en Supabase, frontend local apuntando a Render.
+- **DB**: Dual-mode funcionando. Local usa SQLite, prod usa PostgreSQL con transaction pooler (port 6543).
+- **IA OpenRouter**: implementada pero `USE_AI=0` por defecto.
+- **Tracking de resultados**: ✓ botones W/L/BE + modal de journal post-mortem.
+- **Multi-símbolo**: ✓ tabs en frontend, breakdowns por símbolo en stats.
+- **Entry planner**: ✓ funciona si el Pine envía los campos contextuales.
+- **News warnings**: ✓ banner visual (no veto), ventana 30min antes / 5min después.
+- **Calendario económico**: ✓ sección colapsable con date picker y hora Madrid.
+- **Borrado de señales**: ✓ DELETE `/signals/{id}` para limpiar data sucia.
 
 ## Próximos pasos posibles (mencionados, no hechos)
 
-- ~~Migrar SQLite → Supabase Postgres~~ ✓ (storage.py dual-mode).
-- ~~Deploy backend en Render~~ ✓ (render.yaml configurado, falta primer deploy).
 - Notificaciones a Telegram cuando llega ENTER.
 - Calculadora de tamaño de posición integrada (capital + % riesgo → lotes).
-- Filtros por hora / kill zone configurables.
-- Equity curve en frontend.
-- Backtest del motor sobre el historial acumulado.
+- R:R floor como veto duro (rechazar si `(tp-entry)/(entry-sl) < 1.5`).
+- Kill zone como veto duro (fuera de London/NY → WAIT automático).
+- Daily loss limit + cooldown post-trade (circuit breaker anti-revenge-trading).
+- Equity curve y heatmap hora-del-día vs PnL en frontend.
+- Backtest del motor sobre el historial acumulado en Supabase.
+- Stats/breakdowns basados en journal (ver qué emociones pierden, si respetar el plan correlaciona con WR).
+- Migrar frontend a Vercel para que todo sea público (hoy sigue siendo local).
 
 ## Gotchas conocidos
 
 - **PowerShell + curl**: ver convenciones arriba.
 - **`localhost` vs `127.0.0.1`**: ver convenciones arriba.
-- **ngrok free**: URL cambia en cada reinicio → hay que actualizar las alertas de TradingView.
-- **PC en suspensión**: ngrok cae, uvicorn pausa, TradingView pierde señales sin retry. Recomendar configuración de energía "nunca suspender" mientras esté en uso.
-- **SQLite + redeploys**: si algún día se mueve a Render free, el disco es efímero — la DB se pierde en cada reinicio. Es la razón de la migración pendiente a Supabase.
-- **`/webhook/tradingview` no aparece en `/docs`** con schema de body: usa `Request` crudo (para aceptar también texto legacy). Para probar desde `/docs`, usar `/analyze` que sí tiene schema Pydantic.
+- **Render free spin-down**: tras 15min de inactividad el servicio se apaga, cold start ~30-50s. Mitigación: UptimeRobot/cron-job.org pinging `/health` cada 5min.
+- **Supabase password con caracteres especiales**: `@`, `#`, `:`, etc. rompen el parsing del `DATABASE_URL`. Resetear con solo letras y números.
+- **Supabase Direct Connection no funciona en Render** (IPv4 only). Usar **Transaction pooler** (port 6543, user `postgres.PROJECT_REF`).
+- **`zoneinfo` en Windows**: requiere paquete `tzdata` (está en `requirements.txt`). Linux/Render trae la base IANA del sistema.
+- **`/webhook/tradingview` no aparece en `/docs`** con schema de body: usa `Request` crudo (para aceptar también texto legacy). Para probar desde `/docs`, usar `/analyze`.
+- **`.env.local` del frontend apunta a Render**: si el backend local tiene código nuevo, el frontend no lo verá hasta hacer push a Render o cambiar temporalmente `NEXT_PUBLIC_API_URL` a `http://127.0.0.1:8000`.

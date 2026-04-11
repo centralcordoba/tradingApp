@@ -100,9 +100,10 @@ def set_result(signal_id: int, payload: dict):
     Body: {
         "result": "WIN",
         "exit_price": 2350.5,                  # opcional
-        "journal_respected_plan": "yes"|"no",  # opcional
-        "journal_closed_early": "yes"|"no",    # opcional
-        "journal_emotion": "confianza"|"miedo"|"fomo"|"venganza"  # opcional
+        "taken": "yes"|"no",                   # obligatorio desde el frontend
+        "journal_respected_plan": "yes"|"no",  # solo si taken=yes
+        "journal_closed_early": "yes"|"no",    # solo si taken=yes
+        "journal_emotion": "confianza"|"miedo"|"fomo"|"venganza"  # solo si taken=yes
     }
     """
     result = (payload.get("result") or "").upper()
@@ -112,6 +113,7 @@ def set_result(signal_id: int, payload: dict):
             signal_id,
             result,
             exit_price,
+            taken=payload.get("taken"),
             journal_respected_plan=payload.get("journal_respected_plan"),
             journal_closed_early=payload.get("journal_closed_early"),
             journal_emotion=payload.get("journal_emotion"),
