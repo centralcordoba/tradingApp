@@ -75,13 +75,146 @@ tr:hover { background: #11151d; }
 .tab:hover { background: #1c2230; color: #e6e8eb; }
 .tab.active { background: #1e3a5f; color: #60a5fa; border-color: #2563eb; }
 
-.breakdowns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-.breakdown { background: #11151d; border: 1px solid #1c2230; border-radius: 8px; padding: 12px; }
-.breakdown h3 { margin: 0 0 8px; font-size: 12px; color: #8a92a3; text-transform: uppercase; letter-spacing: .5px; }
-.breakdown table { font-size: 12px; }
-.breakdown th, .breakdown td { padding: 6px 8px; border-bottom: 1px solid #1c2230; }
+.breakdowns {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
 .good { color: #4ade80; }
 .bad  { color: #f87171; }
+
+/* ── Breakdown cards (trading-style) ── */
+.bd-card {
+  background: #11151d;
+  border: 1px solid #1c2230;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.bd-header {
+  color: #8a92a3;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1c2230;
+}
+.bd-row {
+  padding: 10px 0;
+  border-bottom: 1px solid #131822;
+}
+.bd-row:last-child { border-bottom: none; }
+.bd-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.bd-label {
+  color: #e6e8eb;
+  font-size: 13px;
+  font-weight: 700;
+}
+.bd-trades {
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 600;
+}
+/* Volume bar — thin line showing relative sample size */
+.bd-volume-track {
+  height: 2px;
+  background: #1c2230;
+  border-radius: 1px;
+  margin-bottom: 8px;
+}
+.bd-volume-fill {
+  height: 100%;
+  background: #2a3142;
+  border-radius: 1px;
+}
+.bd-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Win Rate bar */
+.bd-metric-wr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bd-wr-bar-track {
+  flex: 1;
+  height: 6px;
+  background: #1c2230;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bd-wr-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.bd-wr-good { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.bd-wr-bad  { background: linear-gradient(90deg, #dc2626, #f87171); }
+.bd-wr-value {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  min-width: 32px;
+  text-align: right;
+}
+/* W / L / BE pills */
+.bd-wlbe {
+  display: flex;
+  gap: 6px;
+}
+.bd-wlbe span {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+.bd-w { background: #0d3b22; color: #4ade80; }
+.bd-l { background: #3b0d0d; color: #f87171; }
+.bd-b { background: #3b2e0d; color: #facc15; }
+/* PnL bar */
+.bd-pnl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bd-pnl-bar-track {
+  flex: 1;
+  height: 4px;
+  background: #1c2230;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.bd-pnl-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.bd-pnl-pos { background: linear-gradient(90deg, #0d3b22, #4ade80); }
+.bd-pnl-neg { background: linear-gradient(90deg, #3b0d0d, #f87171); }
+.bd-pnl-value {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  min-width: 48px;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .breakdowns { grid-template-columns: repeat(2, 1fr); }
+}
 
 .actions { display: flex; gap: 4px; }
 .actions button { border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: 700; font-size: 11px; color: #fff; }
@@ -227,3 +360,124 @@ tr:hover { background: #11151d; }
 }
 .modal-save:hover:not(:disabled) { background: #3b82f6; }
 .modal-save:disabled { background: #1c2230; color: #4a5262; cursor: not-allowed; }
+
+/* ── Market Sessions Panel ── */
+.sessions-panel { margin-bottom: 16px; }
+.sessions-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.session-card {
+  background: #11151d;
+  border: 1px solid #1c2230;
+  border-radius: 8px;
+  padding: 12px 14px;
+  transition: border-color 0.3s, background 0.3s;
+}
+.session-card.session-open {
+  border-color: #1a3a2a;
+  background: #0d1218;
+}
+.session-card.session-closed {
+  opacity: 0.6;
+}
+.session-card.session-madrid {
+  border-color: #2a3142;
+}
+.session-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-open {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+  animation: session-pulse 2s ease-in-out infinite;
+}
+.dot-closed { background: #4a5262; }
+.dot-madrid { background: #60a5fa; box-shadow: 0 0 6px rgba(96, 165, 250, 0.4); }
+@keyframes session-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(74, 222, 128, 0.4); }
+  50%      { box-shadow: 0 0 10px rgba(74, 222, 128, 0.7); }
+}
+.session-name {
+  color: #b8becc;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex: 1;
+}
+.session-status {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.status-open {
+  background: #0d3b22;
+  color: #4ade80;
+}
+.status-closed {
+  background: #1c2230;
+  color: #4a5262;
+}
+.session-time {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e6e8eb;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.session-card.session-closed .session-time { color: #6b7280; }
+.session-hours {
+  font-size: 10px;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+.session-countdown {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.3px;
+}
+.countdown-close { color: #facc15; }
+.countdown-open  { color: #60a5fa; }
+.session-bar-track {
+  height: 3px;
+  background: #1c2230;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.session-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22d3ee);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+.session-card.session-closed .session-bar-fill { background: #4a5262; }
+.session-overlap {
+  font-size: 11px;
+  font-weight: 700;
+  color: #facc15;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.overlap-icon { font-size: 12px; }
+
+@media (max-width: 768px) {
+  .sessions-grid { grid-template-columns: repeat(2, 1fr); }
+}

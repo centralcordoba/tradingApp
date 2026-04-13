@@ -98,6 +98,152 @@ type Stats = {
 
 const EMPTY_AGG: Agg = { n: 0, wins: 0, losses: 0, be: 0, win_rate: 0, pnl: 0 };
 
+/* ── Market Sessions Panel ── */
+type SessionInfo = {
+  name: string;
+  timezone: string;
+  openHourUTC: number;
+  closeHourUTC: number;
+  abbr: string;
+};
+
+const SESSIONS: SessionInfo[] = [
+  { name: "Asia · Tokyo", timezone: "Asia/Tokyo", openHourUTC: 0, closeHourUTC: 9, abbr: "TYO" },
+  { name: "Londres", timezone: "Europe/London", openHourUTC: 7, closeHourUTC: 16, abbr: "LDN" },
+  { name: "New York", timezone: "America/New_York", openHourUTC: 12, closeHourUTC: 21, abbr: "NYC" },
+];
+
+function useClockTick(intervalMs = 1000) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function formatTime(date: Date, tz: string): string {
+  return date.toLocaleTimeString("es-ES", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function isSessionOpen(now: Date, session: SessionInfo): boolean {
+  const h = now.getUTCHours();
+  const m = now.getUTCMinutes();
+  const current = h + m / 60;
+  return current >= session.openHourUTC && current < session.closeHourUTC;
+}
+
+function sessionProgress(now: Date, session: SessionInfo): number {
+  const h = now.getUTCHours();
+  const m = now.getUTCMinutes();
+  const current = h + m / 60;
+  if (current < session.openHourUTC || current >= session.closeHourUTC) return 0;
+  const duration = session.closeHourUTC - session.openHourUTC;
+  return ((current - session.openHourUTC) / duration) * 100;
+}
+
+function sessionCountdown(now: Date, session: SessionInfo): { label: string; minutes: number } {
+  const h = now.getUTCHours();
+  const m = now.getUTCMinutes();
+  const s = now.getUTCSeconds();
+  const currentMin = h * 60 + m + s / 60;
+  const openMin = session.openHourUTC * 60;
+  const closeMin = session.closeHourUTC * 60;
+  const open = currentMin >= openMin && currentMin < closeMin;
+
+  let diffMin: number;
+  if (open) {
+    diffMin = closeMin - currentMin;
+  } else {
+    diffMin = currentMin < openMin ? openMin - currentMin : (24 * 60 - currentMin) + openMin;
+  }
+
+  const totalSec = Math.max(0, Math.floor(diffMin * 60));
+  const hh = Math.floor(totalSec / 3600);
+  const mm = Math.floor((totalSec % 3600) / 60);
+  const ss = totalSec % 60;
+
+  const prefix = open ? "Cierra en" : "Abre en";
+  const time = hh > 0
+    ? `${hh}h ${String(mm).padStart(2, "0")}m`
+    : `${mm}m ${String(ss).padStart(2, "0")}s`;
+
+  return { label: `${prefix} ${time}`, minutes: diffMin };
+}
+
+function getOverlapLabel(now: Date): string | null {
+  const ldn = isSessionOpen(now, SESSIONS[1]);
+  const nyc = isSessionOpen(now, SESSIONS[2]);
+  const asia = isSessionOpen(now, SESSIONS[0]);
+  if (ldn && nyc) return "LDN + NYC";
+  if (asia && ldn) return "ASIA + LDN";
+  return null;
+}
+
+function SessionsPanel() {
+  const now = useClockTick(1000);
+  const madridTime = formatTime(now, "Europe/Madrid");
+  const overlap = getOverlapLabel(now);
+
+  return (
+    <div className="sessions-panel">
+      <div className="sessions-grid">
+        {SESSIONS.map((s) => {
+          const open = isSessionOpen(now, s);
+          const progress = sessionProgress(now, s);
+          const time = formatTime(now, s.timezone);
+          const countdown = sessionCountdown(now, s);
+          return (
+            <div key={s.abbr} className={`session-card ${open ? "session-open" : "session-closed"}`}>
+              <div className="session-header">
+                <span className={`session-dot ${open ? "dot-open" : "dot-closed"}`} />
+                <span className="session-name">{s.name}</span>
+                <span className={`session-status ${open ? "status-open" : "status-closed"}`}>
+                  {open ? "ABIERTO" : "CERRADO"}
+                </span>
+              </div>
+              <div className="session-time">{time}</div>
+              <div className={`session-countdown ${open ? "countdown-close" : "countdown-open"}`}>
+                {countdown.label}
+              </div>
+              <div className="session-bar-track">
+                <div
+                  className="session-bar-fill"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+        <div className="session-card session-madrid">
+          <div className="session-header">
+            <span className="session-dot dot-madrid" />
+            <span className="session-name">Madrid · Local</span>
+          </div>
+          <div className="session-time">{madridTime}</div>
+          {overlap && (
+            <div className="session-overlap">
+              <span className="overlap-icon">⚡</span> Overlap {overlap}
+            </div>
+          )}
+          {!overlap && (
+            <div className="session-hours" style={{ opacity: 0.5 }}>Sin overlap activo</div>
+          )}
+          <div className="session-bar-track">
+            <div className="session-bar-fill" style={{ width: "0%" }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [items, setItems] = useState<Signal[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -187,6 +333,8 @@ export default function Home() {
         </div>
         <button className="refresh" onClick={load}>Refrescar</button>
       </div>
+
+      <SessionsPanel />
 
       {newsWarnings.length > 0 && (
         <div className="news-banner">
@@ -550,22 +698,57 @@ function SplitCard({
 function Breakdown({ title, data }: { title: string; data: Record<string, Agg> }) {
   const keys = Object.keys(data);
   if (!keys.length) return null;
+  const maxN = Math.max(...keys.map((k) => data[k].n), 1);
+  const maxPnl = Math.max(...keys.map((k) => Math.abs(data[k].pnl)), 1);
+
   return (
-    <div className="breakdown">
-      <h3>{title}</h3>
-      <table>
-        <thead><tr><th></th><th>N</th><th>WR</th><th>PnL</th></tr></thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k}>
-              <td>{k}</td>
-              <td>{data[k].n}</td>
-              <td>{(data[k].win_rate * 100).toFixed(0)}%</td>
-              <td className={data[k].pnl >= 0 ? "good" : "bad"}>{data[k].pnl.toFixed(1)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="bd-card">
+      <div className="bd-header">{title}</div>
+      {keys.map((k) => {
+        const agg = data[k];
+        const wr = agg.win_rate * 100;
+        const pnlPositive = agg.pnl >= 0;
+        const pnlBarWidth = (Math.abs(agg.pnl) / maxPnl) * 100;
+        const volumeWidth = (agg.n / maxN) * 100;
+        return (
+          <div key={k} className="bd-row">
+            <div className="bd-row-top">
+              <span className="bd-label">{k}</span>
+              <span className="bd-trades">{agg.n} ops</span>
+            </div>
+            <div className="bd-volume-track">
+              <div className="bd-volume-fill" style={{ width: `${volumeWidth}%` }} />
+            </div>
+            <div className="bd-metrics">
+              <div className="bd-metric-wr">
+                <div className="bd-wr-bar-track">
+                  <div
+                    className={`bd-wr-bar-fill ${wr >= 50 ? "bd-wr-good" : "bd-wr-bad"}`}
+                    style={{ width: `${wr}%` }}
+                  />
+                </div>
+                <span className={`bd-wr-value ${wr >= 50 ? "good" : "bad"}`}>{wr.toFixed(0)}%</span>
+              </div>
+              <div className="bd-wlbe">
+                <span className="bd-w">{agg.wins}W</span>
+                <span className="bd-l">{agg.losses}L</span>
+                <span className="bd-b">{agg.be}BE</span>
+              </div>
+              <div className="bd-pnl-row">
+                <div className="bd-pnl-bar-track">
+                  <div
+                    className={`bd-pnl-bar-fill ${pnlPositive ? "bd-pnl-pos" : "bd-pnl-neg"}`}
+                    style={{ width: `${pnlBarWidth}%` }}
+                  />
+                </div>
+                <span className={`bd-pnl-value ${pnlPositive ? "good" : "bad"}`}>
+                  {pnlPositive ? "+" : ""}{agg.pnl.toFixed(1)}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
