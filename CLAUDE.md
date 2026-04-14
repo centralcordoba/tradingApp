@@ -55,7 +55,7 @@ tradingApp/
 │   └── signals.db              # solo en dev local
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx            # Dashboard + banner news + modal journal + calendario
+│   │   ├── page.tsx            # Dashboard + sesiones + kill zones + banner news + modal journal + calendario
 │   │   ├── layout.tsx
 │   │   └── globals.css
 │   ├── .env.local              # NEXT_PUBLIC_API_URL → Render
@@ -121,6 +121,52 @@ Calcula `wait_zone`, `trigger_price`, `invalidation` e `instructions` operativas
 - **Desactivar**: `NEWS_FILTER_ENABLED=0`.
 
 **Calendario económico en frontend**: sección colapsable con date picker + hora Madrid (vía `zoneinfo` + `tzdata`). Carga perezosa al abrir la sección. Requiere `tzdata` en `requirements.txt` porque Windows Python no trae la base IANA.
+
+## Market Sessions + Kill Zones (frontend)
+
+### Panel de sesiones de mercado
+
+4 cards en grid con reloj en tiempo real (tick 1s):
+- **Asia · Tokyo**, **Londres**, **New York** — cada una muestra hora local, estado ABIERTO/CERRADO, barra de progreso, countdown al cierre/apertura.
+- **Madrid · Local** — hora del usuario + detección de overlap (LDN+NYC, ASIA+LDN).
+
+Las horas de apertura/cierre están en UTC en `SESSIONS[]`. `isSessionOpen()`, `sessionProgress()`, `sessionCountdown()` calculan estado en tiempo real.
+
+### Panel Kill Zones (hora Madrid)
+
+Sección colapsable (`KillZonesPanel`) con timeline vertical que muestra las ventanas operativas del scalper en hora Madrid. Definidas en `KILL_ZONES[]`:
+
+| Hora Madrid | Sesión | Status | Acción |
+|---|---|---|---|
+| 02:00–05:00 | Asia | avoid | No operar (solo análisis de rango) |
+| 05:00–09:00 | Pre-London | avoid | No operar (identificar liquidez) |
+| 09:00–10:30 | London Open | fire | Setup principal (breakout / liquidity sweep) |
+| 10:30–12:00 | London Continuation | ok | Solo continuación (no forzar trades) |
+| 12:00–14:00 | Pre-NY | warn | Pullbacks / manipulación (avanzado) |
+| 14:00–17:00 | Overlap LDN-NY | fire | MEJOR VENTANA (A+ setups) |
+| 17:00–19:00 | NY Mid | warn | Selectivo (reversals / rangos) |
+| 19:00–22:00 | NY Close | avoid | Evitar |
+
+- **Detección automática**: `getMadridHourMin()` usa `Intl.DateTimeFormat` con `Europe/Madrid` para obtener la hora local. `isInKillZone()` determina la sesión activa.
+- **UX**: la sesión activa se resalta con dot animado, tag "AHORA", barra de progreso y opacidad completa. Las inactivas se atenúan (opacity 0.55).
+- **Header inteligente**: el botón toggle muestra un badge con la kill zone activa sin necesidad de abrir el panel.
+- **Colores por tipo**: `fire` (naranja), `ok` (verde), `warn` (amarillo), `avoid` (gris).
+- **Leyenda**: footer con los 4 niveles + nota "Hora Madrid".
+
+### Zona chips con color coding (tabla de señales)
+
+La columna "Zona" de la tabla de señales usa chips coloreados en vez de texto plano:
+
+| Zona | Clase CSS | Color | Significado |
+|---|---|---|---|
+| `COMPRA YA` | `zona-deep-discount` | Verde intenso + glow | Descuento extremo — ideal para LONG |
+| `COMPRA` | `zona-discount` | Verde suave | Zona de descuento |
+| `VENDE` | `zona-premium` | Naranja | Zona premium |
+| `VENDE YA` | `zona-deep-premium` | Rojo + glow | Premium extremo — ideal para SHORT |
+
+**Tooltips contextuales**: `zonaTooltip(zona, side)` genera texto que depende de la zona **y** del lado de la señal. Ejemplo: `VENDE YA` + LONG → "Premium extremo — NO comprar aquí (resistencia fuerte)".
+
+**Decisión de diseño**: se evaluó agregar un panel independiente de zonas de compra/venta pero se descartó por redundancia (el motor ya usa `zona` en vetos, score y entry planner) y principio pro-scalper de minimizar indicadores visuales. El color coding da feedback instantáneo sin ruido adicional.
 
 ## Taken vs Rated + Journal post-mortem
 
@@ -266,13 +312,17 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 - **News warnings**: ✓ banner visual (no veto), ventana 30min antes / 5min después.
 - **Calendario económico**: ✓ sección colapsable con date picker y hora Madrid.
 - **Borrado de señales**: ✓ DELETE `/signals/{id}` para limpiar data sucia.
+- **Panel sesiones de mercado**: ✓ 4 cards con reloj real-time (Tokyo, Londres, NY, Madrid) + overlap detection.
+- **Panel Kill Zones**: ✓ timeline vertical con 8 franjas horarias (hora Madrid), detección de sesión activa, barra de progreso, header con badge de sesión actual.
+- **Zona chips coloreados**: ✓ chips con color coding (deep-discount → deep-premium) + tooltips contextuales según zona+lado en la tabla de señales.
+- **Decisión de diseño UI**: se descartó un panel independiente de zonas compra/venta por redundancia con el motor y principio pro-scalper de "menos indicadores = mejor ejecución". Se optó por color coding inline.
 
 ## Próximos pasos posibles (mencionados, no hechos)
 
 - Notificaciones a Telegram cuando llega ENTER.
 - Calculadora de tamaño de posición integrada (capital + % riesgo → lotes).
 - R:R floor como veto duro (rechazar si `(tp-entry)/(entry-sl) < 1.5`).
-- Kill zone como veto duro (fuera de London/NY → WAIT automático).
+- Kill zone como veto duro en el backend (fuera de London/NY → WAIT automático). Nota: el panel visual ya existe, falta integrar como veto en `decision_engine.py`.
 - Daily loss limit + cooldown post-trade (circuit breaker anti-revenge-trading).
 - Equity curve y heatmap hora-del-día vs PnL en frontend.
 - Backtest del motor sobre el historial acumulado en Supabase.

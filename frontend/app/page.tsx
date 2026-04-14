@@ -186,6 +186,126 @@ function getOverlapLabel(now: Date): string | null {
   return null;
 }
 
+/* ── Kill Zones Panel ── */
+type KillZone = {
+  label: string;
+  startH: number; startM: number;
+  endH: number;   endM: number;
+  icon: string;
+  status: "fire" | "ok" | "warn" | "avoid";
+  note: string;
+};
+
+const KILL_ZONES: KillZone[] = [
+  { label: "Asia",               startH: 2,  startM: 0,  endH: 5,  endM: 0,  icon: "🔴", status: "avoid", note: "No operar (solo análisis de rango)" },
+  { label: "Pre-London",         startH: 5,  startM: 0,  endH: 9,  endM: 0,  icon: "🔴", status: "avoid", note: "No operar (identificar liquidez)" },
+  { label: "London Open",        startH: 9,  startM: 0,  endH: 10, endM: 30, icon: "🔥", status: "fire",  note: "Setup principal (breakout / liquidity sweep)" },
+  { label: "London Continuation",startH: 10, startM: 30, endH: 12, endM: 0,  icon: "✅", status: "ok",    note: "Solo continuación (no forzar trades)" },
+  { label: "Pre-NY",             startH: 12, startM: 0,  endH: 14, endM: 0,  icon: "⚠️", status: "warn",  note: "Pullbacks / manipulación (avanzado)" },
+  { label: "Overlap LDN-NY",     startH: 14, startM: 0,  endH: 17, endM: 0,  icon: "🏆", status: "fire",  note: "MEJOR VENTANA (A+ setups)" },
+  { label: "NY Mid",             startH: 17, startM: 0,  endH: 19, endM: 0,  icon: "⚠️", status: "warn",  note: "Selectivo (reversals / rangos)" },
+  { label: "NY Close",           startH: 19, startM: 0,  endH: 22, endM: 0,  icon: "🔴", status: "avoid", note: "Evitar" },
+];
+
+function getMadridHourMin(now: Date): { h: number; m: number } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Madrid",
+    hour: "2-digit", minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const h = parseInt(parts.find(p => p.type === "hour")!.value, 10);
+  const m = parseInt(parts.find(p => p.type === "minute")!.value, 10);
+  return { h, m };
+}
+
+function isInKillZone(now: Date, kz: KillZone): boolean {
+  const { h, m } = getMadridHourMin(now);
+  const cur = h * 60 + m;
+  const start = kz.startH * 60 + kz.startM;
+  const end = kz.endH * 60 + kz.endM;
+  return cur >= start && cur < end;
+}
+
+function kzProgress(now: Date, kz: KillZone): number {
+  const { h, m } = getMadridHourMin(now);
+  const cur = h * 60 + m;
+  const start = kz.startH * 60 + kz.startM;
+  const end = kz.endH * 60 + kz.endM;
+  if (cur < start || cur >= end) return 0;
+  return ((cur - start) / (end - start)) * 100;
+}
+
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+
+function KillZonesPanel() {
+  const now = useClockTick(1000);
+  const [open, setOpen] = useState(true);
+  const activeIdx = KILL_ZONES.findIndex(kz => isInKillZone(now, kz));
+
+  return (
+    <div className="kz-section">
+      <button className="kz-toggle" onClick={() => setOpen(!open)}>
+        <span className="kz-toggle-left">
+          <span className="kz-toggle-icon">🎯</span>
+          <span>Kill Zones</span>
+          {activeIdx >= 0 && (
+            <span className={`kz-active-badge kz-st-${KILL_ZONES[activeIdx].status}`}>
+              {KILL_ZONES[activeIdx].icon} {KILL_ZONES[activeIdx].label}
+            </span>
+          )}
+          {activeIdx < 0 && (
+            <span className="kz-active-badge kz-st-avoid">Fuera de horario</span>
+          )}
+        </span>
+        <span className="kz-chevron">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="kz-body">
+          <div className="kz-timeline">
+            {KILL_ZONES.map((kz, i) => {
+              const active = i === activeIdx;
+              const progress = kzProgress(now, kz);
+              return (
+                <div key={i} className={`kz-row ${active ? "kz-active" : ""} kz-st-${kz.status}`}>
+                  <div className="kz-time-col">
+                    <span className="kz-time">{pad2(kz.startH)}:{pad2(kz.startM)}</span>
+                    <span className="kz-time-sep">–</span>
+                    <span className="kz-time">{pad2(kz.endH)}:{pad2(kz.endM)}</span>
+                  </div>
+                  <div className="kz-indicator">
+                    <div className={`kz-dot ${active ? "kz-dot-active" : ""}`} />
+                    {i < KILL_ZONES.length - 1 && <div className="kz-line" />}
+                  </div>
+                  <div className="kz-content">
+                    <div className="kz-header-row">
+                      <span className="kz-icon">{kz.icon}</span>
+                      <span className="kz-label">{kz.label}</span>
+                      {active && <span className="kz-now-tag">AHORA</span>}
+                    </div>
+                    <div className="kz-note">{kz.note}</div>
+                    {active && (
+                      <div className="kz-progress-track">
+                        <div className="kz-progress-fill" style={{ width: `${progress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="kz-footer">
+            <span className="kz-legend"><span className="kz-leg-dot kz-leg-fire" /> A+ Setup</span>
+            <span className="kz-legend"><span className="kz-leg-dot kz-leg-ok" /> Operar con cautela</span>
+            <span className="kz-legend"><span className="kz-leg-dot kz-leg-warn" /> Avanzado / selectivo</span>
+            <span className="kz-legend"><span className="kz-leg-dot kz-leg-avoid" /> No operar</span>
+            <span className="kz-tz-note">Hora Madrid</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SessionsPanel() {
   const now = useClockTick(1000);
   const madridTime = formatTime(now, "Europe/Madrid");
@@ -242,6 +362,40 @@ function SessionsPanel() {
       </div>
     </div>
   );
+}
+
+function zonaClass(zona: string): string {
+  switch (zona) {
+    case "COMPRA YA": return "deep-discount";
+    case "COMPRA":    return "discount";
+    case "VENDE":     return "premium";
+    case "VENDE YA":  return "deep-premium";
+    default:          return "neutral";
+  }
+}
+
+function zonaTooltip(zona: string, side: string): string {
+  const isLong = side === "LONG" || side === "BUY";
+  switch (zona) {
+    case "COMPRA YA":
+      return isLong
+        ? "Descuento extremo — zona ideal para LONG"
+        : "Descuento extremo — peligroso para SHORT (soporte fuerte)";
+    case "COMPRA":
+      return isLong
+        ? "Zona de descuento — favorable para LONG"
+        : "Zona de descuento — SHORT contra el valor";
+    case "VENDE":
+      return isLong
+        ? "Zona premium — LONG caro, riesgo de rechazo"
+        : "Zona premium — favorable para SHORT";
+    case "VENDE YA":
+      return isLong
+        ? "Premium extremo — NO comprar aquí (resistencia fuerte)"
+        : "Premium extremo — zona ideal para SHORT";
+    default:
+      return "Zona no definida";
+  }
 }
 
 export default function Home() {
@@ -335,6 +489,7 @@ export default function Home() {
       </div>
 
       <SessionsPanel />
+      <KillZonesPanel />
 
       {newsWarnings.length > 0 && (
         <div className="news-banner">
@@ -466,7 +621,11 @@ export default function Home() {
                 <td>{it.signal.conf}/19</td>
                 <td>{it.signal.quality}</td>
                 <td>{it.signal.mtf}</td>
-                <td>{it.signal.zona}</td>
+                <td>
+                  <span className={`zona-chip zona-${zonaClass(it.signal.zona)}`} title={zonaTooltip(it.signal.zona, it.signal.signal)}>
+                    {it.signal.zona}
+                  </span>
+                </td>
                 <td><span className={`badge ${it.response.decision}`}>{it.response.decision}</span></td>
                 <td className="reason">
                   {it.response.reason}
