@@ -160,15 +160,29 @@ def save_signal(signal_dict: dict, response_dict: dict) -> int:
             return cur.lastrowid
 
 
-def list_signals(limit: int = 100, symbol: Optional[str] = None) -> List[dict]:
+def count_signals(symbol: Optional[str] = None) -> int:
     ph = _PH
     with _db() as cur:
         if symbol:
-            sql = f"SELECT * FROM signals WHERE symbol = {ph} ORDER BY id DESC LIMIT {ph}"
-            _exec(cur, sql, (symbol, limit))
+            _exec(cur, f"SELECT COUNT(*) AS cnt FROM signals WHERE symbol = {ph}", (symbol,))
         else:
-            sql = f"SELECT * FROM signals ORDER BY id DESC LIMIT {ph}"
-            _exec(cur, sql, (limit,))
+            _exec(cur, "SELECT COUNT(*) AS cnt FROM signals", ())
+        row = _fetchall(cur)
+    if not row:
+        return 0
+    r = row[0]
+    return r["cnt"] if isinstance(r, dict) else r[0]
+
+
+def list_signals(limit: int = 100, offset: int = 0, symbol: Optional[str] = None) -> List[dict]:
+    ph = _PH
+    with _db() as cur:
+        if symbol:
+            sql = f"SELECT * FROM signals WHERE symbol = {ph} ORDER BY id DESC LIMIT {ph} OFFSET {ph}"
+            _exec(cur, sql, (symbol, limit, offset))
+        else:
+            sql = f"SELECT * FROM signals ORDER BY id DESC LIMIT {ph} OFFSET {ph}"
+            _exec(cur, sql, (limit, offset))
         rows = _fetchall(cur)
     return [_row_to_dict(r) for r in rows]
 

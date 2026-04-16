@@ -623,3 +623,79 @@ tr:hover { background: #11151d; }
 .zona-neutral {
   background: #1c2230; color: #8a92a3;
 }
+
+/* ── Pagination ── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 12px 0;
+}
+.page-btn {
+  background: #11151d;
+  color: #8a92a3;
+  border: 1px solid #1c2230;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.page-btn:hover:not(:disabled) {
+  background: #1c2230;
+  color: #e6e8eb;
+  border-color: #2a3142;
+}
+.page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.page-numbers {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 4px;
+}
+.page-num {
+  background: #11151d;
+  color: #8a92a3;
+  border: 1px solid #1c2230;
+  min-width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.page-num:hover {
+  background: #1c2230;
+  color: #e6e8eb;
+}
+.page-num.active {
+  background: #1e3a5f;
+  color: #60a5fa;
+  border-color: #2563eb;
+}
+.page-dots {
+  color: #4a5262;
+  font-size: 12px;
+  padding: 0 4px;
+  user-select: none;
+}
+.page-info {
+  color: #6b7280;
+  font-size: 11px;
+  margin-left: 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}

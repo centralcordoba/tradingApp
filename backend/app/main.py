@@ -84,8 +84,10 @@ async def tv_webhook(request: Request, ai: int | None = None):
 
 
 @app.get("/signals")
-def list_signals(limit: int = 100, symbol: str | None = None):
-    return storage.list_signals(limit=limit, symbol=symbol)
+def list_signals(limit: int = 10, offset: int = 0, symbol: str | None = None):
+    items = storage.list_signals(limit=limit, offset=offset, symbol=symbol)
+    total = storage.count_signals(symbol=symbol)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/symbols")

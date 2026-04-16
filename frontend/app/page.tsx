@@ -399,7 +399,10 @@ function zonaTooltip(zona: string, side: string): string {
 }
 
 export default function Home() {
+  const PAGE_SIZE = 10;
   const [items, setItems] = useState<Signal[]>([]);
+  const [totalSignals, setTotalSignals] = useState(0);
+  const [page, setPage] = useState(1);
   const [stats, setStats] = useState<Stats | null>(null);
   const [symbols, setSymbols] = useState<string[]>([]);
   const [filter, setFilter] = useState<string>("ALL");
@@ -411,28 +414,35 @@ export default function Home() {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
 
+  const totalPages = Math.max(1, Math.ceil(totalSignals / PAGE_SIZE));
+
   const load = useCallback(async () => {
     try {
-      const url = filter === "ALL" ? `${API}/signals?limit=100` : `${API}/signals?limit=100&symbol=${filter}`;
+      const offset = (page - 1) * PAGE_SIZE;
+      const symParam = filter === "ALL" ? "" : `&symbol=${filter}`;
+      const signalsUrl = `${API}/signals?limit=${PAGE_SIZE}&offset=${offset}${symParam}`;
       const [sR, stR, syR, nR] = await Promise.all([
-        fetch(url, { cache: "no-store" }),
+        fetch(signalsUrl, { cache: "no-store" }),
         fetch(`${API}/stats`, { cache: "no-store" }),
         fetch(`${API}/symbols`, { cache: "no-store" }),
         fetch(`${API}/news/warnings`, { cache: "no-store" }),
       ]);
-      setItems(await sR.json());
+      const signalsData = await sR.json();
+      setItems(signalsData.items || []);
+      setTotalSignals(signalsData.total || 0);
       setStats(await stR.json());
       setSymbols(await syR.json());
       const nj = await nR.json();
       setNewsWarnings(nj.warnings || []);
     } catch {
       setItems([]);
+      setTotalSignals(0);
       setStats(null);
       setNewsWarnings([]);
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, page]);
 
   useEffect(() => {
     load();
@@ -575,9 +585,9 @@ export default function Home() {
       </div>
 
       <div className="tabs">
-        <button className={filter === "ALL" ? "tab active" : "tab"} onClick={() => setFilter("ALL")}>TODOS</button>
+        <button className={filter === "ALL" ? "tab active" : "tab"} onClick={() => { setFilter("ALL"); setPage(1); }}>TODOS</button>
         {symbols.map((s) => (
-          <button key={s} className={filter === s ? "tab active" : "tab"} onClick={() => setFilter(s)}>{s}</button>
+          <button key={s} className={filter === s ? "tab active" : "tab"} onClick={() => { setFilter(s); setPage(1); }}>{s}</button>
         ))}
       </div>
 
@@ -662,6 +672,69 @@ export default function Home() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {totalSignals > 0 && (
+        <div className="pagination">
+          <button
+            className="page-btn"
+            disabled={page <= 1}
+            onClick={() => setPage(1)}
+            title="Primera"
+          >
+            &laquo;
+          </button>
+          <button
+            className="page-btn"
+            disabled={page <= 1}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+          >
+            &lsaquo;
+          </button>
+
+          <div className="page-numbers">
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+              .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("...");
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, i) =>
+                typeof p === "string" ? (
+                  <span key={`dots-${i}`} className="page-dots">{p}</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={`page-num ${p === page ? "active" : ""}`}
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+          </div>
+
+          <button
+            className="page-btn"
+            disabled={page >= totalPages}
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+          >
+            &rsaquo;
+          </button>
+          <button
+            className="page-btn"
+            disabled={page >= totalPages}
+            onClick={() => setPage(totalPages)}
+            title="Última"
+          >
+            &raquo;
+          </button>
+
+          <span className="page-info">
+            {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, totalSignals)} de {totalSignals}
+          </span>
+        </div>
       )}
 
       {journal && (
