@@ -1104,3 +1104,91 @@ tr:hover { background: #11151d; }
   color: #e6e8eb;
   border-color: #2a3142;
 }
+
+/* ── Daily Brief panel ── */
+.brief-panel {
+  background: linear-gradient(135deg, #0d1320 0%, #11151d 100%);
+  border: 1px solid #1c2230;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.brief-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 12px; border-bottom: 1px solid #1c2230; margin-bottom: 14px;
+}
+.brief-head-ico { font-size: 16px; }
+.brief-head-title {
+  font-weight: 700; font-size: 13px; color: #e6e8eb; letter-spacing: .3px;
+}
+.brief-head-sesgo {
+  color: #b8becc; font-size: 12px;
+  background: #0b0e13; border: 1px solid #1c2230; padding: 4px 10px; border-radius: 6px;
+  margin-left: auto; max-width: 100%;
+}
+
+.brief-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 900px) { .brief-grid { grid-template-columns: 1fr; } }
+
+.brief-card {
+  background: #0b0e13;
+  border: 1px solid #1c2230;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.brief-card-label {
+  font-size: 10px; color: #8a92a3; text-transform: uppercase; letter-spacing: .5px;
+  font-weight: 700;
+  display: flex; align-items: center; gap: 6px;
+}
+.brief-card-value {
+  font-size: 12px; color: #e6e8eb; line-height: 1.45;
+}
+.brief-count {
+  background: #1c2230; color: #8a92a3; font-size: 9px;
+  padding: 1px 6px; border-radius: 999px; margin-left: auto;
+}
+
+.brief-best { border-left: 2px solid #facc15; }
+.brief-best-value { color: #facc15; font-weight: 700; font-size: 13px; }
+.brief-gold { border-left: 2px solid #f59e0b; }
+.brief-correlation { border-left: 2px solid #60a5fa; }
+.brief-operables { border-left: 2px solid #4ade80; grid-column: span 1; }
+.brief-excluidos { border-left: 2px solid #6b7280; grid-column: span 2; }
+@media (max-width: 900px) {
+  .brief-operables, .brief-excluidos { grid-column: auto; }
+}
+
+.brief-list {
+  list-style: none; padding: 4px 0 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 180px; overflow-y: auto;
+}
+.brief-list li {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #11151d;
+  color: #b8becc;
+}
+.brief-list-ok li { border-left: 2px solid #4ade80; color: #86efac; }
+.brief-list-bad li { border-left: 2px solid #6b7280; color: #8a92a3; }
+.brief-list-empty {
+  font-size: 11px; color: #6b7280; font-style: italic; padding: 4px 0;
+}
+
+/* Bloque badge en ScannerCard */
+.bloque-badge {
+  font-size: 9px; font-weight: 800; letter-spacing: .5px;
+  padding: 2px 6px; border-radius: 3px;
+  cursor: help;
+}
+.bloque-b1 { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+.bloque-b2 { background: #1c2230; color: #8a92a3; border: 1px solid #2a3142; }
+.bloque-b3 { background: #3b2e0d; color: #facc15; border: 1px solid #854d0e; }

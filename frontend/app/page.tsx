@@ -432,7 +432,8 @@ type ScannerFactor = {
 
 type ScannerPair = {
   pair: string;
-  yahoo_symbol: string;
+  td_symbol?: string;
+  yahoo_symbol?: string;
   price: number;
   prev_close: number;
   change_pct: number;
@@ -443,8 +444,19 @@ type ScannerPair = {
   side: "LONG" | "SHORT" | "NEUTRAL";
   confluence: number;
   max: number;
+  bloque?: "1" | "2" | "3";
+  bloque_reason?: string;
   factors: ScannerFactor[];
   spark: number[];
+};
+
+type DailyBrief = {
+  sesgo_dia: string;
+  pares_operables: string[];
+  pares_excluidos: string[];
+  mejor_setup: string;
+  correlacion_dominante: string;
+  xauusd_resumen: string;
 };
 
 function Sparkline({ data, side, width = 120, height = 36 }: {
@@ -487,10 +499,11 @@ function Sparkline({ data, side, width = 120, height = 36 }: {
 
 function ZoneAnalysisView() {
   const [pairs, setPairs] = useState<ScannerPair[]>([]);
+  const [brief, setBrief] = useState<DailyBrief | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [sideFilter, setSideFilter] = useState<"ALL" | "LONG" | "SHORT">("ALL");
+  const [sideFilter, setSideFilter] = useState<"ALL" | "LONG" | "SHORT" | "B1" | "B3">("ALL");
   const [showAll, setShowAll] = useState(false);
 
   const VISIBLE_N = 6;
@@ -501,6 +514,7 @@ function ZoneAnalysisView() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setPairs(j.items || []);
+      setBrief(j.brief || null);
       setError(j.last_error && (j.items || []).length === 0 ? j.last_error : null);
       setLastUpdate(new Date());
     } catch (e) {
@@ -516,7 +530,13 @@ function ZoneAnalysisView() {
     return () => clearInterval(id);
   }, [load]);
 
-  const filtered = pairs.filter(p => sideFilter === "ALL" || p.side === sideFilter);
+  const filtered = pairs.filter(p => {
+    if (sideFilter === "ALL") return true;
+    if (sideFilter === "LONG" || sideFilter === "SHORT") return p.side === sideFilter;
+    if (sideFilter === "B1") return p.bloque === "1";
+    if (sideFilter === "B3") return p.bloque === "3";
+    return true;
+  });
   const visible = showAll ? filtered : filtered.slice(0, VISIBLE_N);
   const hiddenCount = filtered.length - visible.length;
 
@@ -550,9 +570,13 @@ function ZoneAnalysisView() {
         </div>
       </div>
 
+      {brief && <DailyBriefPanel brief={brief} />}
+
       <div className="zone-controls">
         <div className="zone-tabs">
           <button className={sideFilter === "ALL" ? "tab active" : "tab"} onClick={() => setSideFilter("ALL")}>TODOS</button>
+          <button className={sideFilter === "B1" ? "tab active" : "tab"} onClick={() => setSideFilter("B1")}>🟢 B1</button>
+          <button className={sideFilter === "B3" ? "tab active" : "tab"} onClick={() => setSideFilter("B3")}>🟡 B3</button>
           <button className={sideFilter === "LONG" ? "tab active" : "tab"} onClick={() => setSideFilter("LONG")}>LONG</button>
           <button className={sideFilter === "SHORT" ? "tab active" : "tab"} onClick={() => setSideFilter("SHORT")}>SHORT</button>
         </div>
@@ -590,6 +614,61 @@ function ZoneAnalysisView() {
   );
 }
 
+function DailyBriefPanel({ brief }: { brief: DailyBrief }) {
+  return (
+    <section className="brief-panel">
+      <div className="brief-head">
+        <span className="brief-head-ico">📊</span>
+        <span className="brief-head-title">Brief del día</span>
+        <span className="brief-head-sesgo">{brief.sesgo_dia}</span>
+      </div>
+
+      <div className="brief-grid">
+        <div className="brief-card brief-correlation">
+          <div className="brief-card-label"><span>🌐</span> Correlación dominante</div>
+          <div className="brief-card-value">{brief.correlacion_dominante}</div>
+        </div>
+
+        <div className="brief-card brief-best">
+          <div className="brief-card-label"><span>🏆</span> Mejor setup</div>
+          <div className="brief-card-value brief-best-value">{brief.mejor_setup}</div>
+        </div>
+
+        <div className="brief-card brief-gold">
+          <div className="brief-card-label"><span>🥇</span> XAUUSD</div>
+          <div className="brief-card-value">{brief.xauusd_resumen}</div>
+        </div>
+
+        <div className="brief-card brief-operables">
+          <div className="brief-card-label">
+            <span>✅</span> Pares operables <span className="brief-count">{brief.pares_operables.length}</span>
+          </div>
+          {brief.pares_operables.length === 0 ? (
+            <div className="brief-list-empty">Ningún par en B1 o B3 hoy</div>
+          ) : (
+            <ul className="brief-list brief-list-ok">
+              {brief.pares_operables.map((s, i) => <li key={i}>{s}</li>)}
+            </ul>
+          )}
+        </div>
+
+        <div className="brief-card brief-excluidos">
+          <div className="brief-card-label">
+            <span>❌</span> Pares excluidos <span className="brief-count">{brief.pares_excluidos.length}</span>
+          </div>
+          {brief.pares_excluidos.length === 0 ? (
+            <div className="brief-list-empty">Sin exclusiones</div>
+          ) : (
+            <ul className="brief-list brief-list-bad">
+              {brief.pares_excluidos.map((s, i) => <li key={i}>{s}</li>)}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
   const sideClass = data.side === "LONG" ? "long" : data.side === "SHORT" ? "short" : "neutral";
   const pct = (data.confluence / data.max) * 100;
@@ -604,6 +683,11 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
         <div className="scanner-head-left">
           <span className="scanner-pair">{data.pair}</span>
           <span className={`scanner-side scanner-side-${sideClass}`}>{data.side}</span>
+          {data.bloque && (
+            <span className={`bloque-badge bloque-b${data.bloque}`} title={data.bloque_reason || ""}>
+              B{data.bloque}
+            </span>
+          )}
         </div>
         <Sparkline data={data.spark} side={data.side} />
       </div>

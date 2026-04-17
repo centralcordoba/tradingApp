@@ -122,6 +122,7 @@ def scan_pairs(pairs: str = ""):
     return {
         "items": results,
         "count": len(results),
+        "brief": scanner.build_daily_brief(results) if results else None,
         "last_error": scanner.last_error() if len(results) == 0 else "",
     }
 

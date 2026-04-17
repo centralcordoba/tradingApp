@@ -309,6 +309,21 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
     # Sparkline: últimos 60 closes normalizados
     spark = closes[-60:]
 
+    ema_aligned = (
+        bool(ema9 and ema21 and ema50) and
+        (
+            (ema9[-1] > ema21[-1] > ema50[-1]) or
+            (ema9[-1] < ema21[-1] < ema50[-1])
+        )
+    )
+    bloque, bloque_reason = _classify_bloque(
+        bias=bias,
+        confluence=confluence,
+        range_pos=range_pos,
+        rsi=rsi,
+        ema_aligned=ema_aligned,
+    )
+
     return {
         "pair": pair,
         "td_symbol": _td_symbol(pair),
@@ -322,9 +337,56 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
         "side": side,
         "confluence": confluence,
         "max": max_confluence,
+        "bloque": bloque,              # "1" | "2" | "3"
+        "bloque_reason": bloque_reason,
         "factors": factors,
         "spark": [round(c, 5) for c in spark],
     }
+
+
+def _classify_bloque(
+    bias: int,
+    confluence: int,
+    range_pos: float,
+    rsi: Optional[float],
+    ema_aligned: bool,
+) -> tuple[str, str]:
+    """Clasifica un par en uno de tres bloques operativos.
+
+    Bloque 1 — Trend-follow: |bias|≥4, EMAs alineadas monotónicamente, RSI no agotado.
+    Bloque 3 — Reversión en extremo: rango extremo (<15% o >85%) + RSI en zona de exhaustion (<32 o >68).
+    Bloque 2 — Sin edge: resto (lateral, EMAs mixtas, bias bajo).
+    """
+    at_extreme = range_pos <= 0.15 or range_pos >= 0.85
+    rsi_exhausted = rsi is not None and (rsi <= 32 or rsi >= 68)
+
+    # Bloque 3 — reversión: precio en extremo + RSI agotado (señal de reversión)
+    # El sentido de la reversión viene dado por qué extremo: low+oversold = LONG, high+overbought = SHORT
+    if at_extreme and rsi_exhausted:
+        if range_pos <= 0.15 and rsi is not None and rsi <= 32:
+            return "3", "Reversión potencial LONG — rango bajo + RSI sobrevendido"
+        if range_pos >= 0.85 and rsi is not None and rsi >= 68:
+            return "3", "Reversión potencial SHORT — rango alto + RSI sobrecomprado"
+
+    # Bloque 1 — tendencia limpia: bias alto, EMAs alineadas, RSI sano
+    if confluence >= 4 and ema_aligned:
+        # excluir si precio está pegado al extremo contrario al bias (riesgo de agotamiento)
+        exhausted_against = (
+            (bias > 0 and range_pos >= 0.9 and rsi is not None and rsi >= 72) or
+            (bias < 0 and range_pos <= 0.1 and rsi is not None and rsi <= 28)
+        )
+        if not exhausted_against:
+            direction = "alcista" if bias > 0 else "bajista"
+            return "1", f"Tendencia {direction} limpia — EMAs alineadas, confluencia {confluence}/7"
+
+    # Bloque 2 — excluido: razón más específica posible
+    if confluence < 3:
+        return "2", "Sin dirección clara — bias bajo"
+    if not ema_aligned:
+        return "2", "EMAs mixtas — estructura no definida"
+    if at_extreme and not rsi_exhausted:
+        return "2", "Precio en extremo sin confirmación de agotamiento"
+    return "2", "Sin edge — contexto ambiguo"
 
 
 def _analyze_pair(pair: str) -> Optional[dict]:
@@ -339,6 +401,118 @@ def _analyze_pair(pair: str) -> Optional[dict]:
         return _score_pair(pair, ohlc)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Daily brief — síntesis estilo analista
+# ---------------------------------------------------------------------------
+
+def _macro_theme(by_pair: dict[str, dict]) -> str:
+    """Heurística simple: correlación dominante del día."""
+    # USD strength score: + significa USD fuerte
+    usd_score = 0
+    for p, d in by_pair.items():
+        b = d.get("bias", 0)
+        if p in ("EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"):
+            usd_score -= b          # SHORT de XXXUSD = USD fuerte
+        elif p in ("USDCAD", "USDCHF", "USDJPY"):
+            usd_score += b          # LONG de USDXXX = USD fuerte
+        elif p == "XAUUSD":
+            usd_score -= b          # oro SHORT = USD fuerte
+
+    gold = by_pair.get("XAUUSD", {}).get("bias", 0)
+    usdjpy = by_pair.get("USDJPY", {}).get("bias", 0)
+    aud = by_pair.get("AUDUSD", {}).get("bias", 0)
+    nzd = by_pair.get("NZDUSD", {}).get("bias", 0)
+
+    # Safe-haven: oro arriba + yen fuerte (USDJPY bajista)
+    if gold >= 3 and usdjpy <= -3:
+        return "Risk-off / refugio — oro y yen bid, evita riesgo cíclico"
+    # Risk-on: AUD/NZD fuertes + oro débil
+    if (aud + nzd) >= 4 and gold <= -2:
+        return "Risk-on — divisas cíclicas al alza, debilidad de refugios"
+    if usd_score >= 10:
+        return "Dólar fuerte transversalmente — vendedor de todo lo demás"
+    if usd_score <= -10:
+        return "Dólar débil transversalmente — comprador de todo lo demás"
+    if usd_score >= 5:
+        return "Sesgo favorable al dólar, no extremo"
+    if usd_score <= -5:
+        return "Sesgo contrario al dólar, no extremo"
+    return "Sin tema macro dominante — mercado mixto / lateral"
+
+
+def _sesgo_dia(items: list[dict]) -> str:
+    """Resumen one-liner del sesgo general."""
+    longs = sum(1 for x in items if x["side"] == "LONG")
+    shorts = sum(1 for x in items if x["side"] == "SHORT")
+    neutrals = sum(1 for x in items if x["side"] == "NEUTRAL")
+    total = len(items) or 1
+
+    high_conf = [x for x in items if x["confluence"] >= 5]
+    n_hc = len(high_conf)
+
+    if longs > shorts and longs >= total * 0.5:
+        tone = "sesgo alcista general"
+    elif shorts > longs and shorts >= total * 0.5:
+        tone = "sesgo bajista general"
+    elif neutrals >= total * 0.6:
+        tone = "mercado lateral — mayoría sin dirección"
+    else:
+        tone = "mercado mixto sin sesgo único"
+
+    hc_note = f", {n_hc} par{'es' if n_hc != 1 else ''} con confluencia ≥5/7" if n_hc else ""
+    return f"{tone} ({longs} LONG · {shorts} SHORT · {neutrals} neutral){hc_note}"
+
+
+def _mejor_setup(operables: list[dict]) -> str:
+    """Top pick entre Bloque 1 y Bloque 3, máx 15 palabras."""
+    if not operables:
+        return "Sin setup operable hoy — todo en Bloque 2"
+    top = max(operables, key=lambda x: (x["confluence"], abs(x.get("change_pct", 0))))
+    pair = top["pair"]
+    side = top["side"] if top["side"] != "NEUTRAL" else ("LONG" if top["bias"] > 0 else "SHORT")
+    bloq = top["bloque"]
+    razon = top["bloque_reason"]
+    # Compact: "XAUUSD SHORT [B1] bias -6, macro bajista, conf 6/7"
+    return f"{pair} {side} [B{bloq}] — {razon.split(' — ')[-1] if ' — ' in razon else razon}"[:140]
+
+
+def _xauusd_resumen(by_pair: dict[str, dict]) -> str:
+    """Línea dedicada al oro."""
+    g = by_pair.get("XAUUSD")
+    if not g:
+        return "XAUUSD no disponible"
+    return (
+        f"Bloque {g['bloque']} · {g['side']} · confluencia {g['confluence']}/{g['max']} · "
+        f"RSI {g['rsi']:.0f} · rango {int(g['range_pos']*100)}% · {g['bloque_reason']}"
+    )
+
+
+def build_daily_brief(items: list[dict]) -> dict:
+    """Aggrega los resultados en formato brief estilo analista."""
+    by_pair = {x["pair"]: x for x in items}
+    operables = [x for x in items if x["bloque"] in ("1", "3")]
+    excluidos = [x for x in items if x["bloque"] == "2"]
+
+    # Orden: operables por confluencia desc, excluidos por bias absoluto desc
+    operables.sort(key=lambda x: -x["confluence"])
+    excluidos.sort(key=lambda x: -abs(x["bias"]))
+
+    return {
+        "sesgo_dia": _sesgo_dia(items),
+        "pares_operables": [
+            f"{x['pair']} {x['side']} [B{x['bloque']}] conf {x['confluence']}/{x['max']}"
+            for x in operables
+        ],
+        "pares_excluidos": [
+            f"{x['pair']} — {x['bloque_reason']}"
+            for x in excluidos
+        ],
+        "mejor_setup": _mejor_setup(operables),
+        "correlacion_dominante": _macro_theme(by_pair),
+        "xauusd_resumen": _xauusd_resumen(by_pair),
+    }
 
 
 # ---------------------------------------------------------------------------
