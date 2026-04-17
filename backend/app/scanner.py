@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -66,12 +67,23 @@ def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> O
         "apikey": TWELVEDATA_API_KEY,
     }
     url = f"{TWELVEDATA_BASE}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (AI Trading Assistant Scanner)",
+    })
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:250]
+        except Exception:
+            pass
+        _last_error = f"{pair}: HTTP {e.code} — {body or e.reason}"
+        return None
     except Exception as e:
-        _last_error = f"{pair}: {e}"
+        _last_error = f"{pair}: {type(e).__name__}: {e}"
         return None
 
     if isinstance(data, dict) and data.get("status") == "error":

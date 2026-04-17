@@ -96,6 +96,20 @@ def list_symbols():
     return storage.distinct_symbols()
 
 
+@app.get("/scanner/debug")
+def scanner_debug():
+    """Diagnóstico: confirma que la TWELVEDATA_API_KEY llega al servidor.
+    No revela el valor — solo longitud y prefijo de 4 chars.
+    """
+    key = os.getenv("TWELVEDATA_API_KEY", "")
+    return {
+        "key_present": bool(key),
+        "key_length": len(key),
+        "key_prefix": (key[:4] + "…") if key else "",
+        "last_error": scanner.last_error(),
+    }
+
+
 @app.get("/scanner/pairs")
 def scan_pairs(pairs: str = ""):
     """Escanea pares en vivo (Twelve Data) y devuelve rankeados por confluencia.
