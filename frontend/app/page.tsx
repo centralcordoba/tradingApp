@@ -497,6 +497,30 @@ function Sparkline({ data, side, width = 120, height = 36 }: {
   );
 }
 
+const BLOCK_LEGEND: { k: "1" | "2" | "3"; ico: string; name: string; def: string; tip: string }[] = [
+  {
+    k: "1",
+    ico: "🟢",
+    name: "Bloque 1 — Tendencia limpia",
+    def: "EMAs alineadas (9>21>50 o al revés) + confluencia ≥4. Sin extremos agotados.",
+    tip: "Operar a favor de la tendencia. Esperar pullback al EMA9 / EMA21.",
+  },
+  {
+    k: "3",
+    ico: "🟡",
+    name: "Bloque 3 — Reversión en extremo",
+    def: "Precio en extremo del rango (<15% o >85%) + RSI en exhaustion (<32 o >68).",
+    tip: "Operar contra-tendencia corta. Esperar sweep + vela de reversión.",
+  },
+  {
+    k: "2",
+    ico: "⚪",
+    name: "Bloque 2 — Excluido",
+    def: "Bias bajo, EMAs mixtas o precio en zona ambigua sin confirmación.",
+    tip: "No operar. Observar hasta que se rompa la estructura.",
+  },
+];
+
 function ZoneAnalysisView() {
   const [pairs, setPairs] = useState<ScannerPair[]>([]);
   const [brief, setBrief] = useState<DailyBrief | null>(null);
@@ -505,6 +529,7 @@ function ZoneAnalysisView() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [sideFilter, setSideFilter] = useState<"ALL" | "LONG" | "SHORT" | "B1" | "B3">("ALL");
   const [showAll, setShowAll] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
 
   const VISIBLE_N = 6;
 
@@ -575,13 +600,41 @@ function ZoneAnalysisView() {
       <div className="zone-controls">
         <div className="zone-tabs">
           <button className={sideFilter === "ALL" ? "tab active" : "tab"} onClick={() => setSideFilter("ALL")}>TODOS</button>
-          <button className={sideFilter === "B1" ? "tab active" : "tab"} onClick={() => setSideFilter("B1")}>🟢 B1</button>
-          <button className={sideFilter === "B3" ? "tab active" : "tab"} onClick={() => setSideFilter("B3")}>🟡 B3</button>
+          <button
+            className={sideFilter === "B1" ? "tab active" : "tab"}
+            onClick={() => setSideFilter("B1")}
+            title={`${BLOCK_LEGEND[0].name} — ${BLOCK_LEGEND[0].def}`}
+          >🟢 B1</button>
+          <button
+            className={sideFilter === "B3" ? "tab active" : "tab"}
+            onClick={() => setSideFilter("B3")}
+            title={`${BLOCK_LEGEND[1].name} — ${BLOCK_LEGEND[1].def}`}
+          >🟡 B3</button>
           <button className={sideFilter === "LONG" ? "tab active" : "tab"} onClick={() => setSideFilter("LONG")}>LONG</button>
           <button className={sideFilter === "SHORT" ? "tab active" : "tab"} onClick={() => setSideFilter("SHORT")}>SHORT</button>
+          <button
+            className={`tab block-info-btn ${showLegend ? "active" : ""}`}
+            onClick={() => setShowLegend(s => !s)}
+            title="¿Qué significan B1/B2/B3?"
+          >ⓘ Bloques</button>
         </div>
         <button className="refresh" onClick={load}>↻ Refrescar ahora</button>
       </div>
+
+      {showLegend && (
+        <div className="block-legend">
+          {BLOCK_LEGEND.map(b => (
+            <div key={b.k} className={`block-legend-row bloque-b${b.k}-border`}>
+              <span className={`bloque-badge bloque-b${b.k}`}>B{b.k}</span>
+              <div className="block-legend-txt">
+                <div className="block-legend-name">{b.ico} {b.name}</div>
+                <div className="block-legend-def">{b.def}</div>
+                <div className="block-legend-tip">💡 {b.tip}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading && pairs.length === 0 ? (
         <div className="zone-empty">Analizando mercados… (primera llamada puede tardar 5-10s)</div>

@@ -1192,3 +1192,40 @@ tr:hover { background: #11151d; }
 .bloque-b1 { background: #052e16; color: #4ade80; border: 1px solid #166534; }
 .bloque-b2 { background: #1c2230; color: #8a92a3; border: 1px solid #2a3142; }
 .bloque-b3 { background: #3b2e0d; color: #facc15; border: 1px solid #854d0e; }
+
+/* Bloques — info button + legend */
+.block-info-btn { margin-left: auto; }
+
+.block-legend {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  background: #0b0e13;
+  border: 1px solid #1c2230;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) { .block-legend { grid-template-columns: 1fr; } }
+
+.block-legend-row {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 8px 10px;
+  background: #11151d;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+}
+.bloque-b1-border { border-left-color: #16a34a; }
+.bloque-b2-border { border-left-color: #6b7280; }
+.bloque-b3-border { border-left-color: #ca8a04; }
+
+.block-legend-txt { flex: 1; min-width: 0; }
+.block-legend-name {
+  font-size: 12px; font-weight: 700; color: #e6e8eb; margin-bottom: 3px;
+}
+.block-legend-def {
+  font-size: 11px; color: #b8becc; line-height: 1.45; margin-bottom: 4px;
+}
+.block-legend-tip {
+  font-size: 10px; color: #facc15; line-height: 1.4; font-style: italic;
+}
