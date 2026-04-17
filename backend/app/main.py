@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client
+from . import storage, ai_client, news_client, scanner
 
 USE_AI_DEFAULT = os.getenv("USE_AI", "0") == "1"
 
@@ -94,6 +94,18 @@ def list_signals(limit: int = 10, offset: int = 0, symbol: str | None = None):
 def list_symbols():
     """Devuelve los símbolos únicos vistos hasta ahora (para el filtro del frontend)."""
     return storage.distinct_symbols()
+
+
+@app.get("/scanner/pairs")
+def scan_pairs(pairs: str = ""):
+    """Escanea pares en vivo (Yahoo Finance) y devuelve rankeados por confluencia.
+
+    `pairs` opcional: lista separada por comas (ej: "XAUUSD,EURUSD"). Si vacío,
+    usa la lista por defecto (metales + majors + cruces).
+    """
+    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
+    results = scanner.scan_pairs(selected)
+    return {"items": results, "count": len(results)}
 
 
 @app.post("/signals/{signal_id}/result")

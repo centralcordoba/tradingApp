@@ -10,12 +10,18 @@ type Signal = {
     signal: string;
     symbol: string;
     price: number;
+    sl?: number;
+    tp?: number;
     conf: number;
     quality: string;
     mtf: string;
     zona: string;
     pattern: string;
     rsi: number;
+    fvg?: boolean;
+    vol_high?: boolean;
+    overhead?: boolean;
+    congestion?: boolean;
   };
   response: {
     decision: "ENTER" | "WAIT" | "AVOID";
@@ -398,8 +404,252 @@ function zonaTooltip(zona: string, side: string): string {
   }
 }
 
+type View = "dashboard" | "zones";
+
+const PRESET_SYMBOLS = [
+  "XAUUSD", "XAGUSD",
+  "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
+  "AUDUSD", "NZDUSD", "USDCAD",
+  "EURJPY", "GBPJPY", "EURGBP",
+];
+
+function mergeSymbols(apiSymbols: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of [...apiSymbols, ...PRESET_SYMBOLS]) {
+    const k = s.toUpperCase();
+    if (!seen.has(k)) { seen.add(k); out.push(k); }
+  }
+  return out;
+}
+
+type ScannerFactor = {
+  key: string;
+  label: string;
+  desc: string;
+  value: -1 | 0 | 1 | number;
+};
+
+type ScannerPair = {
+  pair: string;
+  yahoo_symbol: string;
+  price: number;
+  prev_close: number;
+  change_pct: number;
+  rsi: number | null;
+  atr: number | null;
+  range_pos: number;
+  bias: number;
+  side: "LONG" | "SHORT" | "NEUTRAL";
+  confluence: number;
+  max: number;
+  factors: ScannerFactor[];
+  spark: number[];
+};
+
+function Sparkline({ data, side, width = 120, height = 36 }: {
+  data: number[];
+  side: "LONG" | "SHORT" | "NEUTRAL";
+  width?: number;
+  height?: number;
+}) {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const rng = max - min || 1;
+  const stepX = width / (data.length - 1);
+  const pts = data.map((v, i) => {
+    const x = i * stepX;
+    const y = height - ((v - min) / rng) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const color = side === "LONG" ? "#4ade80" : side === "SHORT" ? "#f87171" : "#60a5fa";
+  const fillId = `spark-${side}-${Math.random().toString(36).slice(2, 7)}`;
+  const lastY = height - ((data[data.length - 1] - min) / rng) * height;
+  const firstPt = `0,${height}`;
+  const lastPt = `${width},${height}`;
+  const areaPts = `${firstPt} ${pts} ${lastPt}`;
+
+  return (
+    <svg className="spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPts} fill={`url(#${fillId})`} />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={width} cy={lastY} r="2.5" fill={color} />
+    </svg>
+  );
+}
+
+function ZoneAnalysisView() {
+  const [pairs, setPairs] = useState<ScannerPair[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [sideFilter, setSideFilter] = useState<"ALL" | "LONG" | "SHORT">("ALL");
+  const [showAll, setShowAll] = useState(false);
+
+  const VISIBLE_N = 6;
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/scanner/pairs`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      setPairs(j.items || []);
+      setError(null);
+      setLastUpdate(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error de red");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const filtered = pairs.filter(p => sideFilter === "ALL" || p.side === sideFilter);
+  const visible = showAll ? filtered : filtered.slice(0, VISIBLE_N);
+  const hiddenCount = filtered.length - visible.length;
+
+  const longsN = pairs.filter(p => p.side === "LONG").length;
+  const shortsN = pairs.filter(p => p.side === "SHORT").length;
+  const neutralN = pairs.filter(p => p.side === "NEUTRAL").length;
+
+  return (
+    <div className="zone-view">
+      <div className="zone-intro">
+        <div className="zone-intro-head">
+          <div>
+            <div className="zone-intro-title">🎯 Scanner en vivo · confluencia técnica</div>
+            <div className="zone-intro-sub">
+              Análisis independiente multi-factor (EMA9/21/50/200, RSI, rango, impulso) sobre datos 15m.
+              Prioriza los pares con <b>mayor confluencia</b>.
+            </div>
+          </div>
+          <div className="zone-intro-meta">
+            <div className="zone-meta-row">
+              <span className="zone-meta-dot zone-dot-long" /> {longsN} LONG
+              <span className="zone-meta-dot zone-dot-short" style={{ marginLeft: 10 }} /> {shortsN} SHORT
+              <span className="zone-meta-dot zone-dot-neutral" style={{ marginLeft: 10 }} /> {neutralN} neutral
+            </div>
+            {lastUpdate && (
+              <div className="zone-meta-time">
+                Actualizado: {lastUpdate.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="zone-controls">
+        <div className="zone-tabs">
+          <button className={sideFilter === "ALL" ? "tab active" : "tab"} onClick={() => setSideFilter("ALL")}>TODOS</button>
+          <button className={sideFilter === "LONG" ? "tab active" : "tab"} onClick={() => setSideFilter("LONG")}>LONG</button>
+          <button className={sideFilter === "SHORT" ? "tab active" : "tab"} onClick={() => setSideFilter("SHORT")}>SHORT</button>
+        </div>
+        <button className="refresh" onClick={load}>↻ Refrescar ahora</button>
+      </div>
+
+      {loading && pairs.length === 0 ? (
+        <div className="zone-empty">Analizando mercados… (primera llamada puede tardar 5-10s)</div>
+      ) : error && pairs.length === 0 ? (
+        <div className="zone-empty" style={{ color: "#f87171" }}>
+          No se pudo cargar el scanner: {error}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="zone-empty">Sin pares para este filtro.</div>
+      ) : (
+        <>
+          <div className="scanner-grid">
+            {visible.map((p, i) => (
+              <ScannerCard key={p.pair} data={p} isTop={i === 0 && pairs.indexOf(p) === 0} />
+            ))}
+          </div>
+          {hiddenCount > 0 && (
+            <button className="zone-more" onClick={() => setShowAll(true)}>
+              Ver {hiddenCount} más (menor confluencia)
+            </button>
+          )}
+          {showAll && filtered.length > VISIBLE_N && (
+            <button className="zone-more" onClick={() => setShowAll(false)}>
+              Colapsar
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
+  const sideClass = data.side === "LONG" ? "long" : data.side === "SHORT" ? "short" : "neutral";
+  const pct = (data.confluence / data.max) * 100;
+  const strength = pct >= 70 ? "high" : pct >= 40 ? "mid" : "low";
+  const changeUp = data.change_pct >= 0;
+
+  return (
+    <article className={`scanner-card scanner-${sideClass} scanner-${strength} ${isTop ? "scanner-top" : ""}`}>
+      {isTop && <div className="scanner-top-tag">🏆 MAYOR CONFLUENCIA</div>}
+
+      <div className="scanner-head">
+        <div className="scanner-head-left">
+          <span className="scanner-pair">{data.pair}</span>
+          <span className={`scanner-side scanner-side-${sideClass}`}>{data.side}</span>
+        </div>
+        <Sparkline data={data.spark} side={data.side} />
+      </div>
+
+      <div className="scanner-price-row">
+        <span className="scanner-price">{data.price}</span>
+        <span className={`scanner-change ${changeUp ? "good" : "bad"}`}>
+          {changeUp ? "▲" : "▼"} {changeUp ? "+" : ""}{data.change_pct.toFixed(2)}%
+        </span>
+      </div>
+
+      <div className="scanner-score-row">
+        <div className="scanner-score-big">
+          <span className="scanner-score-num">{data.confluence}</span>
+          <span className="scanner-score-max">/ {data.max}</span>
+        </div>
+        <div className="scanner-score-track">
+          <div className={`scanner-score-fill scanner-fill-${strength}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      <div className="scanner-micro">
+        {data.rsi != null && <span>RSI <b>{data.rsi.toFixed(0)}</b></span>}
+        <span>Rango <b>{(data.range_pos * 100).toFixed(0)}%</b></span>
+        <span>Bias <b className={data.bias > 0 ? "good" : data.bias < 0 ? "bad" : ""}>{data.bias > 0 ? "+" : ""}{data.bias}</b></span>
+      </div>
+
+      <div className="scanner-factors">
+        {data.factors.map(f => {
+          const cls = f.value > 0 ? "fac-long" : f.value < 0 ? "fac-short" : "fac-neutral";
+          const ico = f.value > 0 ? "▲" : f.value < 0 ? "▼" : "·";
+          return (
+            <span key={f.key} className={`scanner-chip ${cls}`} title={f.desc}>
+              <span className="scanner-chip-ico">{ico}</span>
+              {f.label}
+            </span>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
 export default function Home() {
   const PAGE_SIZE = 10;
+  const [view, setView] = useState<View>("dashboard");
   const [items, setItems] = useState<Signal[]>([]);
   const [totalSignals, setTotalSignals] = useState(0);
   const [page, setPage] = useState(1);
@@ -431,7 +681,7 @@ export default function Home() {
       setItems(signalsData.items || []);
       setTotalSignals(signalsData.total || 0);
       setStats(await stR.json());
-      setSymbols(await syR.json());
+      setSymbols(mergeSymbols(await syR.json()));
       const nj = await nR.json();
       setNewsWarnings(nj.warnings || []);
     } catch {
@@ -498,6 +748,21 @@ export default function Home() {
         <button className="refresh" onClick={load}>Refrescar</button>
       </div>
 
+      <nav className="view-nav">
+        <button
+          className={`view-nav-btn ${view === "dashboard" ? "active" : ""}`}
+          onClick={() => setView("dashboard")}
+        >
+          <span className="view-nav-ico">📊</span> Dashboard
+        </button>
+        <button
+          className={`view-nav-btn ${view === "zones" ? "active" : ""}`}
+          onClick={() => setView("zones")}
+        >
+          <span className="view-nav-ico">🎯</span> Análisis de zonas
+        </button>
+      </nav>
+
       <SessionsPanel />
       <KillZonesPanel />
 
@@ -509,6 +774,10 @@ export default function Home() {
         </div>
       )}
 
+      {view === "zones" ? (
+        <ZoneAnalysisView />
+      ) : (
+      <>
       {stats && (
         <>
           <div className="stats">
@@ -735,6 +1004,8 @@ export default function Home() {
             {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, totalSignals)} de {totalSignals}
           </span>
         </div>
+      )}
+      </>
       )}
 
       {journal && (
