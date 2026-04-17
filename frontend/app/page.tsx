@@ -501,7 +501,7 @@ function ZoneAnalysisView() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setPairs(j.items || []);
-      setError(null);
+      setError(j.last_error && (j.items || []).length === 0 ? j.last_error : null);
       setLastUpdate(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error de red");
@@ -512,7 +512,7 @@ function ZoneAnalysisView() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 60000);
+    const id = setInterval(load, 300000);  // 5 min — coincide con el TTL del backend
     return () => clearInterval(id);
   }, [load]);
 

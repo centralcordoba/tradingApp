@@ -98,14 +98,18 @@ def list_symbols():
 
 @app.get("/scanner/pairs")
 def scan_pairs(pairs: str = ""):
-    """Escanea pares en vivo (Yahoo Finance) y devuelve rankeados por confluencia.
+    """Escanea pares en vivo (Twelve Data) y devuelve rankeados por confluencia.
 
     `pairs` opcional: lista separada por comas (ej: "XAUUSD,EURUSD"). Si vacío,
     usa la lista por defecto (metales + majors + cruces).
     """
     selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
     results = scanner.scan_pairs(selected)
-    return {"items": results, "count": len(results)}
+    return {
+        "items": results,
+        "count": len(results),
+        "last_error": scanner.last_error() if len(results) == 0 else "",
+    }
 
 
 @app.post("/signals/{signal_id}/result")

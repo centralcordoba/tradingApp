@@ -1,13 +1,15 @@
-"""Scanner independiente: analiza pares en vivo desde Yahoo Finance.
+"""Scanner independiente: analiza pares en vivo desde Twelve Data.
 
 No depende de las señales del Pine — hace su propia lectura técnica multi-factor
 y devuelve los pares rankeados por confluencia.
 
-Fuente: query1.finance.yahoo.com (público, sin API key, sólo urllib).
+Fuente: api.twelvedata.com (free tier 800 créditos/día, 8 req/min).
+Requiere env var TWELVEDATA_API_KEY.
 """
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.parse
 import urllib.request
@@ -25,67 +27,83 @@ DEFAULT_PAIRS = [
     "EURJPY", "GBPJPY", "EURGBP",
 ]
 
-# Yahoo usa sufijo "=X" para forex; metales son futuros
-_YAHOO_OVERRIDE = {
-    "XAUUSD": "GC=F",  # oro: contrato de futuros CME
-    "XAGUSD": "SI=F",  # plata: contrato de futuros CME
-}
+TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
+TWELVEDATA_BASE = "https://api.twelvedata.com/time_series"
 
-def _yahoo_symbol(pair: str) -> str:
-    p = pair.upper()
-    return _YAHOO_OVERRIDE.get(p, f"{p}=X")
+# Twelve Data usa slash: "EUR/USD", "XAU/USD"
+def _td_symbol(pair: str) -> str:
+    p = pair.upper().replace("/", "").replace("-", "")
+    if p.startswith("XAU"):
+        return "XAU/USD"
+    if p.startswith("XAG"):
+        return "XAG/USD"
+    if len(p) == 6:
+        return f"{p[:3]}/{p[3:]}"
+    return p
 
-CACHE_TTL_SECONDS = 60
+# TTL alto para proteger el presupuesto del plan free (800 créditos/día)
+CACHE_TTL_SECONDS = 300  # 5 min
 _cache: dict[str, tuple[float, dict]] = {}
+_last_error: str = ""
 
 
 # ---------------------------------------------------------------------------
 # Fetch
 # ---------------------------------------------------------------------------
 
-def _fetch_chart(yahoo_symbol: str, interval: str = "15m", rng: str = "5d") -> Optional[dict]:
-    """Descarga OHLC de Yahoo Finance. None si falla."""
-    url = (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/"
-        f"{urllib.parse.quote(yahoo_symbol)}?interval={interval}&range={rng}"
-    )
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (AI Trading Assistant Scanner)",
-            "Accept": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except Exception:
+def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> Optional[dict]:
+    """Descarga OHLC de Twelve Data. None si falla."""
+    global _last_error
+    if not TWELVEDATA_API_KEY:
+        _last_error = "TWELVEDATA_API_KEY no configurada"
         return None
+
+    params = {
+        "symbol": _td_symbol(pair),
+        "interval": interval,
+        "outputsize": str(outputsize),
+        "order": "ASC",  # oldest first, los indicadores calculan sobre series cronológicas
+        "apikey": TWELVEDATA_API_KEY,
+    }
+    url = f"{TWELVEDATA_BASE}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        _last_error = f"{pair}: {e}"
+        return None
+
+    if isinstance(data, dict) and data.get("status") == "error":
+        _last_error = f"{pair}: {data.get('message', 'error')}"
+        return None
+    return data
 
 
 def _parse_ohlc(raw: dict) -> Optional[dict]:
-    """Extrae listas closes/highs/lows/timestamps. Limpia None."""
-    try:
-        result = raw["chart"]["result"][0]
-        ts = result.get("timestamp") or []
-        q = result["indicators"]["quote"][0]
-        closes = q.get("close") or []
-        highs = q.get("high") or []
-        lows = q.get("low") or []
-    except Exception:
+    """Extrae listas closes/highs/lows/timestamps del formato Twelve Data."""
+    values = raw.get("values") if isinstance(raw, dict) else None
+    if not values:
         return None
 
-    # Filtra índices donde close sea None
     out_ts, out_c, out_h, out_l = [], [], [], []
-    for i, c in enumerate(closes):
-        if c is None:
+    for v in values:
+        try:
+            c = float(v["close"])
+        except (TypeError, ValueError, KeyError):
             continue
-        out_ts.append(ts[i] if i < len(ts) else None)
-        out_c.append(float(c))
-        h = highs[i] if i < len(highs) else None
-        l = lows[i] if i < len(lows) else None
-        out_h.append(float(h) if h is not None else float(c))
-        out_l.append(float(l) if l is not None else float(c))
+        try:
+            h = float(v.get("high", c))
+        except (TypeError, ValueError):
+            h = c
+        try:
+            l = float(v.get("low", c))
+        except (TypeError, ValueError):
+            l = c
+        out_ts.append(v.get("datetime"))
+        out_c.append(c)
+        out_h.append(h)
+        out_l.append(l)
 
     if len(out_c) < 60:
         return None
@@ -281,7 +299,7 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
 
     return {
         "pair": pair,
-        "yahoo_symbol": _yahoo_symbol(pair),
+        "td_symbol": _td_symbol(pair),
         "price": round(last_close, 5),
         "prev_close": round(prev_close, 5),
         "change_pct": round(change_pct, 2),
@@ -299,7 +317,7 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
 
 def _analyze_pair(pair: str) -> Optional[dict]:
     """Descarga + scoring para un par. None si falla."""
-    raw = _fetch_chart(_yahoo_symbol(pair))
+    raw = _fetch_chart(pair)
     if raw is None:
         return None
     ohlc = _parse_ohlc(raw)
@@ -334,7 +352,8 @@ def scan_pairs(pairs: Optional[list[str]] = None) -> list[dict]:
             to_fetch.append(p)
 
     if to_fetch:
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        # Free tier: 8 req/min. Concurrencia 4 para dejar holgura.
+        with ThreadPoolExecutor(max_workers=4) as ex:
             future_map = {ex.submit(_analyze_pair, p): p for p in to_fetch}
             for fut in as_completed(future_map):
                 p = future_map[fut]
@@ -345,3 +364,8 @@ def scan_pairs(pairs: Optional[list[str]] = None) -> list[dict]:
 
     results.sort(key=lambda r: (-r["confluence"], -abs(r.get("change_pct", 0))))
     return results
+
+
+def last_error() -> str:
+    """Último mensaje de error para diagnóstico (vacío si todo OK)."""
+    return _last_error

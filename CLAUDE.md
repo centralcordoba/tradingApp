@@ -269,7 +269,22 @@ USE_AI=0
 NEWS_FILTER_ENABLED=1
 NEWS_WINDOW_BEFORE_MIN=30
 NEWS_WINDOW_AFTER_MIN=5
+
+# Scanner en vivo (solapa "Análisis de zonas") — Twelve Data free tier
+TWELVEDATA_API_KEY=
 ```
+
+## Scanner en vivo (solapa "Análisis de zonas")
+
+Análisis **independiente** (no depende de las señales del Pine). Hace su propia lectura técnica multi-factor sobre OHLC 15m y devuelve los pares rankeados por confluencia.
+
+- **Fuente**: Twelve Data (`api.twelvedata.com/time_series`, free tier 800 créditos/día, 8 req/min). **Yahoo Finance no funciona desde Render** — bloquea IPs datacenter, por eso migramos a Twelve Data que requiere API key pero es estable desde cloud.
+- **Símbolos**: conversión automática `XAUUSD → XAU/USD`, `EURUSD → EUR/USD`, etc.
+- **Cache**: 5 min por par (`CACHE_TTL_SECONDS = 300` en `scanner.py`) + poll frontend cada 5 min. Respeta el presupuesto de créditos diarios.
+- **Indicadores**: EMA9/21/50/200, RSI14, ATR14, posición en rango 50v, impulso 5v.
+- **Scoring**: 7 factores direccionales cada uno vale +1/-1/0. `bias = Σfactores`, `side = LONG` si `bias≥3`, `SHORT` si `bias≤-3`, `NEUTRAL` en medio. `confluence = |bias|` (0-7).
+- **Endpoint**: `GET /scanner/pairs?pairs=XAUUSD,EURUSD,...` (pairs opcional, default 12 pares). Devuelve `{items, count, last_error}` — si count=0, `last_error` explica por qué (key faltante, rate limit, etc.).
+- **Diagnóstico**: cuando el scanner devuelve 0 items, el frontend muestra el `last_error` en rojo.
 
 ## Convenciones del usuario
 
