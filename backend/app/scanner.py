@@ -22,7 +22,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 DEFAULT_PAIRS = [
-    "XAUUSD", "XAGUSD",
+    "XAUUSD",  # plata (XAGUSD) requiere plan Grow en Twelve Data, no incluida
     "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
     "AUDUSD", "NZDUSD", "USDCAD",
     "EURJPY", "GBPJPY", "EURGBP",

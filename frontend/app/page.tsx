@@ -407,7 +407,7 @@ function zonaTooltip(zona: string, side: string): string {
 type View = "dashboard" | "zones";
 
 const PRESET_SYMBOLS = [
-  "XAUUSD", "XAGUSD",
+  "XAUUSD",
   "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
   "AUDUSD", "NZDUSD", "USDCAD",
   "EURJPY", "GBPJPY", "EURGBP",
