@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner
+from . import storage, ai_client, news_client, scanner, radar
 
 USE_AI_DEFAULT = os.getenv("USE_AI", "0") == "1"
 
@@ -125,6 +125,21 @@ def scan_pairs(pairs: str = ""):
         "brief": scanner.build_daily_brief(results) if results else None,
         "last_error": scanner.last_error() if len(results) == 0 else "",
     }
+
+
+@app.get("/api/radar")
+def radar_setups(pairs: str = ""):
+    """Radar de setups de reversión sobre soporte/resistencia (M15).
+
+    Segunda capa de análisis — complementa el escáner existente. Detecta por
+    símbolo: vela de rechazo, divergencia RSI/precio y proximidad a niveles
+    clave, y los clasifica en 5 bloques (1/3 válidos, 2/4 trampas).
+
+    `pairs` opcional: lista separada por comas (ej: "EURUSD,GBPUSD"). Si vacío,
+    usa la lista por defecto del escáner.
+    """
+    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
+    return radar.get_radar_response(selected)
 
 
 @app.post("/signals/{signal_id}/result")

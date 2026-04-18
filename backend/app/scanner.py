@@ -93,17 +93,21 @@ def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> O
 
 
 def _parse_ohlc(raw: dict) -> Optional[dict]:
-    """Extrae listas closes/highs/lows/timestamps del formato Twelve Data."""
+    """Extrae listas opens/closes/highs/lows/timestamps del formato Twelve Data."""
     values = raw.get("values") if isinstance(raw, dict) else None
     if not values:
         return None
 
-    out_ts, out_c, out_h, out_l = [], [], [], []
+    out_ts, out_o, out_c, out_h, out_l = [], [], [], [], []
     for v in values:
         try:
             c = float(v["close"])
         except (TypeError, ValueError, KeyError):
             continue
+        try:
+            o = float(v.get("open", c))
+        except (TypeError, ValueError):
+            o = c
         try:
             h = float(v.get("high", c))
         except (TypeError, ValueError):
@@ -113,6 +117,7 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
         except (TypeError, ValueError):
             l = c
         out_ts.append(v.get("datetime"))
+        out_o.append(o)
         out_c.append(c)
         out_h.append(h)
         out_l.append(l)
@@ -120,7 +125,7 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
     if len(out_c) < 60:
         return None
 
-    return {"ts": out_ts, "close": out_c, "high": out_h, "low": out_l}
+    return {"ts": out_ts, "open": out_o, "close": out_c, "high": out_h, "low": out_l}
 
 
 # ---------------------------------------------------------------------------
