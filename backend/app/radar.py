@@ -29,7 +29,7 @@ from . import scanner
 logger = logging.getLogger(__name__)
 
 # Cache del endpoint /api/radar (mismo TTL que el escáner subyacente).
-_RADAR_CACHE_TTL = 300
+_RADAR_CACHE_TTL = 900  # 15 min
 _radar_cache: dict[str, tuple[float, dict]] = {}
 
 # ---------------------------------------------------------------------------

@@ -42,8 +42,9 @@ def _td_symbol(pair: str) -> str:
         return f"{p[:3]}/{p[3:]}"
     return p
 
-# TTL alto para proteger el presupuesto del plan free (800 créditos/día)
-CACHE_TTL_SECONDS = 300  # 5 min
+# TTL alto para proteger el presupuesto del plan free (800 créditos/día).
+# 15 min implica 2-3 ciclos de poll del frontend (5 min) sirviendo desde cache.
+CACHE_TTL_SECONDS = 900  # 15 min
 _cache: dict[str, tuple[float, dict]] = {}          # scored cards (scan_pairs)
 _ohlc_cache: dict[str, tuple[float, dict]] = {}     # raw OHLC (compartido con radar)
 _last_error: str = ""
