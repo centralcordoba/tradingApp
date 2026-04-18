@@ -601,6 +601,8 @@ function ZoneAnalysisView() {
   const [sideFilter, setSideFilter] = useState<"ALL" | "LONG" | "SHORT" | "B1" | "B3">("ALL");
   const [showAll, setShowAll] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
+  const [marketClosed, setMarketClosed] = useState(false);
+  const [dataAgeMin, setDataAgeMin] = useState<number | null>(null);
 
   const VISIBLE_N = 6;
 
@@ -612,6 +614,8 @@ function ZoneAnalysisView() {
       setPairs(j.items || []);
       setBrief(j.brief || null);
       setError(j.last_error && (j.items || []).length === 0 ? j.last_error : null);
+      setMarketClosed(j.market_closed === true);
+      setDataAgeMin(typeof j.data_age_minutes === "number" ? j.data_age_minutes : null);
       setLastUpdate(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error de red");
@@ -620,11 +624,15 @@ function ZoneAnalysisView() {
     }
   }, []);
 
+  useEffect(() => { load(); }, [load]);
+
+  // Pausa el polling cuando el mercado está cerrado para no quemar créditos
+  // de Twelve Data. Al refrescar manualmente se reactiva si vuelve a open.
   useEffect(() => {
-    load();
-    const id = setInterval(load, 300000);  // 5 min — coincide con el TTL del backend
+    if (marketClosed) return;
+    const id = setInterval(load, 300000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, marketClosed]);
 
   const filtered = pairs.filter(p => {
     if (sideFilter === "ALL") return true;
@@ -665,6 +673,14 @@ function ZoneAnalysisView() {
           </div>
         </div>
       </div>
+
+      {marketClosed && (
+        <div className="zone-polling-paused">
+          🌙 Mercado cerrado · polling pausado
+          {dataAgeMin != null && <> · última vela hace {formatDataAge(dataAgeMin)}</>}
+          <span className="zone-polling-hint">· usa "Refrescar ahora" para forzar actualización</span>
+        </div>
+      )}
 
       {brief && <DailyBriefPanel brief={brief} />}
 
@@ -1002,11 +1018,18 @@ function RadarView() {
     }
   }, []);
 
+  // Carga inicial (una sola vez al montar).
+  useEffect(() => { load(); }, [load]);
+
+  // Polling condicional: solo si el mercado está abierto. En fin de semana o
+  // con el feed detenido el backend devuelve market_closed=true y no programamos
+  // el setInterval — así no quemamos créditos de Twelve Data sin razón.
+  const marketClosed = data?.market_closed === true;
   useEffect(() => {
-    load();
+    if (marketClosed) return;
     const id = setInterval(load, 300000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, marketClosed]);
 
   const applyWatchlist = (arr: RadarSetup[]) =>
     onlyWatchlist ? arr.filter(s => WATCHLIST.includes(s.symbol)) : arr;
@@ -1019,7 +1042,6 @@ function RadarView() {
   const totalValid = active.filter(s => !s.sl?.too_wide).length;
 
   const emptyActiveWithExpired = active.length === 0 && expired.length > 0;
-  const marketClosed = data?.market_closed === true;
 
   return (
     <div className="radar-view">

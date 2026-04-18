@@ -119,11 +119,16 @@ def scan_pairs(pairs: str = ""):
     """
     selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
     results = scanner.scan_pairs(selected)
+    probe_list = selected or scanner.DEFAULT_PAIRS
+    age_min = radar._probe_market_age_minutes(probe_list)
+    market_closed = age_min is not None and age_min > radar.MARKET_STALE_THRESHOLD_MIN
     return {
         "items": results,
         "count": len(results),
         "brief": scanner.build_daily_brief(results) if results else None,
         "last_error": scanner.last_error() if len(results) == 0 else "",
+        "market_closed": market_closed,
+        "data_age_minutes": round(age_min) if age_min is not None else None,
     }
 
 
