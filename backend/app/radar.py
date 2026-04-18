@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from . import scanner
@@ -61,6 +61,11 @@ MIN_RANGE_PCT: dict[str, float] = {
     "default": 0.12,
 }
 
+# Minutos sin nueva vela cerrada antes de considerar el feed detenido (mercado
+# cerrado por fin de semana, caída del proveedor, etc). 2 × intervalo M15.
+CANDLE_INTERVAL_MIN = 15
+MARKET_STALE_THRESHOLD_MIN = 30
+
 
 def _pip_size(symbol: str) -> float:
     return PIP_SIZE.get(symbol.upper(), PIP_SIZE["default"])
@@ -96,6 +101,40 @@ def _normalize_ts(raw: Optional[str]) -> Optional[str]:
     if not s.endswith("Z") and "+" not in s:
         s += "Z"
     return s
+
+
+def _parse_candle_ts(raw: Optional[str]) -> Optional[datetime]:
+    """Parsea el timestamp de una vela (formato Twelve Data o ISO) a datetime UTC."""
+    if not raw:
+        return None
+    s = str(raw)
+    try:
+        if "T" in s:
+            iso = s.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(iso)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _minutes_since_candle_close(
+    raw_ts: Optional[str], now: Optional[datetime] = None
+) -> Optional[float]:
+    """Minutos desde que se cerró la vela cuyo `ts` (start) se pasa.
+
+    Valor negativo → vela aún formándose (now está dentro del intervalo).
+    Valor grande positivo → mercado probablemente cerrado o feed detenido.
+    """
+    dt = _parse_candle_ts(raw_ts)
+    if dt is None:
+        return None
+    close_dt = dt + timedelta(minutes=CANDLE_INTERVAL_MIN)
+    ref = now or datetime.now(timezone.utc)
+    return (ref - close_dt).total_seconds() / 60.0
 
 
 def _build_candles(ohlc: dict, n: int = 20) -> list[dict]:
@@ -580,6 +619,18 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
         rejection = _detect_recent_rejection(opens, highs, lows, closes, ts)
         divergence = _detect_rsi_divergence(closes, rsi)
 
+        # Si la última vela se cerró hace mucho (fin de semana, feed caído),
+        # fuerza el rechazo como expirado — no queremos mostrar "vela recién
+        # cerrada" con datos del viernes el lunes por la mañana.
+        data_age = _minutes_since_candle_close(ts[-1] if ts else None)
+        is_stale = data_age is not None and data_age > MARKET_STALE_THRESHOLD_MIN
+        if is_stale and rejection.get("rejection") and not rejection.get("expired"):
+            logger.debug(
+                "[RADAR] %s STALE_DATA age=%.0fmin — forzando rejection.expired",
+                symbol, data_age,
+            )
+            rejection = {**rejection, "expired": True}
+
         classification = _classify_reversal_setup(
             key_levels, rejection, divergence, rsi[-1], range_pos
         )
@@ -748,6 +799,26 @@ def _cross_check_alignment(setups: list[dict], scanner_items: list[dict]) -> lis
 # Paso 7 — Respuesta del endpoint (con cache)
 # ---------------------------------------------------------------------------
 
+def _probe_market_age_minutes(symbols: list[str]) -> Optional[float]:
+    """Lee el cache de OHLC crudo para los símbolos dados y devuelve la edad
+    (min) de la vela más reciente entre todos. None si no hay cache.
+    """
+    ages: list[float] = []
+    for sym in symbols:
+        key = f"{sym.strip().upper()}:15min:200"
+        entry = scanner._ohlc_cache.get(key)
+        if not entry:
+            continue
+        raw = entry[1]
+        values = raw.get("values") if isinstance(raw, dict) else None
+        if not values:
+            continue
+        age = _minutes_since_candle_close(values[-1].get("datetime"))
+        if age is not None:
+            ages.append(age)
+    return min(ages) if ages else None
+
+
 def get_radar_response(symbols: Optional[list[str]] = None) -> dict:
     """Respuesta cacheada del radar (TTL 5 min). Incluye cross-check con el
     escáner para reclasificar conflictos de sesgo macro."""
@@ -793,6 +864,27 @@ def get_radar_response(symbols: Optional[list[str]] = None) -> dict:
         if not (s.get("sl") and s["sl"].get("too_wide"))
     ]
 
+    # Estado del mercado: lee la vela más reciente del cache tras el scan.
+    freshest_age = _probe_market_age_minutes(selected)
+    market_closed = (
+        freshest_age is not None and freshest_age > MARKET_STALE_THRESHOLD_MIN
+    )
+    last_candle_ts = None
+    if freshest_age is not None:
+        # Buscar el ts efectivo de la vela más reciente (para mostrar en UI).
+        for sym in selected:
+            key = f"{sym.strip().upper()}:15min:200"
+            ent = scanner._ohlc_cache.get(key)
+            if not ent:
+                continue
+            vals = ent[1].get("values") if isinstance(ent[1], dict) else None
+            if not vals:
+                continue
+            age = _minutes_since_candle_close(vals[-1].get("datetime"))
+            if age is not None and abs(age - freshest_age) < 1e-6:
+                last_candle_ts = _normalize_ts(vals[-1].get("datetime"))
+                break
+
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "active_setups": active_setups,
@@ -800,6 +892,9 @@ def get_radar_response(symbols: Optional[list[str]] = None) -> dict:
         "total_setups": len(valid_active),
         "strong_setups": sum(1 for s in valid_active if s["strength"] == "STRONG"),
         "total_expired": len(expired_setups),
+        "market_closed": market_closed,
+        "data_age_minutes": round(freshest_age) if freshest_age is not None else None,
+        "last_candle_ts": last_candle_ts,
     }
     _radar_cache[cache_key] = (now, payload)
     return payload

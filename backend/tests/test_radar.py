@@ -12,6 +12,8 @@ from pathlib import Path
 # Permite `python tests/test_radar.py` sin instalar el paquete
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
 from app.radar import (  # noqa: E402
     _build_candles,
     _classify_reversal_setup,
@@ -22,7 +24,9 @@ from app.radar import (  # noqa: E402
     _estimate_sl,
     _find_key_levels,
     _is_compressed_range,
+    _minutes_since_candle_close,
     _normalize_ts,
+    _parse_candle_ts,
     _rsi_series,
     build_radar_setups,
     get_radar_response,
@@ -467,16 +471,87 @@ def test_build_candles_empty_when_insufficient():
 
 def test_radar_response_structure_keys_present():
     # Sin TWELVEDATA_API_KEY el radar devuelve listas vacías, pero la forma
-    # de la respuesta debe respetar la nueva estructura.
+    # de la respuesta debe respetar el schema actual.
+    from app import radar as radar_mod
+    radar_mod._radar_cache.clear()
     r = get_radar_response(["EURUSD"])
-    assert set(r.keys()) == {
+    expected = {
         "timestamp", "active_setups", "expired_setups",
         "total_setups", "strong_setups", "total_expired",
+        "market_closed", "data_age_minutes", "last_candle_ts",
     }
+    assert expected <= set(r.keys())
     assert isinstance(r["active_setups"], list)
     assert isinstance(r["expired_setups"], list)
     assert r["total_setups"] == 0
     assert r["total_expired"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Mercado cerrado / datos stale
+# ---------------------------------------------------------------------------
+
+def test_parse_candle_ts_space_format():
+    dt = _parse_candle_ts("2026-04-18 15:00:00")
+    assert dt is not None
+    assert dt.year == 2026 and dt.month == 4 and dt.day == 18
+    assert dt.hour == 15 and dt.tzinfo is not None
+
+
+def test_parse_candle_ts_iso_format():
+    dt = _parse_candle_ts("2026-04-18T15:00:00Z")
+    assert dt is not None
+    assert dt.hour == 15
+
+
+def test_parse_candle_ts_none_on_bad():
+    assert _parse_candle_ts(None) is None
+    assert _parse_candle_ts("") is None
+    assert _parse_candle_ts("not a date") is None
+
+
+def test_minutes_since_candle_close_recent():
+    # vela abrió hace 20 min → cerró hace 5 min (+15 min interval)
+    now = datetime.now(timezone.utc)
+    ts = (now - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+    age = _minutes_since_candle_close(ts, now=now)
+    assert age is not None
+    assert 4.5 < age < 5.5
+
+
+def test_minutes_since_candle_close_negative_when_forming():
+    # vela abrió hace 5 min → aún no ha cerrado (faltan 10 min)
+    now = datetime.now(timezone.utc)
+    ts = (now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    age = _minutes_since_candle_close(ts, now=now)
+    assert age is not None
+    assert age < 0
+
+
+def test_minutes_since_candle_close_weekend_huge():
+    # Vela del viernes 22:00 UTC, "ahora" = sábado 12:00 UTC → ~14h de gap
+    friday = datetime(2026, 4, 17, 22, 0, 0, tzinfo=timezone.utc)
+    saturday_noon = datetime(2026, 4, 18, 12, 0, 0, tzinfo=timezone.utc)
+    age = _minutes_since_candle_close(
+        friday.strftime("%Y-%m-%d %H:%M:%S"), now=saturday_noon
+    )
+    assert age is not None
+    assert age > 30  # stale
+    assert age > 13 * 60  # claramente fin de semana
+
+
+def test_response_includes_market_closed_keys():
+    # Limpiar cache del radar — un test anterior podría haber cacheado una
+    # respuesta con el schema antiguo.
+    from app import radar as radar_mod
+    radar_mod._radar_cache.clear()
+    r = get_radar_response(["EURUSD"])
+    assert "market_closed" in r
+    assert "data_age_minutes" in r
+    assert "last_candle_ts" in r
+    # Sin API key, no hay cache de OHLC → no hay edad que medir
+    assert r["market_closed"] is False
+    assert r["data_age_minutes"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -472,6 +472,9 @@ type RadarResponse = {
   total_setups: number;
   strong_setups: number;
   total_expired: number;
+  market_closed?: boolean;
+  data_age_minutes?: number | null;
+  last_candle_ts?: string | null;
 };
 
 const PRESET_SYMBOLS = [
@@ -746,15 +749,36 @@ const REJECTION_LABELS: Record<string, string> = {
   engulf_bear: "Envolvente bajista",
 };
 
-function formatCandleTime(iso: string | null): string {
-  if (!iso) return "";
-  // Twelve Data devuelve "YYYY-MM-DD HH:MM:SS" en UTC
+function parseCandleDate(iso: string | null): Date | null {
+  if (!iso) return null;
   try {
-    const d = new Date(iso.replace(" ", "T") + "Z");
-    return d.toLocaleTimeString("es-ES", {
-      hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid",
-    });
-  } catch { return ""; }
+    let s = iso.replace(" ", "T");
+    if (!s.endsWith("Z") && !s.includes("+")) s += "Z";
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  } catch { return null; }
+}
+
+function formatCandleTime(iso: string | null): string {
+  const d = parseCandleDate(iso);
+  if (!d) return "";
+  const tz = { timeZone: "Europe/Madrid" };
+  const todayMadrid = new Date().toLocaleDateString("es-ES", tz);
+  const candleDate = d.toLocaleDateString("es-ES", tz);
+  const hhmm = d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", ...tz });
+  if (todayMadrid === candleDate) return hhmm;
+  // Día distinto → prefijar fecha corta (DD/MM)
+  const short = d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", ...tz });
+  return `${short} ${hhmm}`;
+}
+
+function formatDataAge(min: number): string {
+  const v = Math.max(0, min);
+  if (v < 60) return `${Math.round(v)} min`;
+  const h = Math.floor(v / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
 }
 
 function ageText(age: number | null, ts: string | null): string {
@@ -959,7 +983,7 @@ function RadarView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [onlyWatchlist, setOnlyWatchlist] = useState(true);
+  const [onlyWatchlist, setOnlyWatchlist] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [showExpired, setShowExpired] = useState(false);
 
@@ -995,6 +1019,7 @@ function RadarView() {
   const totalValid = active.filter(s => !s.sl?.too_wide).length;
 
   const emptyActiveWithExpired = active.length === 0 && expired.length > 0;
+  const marketClosed = data?.market_closed === true;
 
   return (
     <div className="radar-view">
@@ -1019,6 +1044,24 @@ function RadarView() {
           )}
         </div>
       </div>
+
+      {marketClosed && (
+        <div className="radar-market-closed">
+          <span className="radar-market-closed-ico">🌙</span>
+          <div>
+            <div className="radar-market-closed-title">Mercado cerrado</div>
+            <div className="radar-market-closed-sub">
+              {data?.last_candle_ts ? (
+                <>Última vela M15: <b>{formatCandleTime(data.last_candle_ts)}</b></>
+              ) : null}
+              {data?.data_age_minutes != null && (
+                <> · hace {formatDataAge(data.data_age_minutes)}</>
+              )}
+              {" · los setups detectados no son accionables hasta que reabra el feed."}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="radar-controls">
         <label className="radar-toggle">
@@ -1052,6 +1095,19 @@ function RadarView() {
       ) : error ? (
         <div className="zone-empty" style={{ color: "#f87171" }}>
           No se pudo cargar el radar: {error}
+        </div>
+      ) : marketClosed && active.length === 0 ? (
+        <div className="zone-empty">
+          🌙 Sin setups accionables — mercado cerrado.
+          {expired.length > 0 && (
+            <>
+              {" "}Hay {expired.length} setup{expired.length === 1 ? "" : "s"} del último feed activo abajo.
+              <button
+                className="radar-inline-link"
+                onClick={() => setShowExpired(true)}
+              >Ver últimos ↓</button>
+            </>
+          )}
         </div>
       ) : emptyActiveWithExpired ? (
         <div className="zone-empty">
