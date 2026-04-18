@@ -120,9 +120,12 @@ const SESSIONS: SessionInfo[] = [
   { name: "New York", timezone: "America/New_York", openHourUTC: 12, closeHourUTC: 21, abbr: "NYC" },
 ];
 
-function useClockTick(intervalMs = 1000) {
-  const [now, setNow] = useState(() => new Date());
+function useClockTick(intervalMs = 1000): Date | null {
+  // null en SSR para evitar hydration mismatch — el tiempo real se setea tras
+  // montar en cliente. Los consumers renderizan placeholder mientras es null.
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
+    setNow(new Date());
     const id = setInterval(() => setNow(new Date()), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);
@@ -247,6 +250,7 @@ function pad2(n: number) { return String(n).padStart(2, "0"); }
 function KillZonesPanel() {
   const now = useClockTick(1000);
   const [open, setOpen] = useState(true);
+  if (!now) return <div className="kz-section kz-placeholder" aria-hidden />;
   const activeIdx = KILL_ZONES.findIndex(kz => isInKillZone(now, kz));
 
   return (
@@ -315,6 +319,7 @@ function KillZonesPanel() {
 
 function SessionsPanel() {
   const now = useClockTick(1000);
+  if (!now) return <div className="sessions-panel sessions-panel-placeholder" aria-hidden />;
   const madridTime = formatTime(now, "Europe/Madrid");
   const overlap = getOverlapLabel(now);
 

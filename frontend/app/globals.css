@@ -1444,3 +1444,7 @@ tr:hover { background: #11151d; }
   color: #bfdbfe;
 }
 .zone-polling-hint { color: #64748b; margin-left: 6px; }
+
+/* Placeholders pre-hidratación — reservan altura para evitar layout shift */
+.sessions-panel-placeholder { min-height: 116px; margin-bottom: 16px; }
+.kz-placeholder { min-height: 52px; margin-bottom: 16px; }
