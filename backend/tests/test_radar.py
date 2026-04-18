@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.radar import (  # noqa: E402
+    _build_candles,
     _classify_reversal_setup,
     _cross_check_alignment,
     _detect_recent_rejection,
@@ -20,8 +21,11 @@ from app.radar import (  # noqa: E402
     _detect_rsi_divergence,
     _estimate_sl,
     _find_key_levels,
+    _is_compressed_range,
+    _normalize_ts,
     _rsi_series,
     build_radar_setups,
+    get_radar_response,
 )
 
 
@@ -379,6 +383,100 @@ def test_alignment_unknown_when_scanner_has_no_data():
     out = _cross_check_alignment(setups, [])  # escáner vacío
     assert out[0]["alignment"]["status"] == "unknown"
     assert out[0]["bloque"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _is_compressed_range: filtro de rango comprimido
+# ---------------------------------------------------------------------------
+
+def test_compressed_range_detected_for_xauusd():
+    # Precio 4834, S 4833.61, R 4834.20 → gap ~0.012% < 0.15%
+    compressed, gap = _is_compressed_range("XAUUSD", 4834.07, 4833.61, 4834.20)
+    assert compressed is True
+    assert gap < 0.15
+
+
+def test_normal_range_not_compressed_for_xauusd():
+    # Precio 4834, S 4820, R 4850 → gap ~0.62%
+    compressed, gap = _is_compressed_range("XAUUSD", 4834.0, 4820.0, 4850.0)
+    assert compressed is False
+    assert gap > 0.15
+
+
+def test_compressed_range_threshold_eurusd():
+    # EURUSD cap 0.10%. Gap 0.08% → comprimido.
+    compressed, _ = _is_compressed_range("EURUSD", 1.1000, 1.0996, 1.1004)
+    assert compressed is True
+
+
+def test_compressed_range_no_levels_returns_false():
+    # Sin soporte o sin resistencia → no es comprimido (hay espacio abierto).
+    assert _is_compressed_range("EURUSD", 1.1, None, 1.2) == (False, 0.0)
+    assert _is_compressed_range("EURUSD", 1.1, 1.0, None) == (False, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# _normalize_ts: formato ISO 8601
+# ---------------------------------------------------------------------------
+
+def test_normalize_ts_space_to_T_and_appends_Z():
+    assert _normalize_ts("2026-04-18 15:00:00") == "2026-04-18T15:00:00Z"
+
+
+def test_normalize_ts_idempotent_if_already_iso():
+    assert _normalize_ts("2026-04-18T15:00:00Z") == "2026-04-18T15:00:00Z"
+
+
+def test_normalize_ts_none_if_empty():
+    assert _normalize_ts(None) is None
+    assert _normalize_ts("") is None
+
+
+# ---------------------------------------------------------------------------
+# _build_candles: 20 velas al final en formato dict
+# ---------------------------------------------------------------------------
+
+def test_build_candles_returns_20_recent():
+    ohlc = {
+        "ts": [f"2026-04-18 {h:02d}:00:00" for h in range(30)],
+        "open": [1.0 + i * 0.001 for i in range(30)],
+        "high": [1.001 + i * 0.001 for i in range(30)],
+        "low": [0.999 + i * 0.001 for i in range(30)],
+        "close": [1.0005 + i * 0.001 for i in range(30)],
+    }
+    candles = _build_candles(ohlc, n=20)
+    assert len(candles) == 20
+    # Deben ser las últimas 20 (índices 10..29)
+    assert candles[0]["ts"] == "2026-04-18T10:00:00Z"
+    assert candles[-1]["ts"] == "2026-04-18T29:00:00Z"
+    for c in candles:
+        assert {"ts", "open", "high", "low", "close"} <= set(c.keys())
+
+
+def test_build_candles_empty_when_insufficient():
+    ohlc = {
+        "ts": ["t1", "t2"],
+        "open": [1.0, 1.0], "high": [1.0, 1.0], "low": [1.0, 1.0], "close": [1.0, 1.0],
+    }
+    assert _build_candles(ohlc, n=20) == []
+
+
+# ---------------------------------------------------------------------------
+# get_radar_response: estructura con active_setups / expired_setups
+# ---------------------------------------------------------------------------
+
+def test_radar_response_structure_keys_present():
+    # Sin TWELVEDATA_API_KEY el radar devuelve listas vacías, pero la forma
+    # de la respuesta debe respetar la nueva estructura.
+    r = get_radar_response(["EURUSD"])
+    assert set(r.keys()) == {
+        "timestamp", "active_setups", "expired_setups",
+        "total_setups", "strong_setups", "total_expired",
+    }
+    assert isinstance(r["active_setups"], list)
+    assert isinstance(r["expired_setups"], list)
+    assert r["total_setups"] == 0
+    assert r["total_expired"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -1382,3 +1382,39 @@ tr:hover { background: #11151d; }
 .radar-align-ok { background: #052e16; color: #4ade80; }
 .radar-align-warn { background: #3b2e0d; color: #facc15; }
 .radar-align-neutral { background: #11151d; color: #8a92a3; }
+
+.radar-expired-section { margin-top: 4px; }
+.radar-expired-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 14px; border-radius: 8px;
+  background: #11151d; border: 1px solid #1c2230;
+  color: #b8becc; font-size: 13px; font-weight: 600;
+  text-align: left; cursor: pointer;
+  transition: background 0.15s;
+}
+.radar-expired-toggle:hover { background: #171c27; }
+.radar-expired-toggle[aria-expanded="true"] { background: #171c27; }
+.radar-expired-hint { color: #6b7280; font-weight: 400; font-size: 11px; margin-left: 4px; }
+
+.radar-expired-section .radar-grid { margin-top: 10px; }
+.radar-expired-section .radar-card { opacity: 0.4; }
+
+.radar-inline-link {
+  margin-left: 8px;
+  background: none; border: none;
+  color: #60a5fa; cursor: pointer;
+  font-size: 12px; padding: 0; text-decoration: underline;
+}
+.radar-inline-link:hover { color: #93c5fd; }
+
+.radar-chart-wrap {
+  width: 100%;
+  margin: 4px 0 2px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.radar-chart {
+  width: 100%;
+  height: 120px;
+  display: block;
+}

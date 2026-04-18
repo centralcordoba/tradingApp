@@ -53,6 +53,14 @@ SL_MAX_PIPS: dict[str, float] = {
     "default": 20,  # conservador para no-operativos
 }
 
+# Rango mínimo entre soporte y resistencia (% del precio). Por debajo, el par
+# está en consolidación comprimida y no es operable — se omite silenciosamente.
+MIN_RANGE_PCT: dict[str, float] = {
+    "XAUUSD": 0.15,
+    "EURUSD": 0.10,
+    "default": 0.12,
+}
+
 
 def _pip_size(symbol: str) -> float:
     return PIP_SIZE.get(symbol.upper(), PIP_SIZE["default"])
@@ -60,6 +68,57 @@ def _pip_size(symbol: str) -> float:
 
 def _sl_cap_pips(symbol: str) -> float:
     return SL_MAX_PIPS.get(symbol.upper(), SL_MAX_PIPS["default"])
+
+
+def _min_range_pct(symbol: str) -> float:
+    return MIN_RANGE_PCT.get(symbol.upper(), MIN_RANGE_PCT["default"])
+
+
+def _is_compressed_range(
+    symbol: str, price: float, support: Optional[float], resistance: Optional[float]
+) -> tuple[bool, float]:
+    """True si el gap S/R es menor al mínimo operable del instrumento.
+
+    Devuelve (compressed, gap_pct). Si falta S o R, no es compresión — aún hay
+    espacio hacia el lado no definido.
+    """
+    if support is None or resistance is None or price <= 0:
+        return False, 0.0
+    gap_pct = (resistance - support) / price * 100
+    return gap_pct < _min_range_pct(symbol), gap_pct
+
+
+def _normalize_ts(raw: Optional[str]) -> Optional[str]:
+    """Twelve Data devuelve 'YYYY-MM-DD HH:MM:SS' en UTC — normalizamos a ISO 8601."""
+    if not raw:
+        return None
+    s = str(raw).replace(" ", "T")
+    if not s.endswith("Z") and "+" not in s:
+        s += "Z"
+    return s
+
+
+def _build_candles(ohlc: dict, n: int = 20) -> list[dict]:
+    """Devuelve las últimas `n` velas en formato dict para el minigráfico del
+    frontend. Reutiliza el OHLC ya cacheado — no hace llamadas nuevas."""
+    ts_list = ohlc.get("ts", [])
+    opens = ohlc.get("open", [])
+    highs = ohlc.get("high", [])
+    lows = ohlc.get("low", [])
+    closes = ohlc.get("close", [])
+    if not opens or len(ts_list) < n or len(opens) < n or len(closes) < n:
+        return []
+    start = len(ts_list) - n
+    return [
+        {
+            "ts": _normalize_ts(ts_list[i]),
+            "open": opens[i],
+            "high": highs[i],
+            "low": lows[i],
+            "close": closes[i],
+        }
+        for i in range(start, len(ts_list))
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -505,6 +564,19 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
         range_pos = _range_position(closes, 50)
 
         key_levels = _find_key_levels(highs, lows, closes)
+
+        # Filtro de rango comprimido — antes de clasificar.
+        price = closes[-1]
+        compressed, gap_pct = _is_compressed_range(
+            symbol, price, key_levels["support"], key_levels["resistance"]
+        )
+        if compressed:
+            logger.debug(
+                "[RADAR] %s COMPRESSED_RANGE — S/R gap %.3f%% < %s%% — omitido",
+                symbol, gap_pct, _min_range_pct(symbol),
+            )
+            return None
+
         rejection = _detect_recent_rejection(opens, highs, lows, closes, ts)
         divergence = _detect_rsi_divergence(closes, rsi)
 
@@ -515,7 +587,6 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
         if classification["bloque"] == 0:
             return None
 
-        price = closes[-1]
         sl = _estimate_sl(
             symbol,
             classification["side"],
@@ -524,6 +595,16 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
             key_levels["resistance"],
             atr,
         )
+
+        # Normalizar candle_ts del rejection para que coincida con los ts de candles
+        if rejection.get("candle_ts"):
+            rejection = {**rejection, "candle_ts": _normalize_ts(rejection["candle_ts"])}
+
+        candles = _build_candles(ohlc, n=20)
+        if candles:
+            logger.debug("[RADAR] %s candles=%d velas OK", symbol, len(candles))
+        else:
+            logger.warning("[RADAR] %s candles insuficientes — devolviendo []", symbol)
 
         logger.debug(
             "[RADAR] %s B%d %s Q%d age=%s",
@@ -556,6 +637,7 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
             "divergence": divergence,
             "sl": sl,
             "alignment": None,  # se completa en _cross_check_alignment
+            "candles": candles,
         }
     except Exception as e:
         logger.warning("[RADAR] fallo analizando %s: %s", symbol, e)
@@ -690,13 +772,34 @@ def get_radar_response(symbols: Optional[list[str]] = None) -> dict:
     # Reordenar tras posible reclasificación
     setups.sort(key=lambda s: -s["quality"])
 
-    valid_setups = [s for s in setups if not (s.get("sl") and s["sl"].get("too_wide"))]
+    # Separar activos (age ≤ 2) de expirados (age = 3). Los expirados NO llevan
+    # candles en el payload para ahorrar bytes — no se van a graficar.
+    active_setups: list[dict] = []
+    expired_setups: list[dict] = []
+    for s in setups:
+        rej = s.get("rejection") or {}
+        if rej.get("expired"):
+            age = rej.get("candle_age")
+            logger.debug("[RADAR] %s EXPIRED — age=%s", s.get("symbol"), age)
+            stripped = {k: v for k, v in s.items() if k != "candles"}
+            expired_setups.append(stripped)
+        else:
+            active_setups.append(s)
+
+    # `total_setups` cuenta sólo activos y descarta too_wide — coherente con el
+    # frontend que los pinta atenuados y no los considera operables.
+    valid_active = [
+        s for s in active_setups
+        if not (s.get("sl") and s["sl"].get("too_wide"))
+    ]
 
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "total_setups": len(valid_setups),
-        "strong_setups": sum(1 for s in valid_setups if s["strength"] == "STRONG"),
-        "setups": setups,  # incluye todas (incluso too_wide para que el frontend las muestre dimmed)
+        "active_setups": active_setups,
+        "expired_setups": expired_setups,
+        "total_setups": len(valid_active),
+        "strong_setups": sum(1 for s in valid_active if s["strength"] == "STRONG"),
+        "total_expired": len(expired_setups),
     }
     _radar_cache[cache_key] = (now, payload)
     return payload

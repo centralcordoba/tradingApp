@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { drawRadarChart } from "./radarChart";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -455,13 +456,22 @@ type RadarSetup = {
     reclassified: boolean;
     original_bloque?: number;
   } | null;
+  candles?: Array<{
+    ts: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  }>;
 };
 
 type RadarResponse = {
   timestamp: string;
+  active_setups: RadarSetup[];
+  expired_setups: RadarSetup[];
   total_setups: number;
   strong_setups: number;
-  setups: RadarSetup[];
+  total_expired: number;
 };
 
 const PRESET_SYMBOLS = [
@@ -785,6 +795,28 @@ function trapCopy(bloque: number): { title: string; detail: string } {
   return { title: "", detail: "" };
 }
 
+function RadarChart({ setup }: { setup: RadarSetup }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    const draw = () => drawRadarChart(canvas, setup);
+    draw();
+    if (!parent || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(draw);
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, [setup]);
+
+  return (
+    <div className="radar-chart-wrap">
+      <canvas ref={ref} className="radar-chart" />
+    </div>
+  );
+}
+
 function RadarCard({ setup }: { setup: RadarSetup }) {
   const meta = blockMeta(setup.bloque, setup.strength);
   const isTrap = setup.bloque === 2 || setup.bloque === 4;
@@ -845,6 +877,10 @@ function RadarCard({ setup }: { setup: RadarSetup }) {
           </div>
         )}
       </div>
+
+      {setup.candles && setup.candles.length > 0 && !expired && (
+        <RadarChart setup={setup} />
+      )}
 
       {setup.sl && !isTrap && (
         <div className={`radar-sl ${tooWide ? "radar-sl-wide" : ""}`}>
@@ -925,6 +961,7 @@ function RadarView() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [onlyWatchlist, setOnlyWatchlist] = useState(true);
   const [showLegend, setShowLegend] = useState(false);
+  const [showExpired, setShowExpired] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -947,14 +984,17 @@ function RadarView() {
     return () => clearInterval(id);
   }, [load]);
 
-  const setups = data?.setups || [];
-  const visible = onlyWatchlist
-    ? setups.filter(s => WATCHLIST.includes(s.symbol))
-    : setups;
+  const applyWatchlist = (arr: RadarSetup[]) =>
+    onlyWatchlist ? arr.filter(s => WATCHLIST.includes(s.symbol)) : arr;
 
-  const strongN = visible.filter(s => s.strength === "STRONG" && !s.sl?.too_wide && !s.rejection?.expired).length;
-  const trapN = visible.filter(s => s.bloque === 2 || s.bloque === 4).length;
-  const totalValid = visible.filter(s => !s.sl?.too_wide && !s.rejection?.expired).length;
+  const active = applyWatchlist(data?.active_setups || []);
+  const expired = applyWatchlist(data?.expired_setups || []);
+
+  const strongN = active.filter(s => s.strength === "STRONG" && !s.sl?.too_wide).length;
+  const trapN = active.filter(s => s.bloque === 2 || s.bloque === 4).length;
+  const totalValid = active.filter(s => !s.sl?.too_wide).length;
+
+  const emptyActiveWithExpired = active.length === 0 && expired.length > 0;
 
   return (
     <div className="radar-view">
@@ -968,7 +1008,7 @@ function RadarView() {
         </div>
         <div className="radar-intro-meta">
           <div className="radar-meta-kpis">
-            <span className="radar-kpi">{totalValid} setups</span>
+            <span className="radar-kpi">{totalValid} activos</span>
             <span className="radar-kpi radar-kpi-strong">{strongN} STRONG</span>
             <span className="radar-kpi radar-kpi-trap">{trapN} trampas</span>
           </div>
@@ -1013,15 +1053,42 @@ function RadarView() {
         <div className="zone-empty" style={{ color: "#f87171" }}>
           No se pudo cargar el radar: {error}
         </div>
-      ) : visible.length === 0 ? (
+      ) : emptyActiveWithExpired ? (
+        <div className="zone-empty">
+          No hay setups activos · {expired.length} setup{expired.length === 1 ? "" : "s"} expirado{expired.length === 1 ? "" : "s"} reciente{expired.length === 1 ? "" : "s"}.
+          <button
+            className="radar-inline-link"
+            onClick={() => setShowExpired(true)}
+          >Ver expirados ↓</button>
+        </div>
+      ) : active.length === 0 ? (
         <div className="zone-empty">
           No hay setups activos {onlyWatchlist ? "en tu watchlist" : ""}.
           {" "}El radar busca pin bars / envolventes en soporte o resistencia.
         </div>
       ) : (
         <div className="radar-grid">
-          {visible.map(s => <RadarCard key={s.symbol} setup={s} />)}
+          {active.map(s => <RadarCard key={s.symbol} setup={s} />)}
         </div>
+      )}
+
+      {expired.length > 0 && (
+        <section className="radar-expired-section">
+          <button
+            className="radar-expired-toggle"
+            onClick={() => setShowExpired(v => !v)}
+            aria-expanded={showExpired}
+          >
+            <span>{showExpired ? "▾" : "▸"}</span>
+            Setups expirados ({expired.length})
+            <span className="radar-expired-hint">· velas ya antiguas, no accionables</span>
+          </button>
+          {showExpired && (
+            <div className="radar-grid">
+              {expired.map(s => <RadarCard key={`exp-${s.symbol}`} setup={s} />)}
+            </div>
+          )}
+        </section>
       )}
     </div>
   );
