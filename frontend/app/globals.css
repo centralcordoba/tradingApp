@@ -1229,3 +1229,156 @@ tr:hover { background: #11151d; }
 .block-legend-tip {
   font-size: 10px; color: #facc15; line-height: 1.4; font-style: italic;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Radar de setups — reversiones en S/R (M15)
+   ───────────────────────────────────────────────────────────────────── */
+.radar-view { display: flex; flex-direction: column; gap: 14px; }
+
+.radar-intro {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #0f141c 0%, #0b0e13 100%);
+  border: 1px solid #1c2230;
+  border-radius: 12px;
+}
+.radar-intro-title { font-size: 15px; font-weight: 700; color: #e6e8eb; margin-bottom: 4px; }
+.radar-intro-sub { font-size: 12px; color: #8a92a3; line-height: 1.5; max-width: 640px; }
+.radar-intro-meta { text-align: right; font-size: 12px; color: #b8becc; }
+.radar-meta-kpis { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 4px; }
+.radar-kpi {
+  display: inline-block; padding: 3px 8px; border-radius: 6px;
+  background: #1c2230; color: #e6e8eb; font-weight: 600; font-size: 11px;
+}
+.radar-kpi-strong { background: #052e16; color: #4ade80; }
+.radar-kpi-trap { background: #3b2e0d; color: #facc15; }
+.radar-meta-time { font-size: 11px; color: #8a92a3; }
+
+.radar-controls {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.radar-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; color: #b8becc; cursor: pointer;
+  padding: 6px 12px; border-radius: 8px;
+  background: #11151d; border: 1px solid #1c2230;
+}
+.radar-toggle input { margin: 0; cursor: pointer; }
+
+.radar-legend {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px; background: #0b0e13;
+  border: 1px solid #1c2230; border-radius: 10px;
+}
+.radar-legend-row {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: #b8becc;
+}
+.radar-legend-badge {
+  display: inline-block; padding: 3px 8px; border-radius: 5px;
+  font-weight: 700; font-size: 10px; min-width: 52px; text-align: center;
+}
+
+.radar-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.radar-card {
+  position: relative;
+  background: #0f141c;
+  border: 1px solid #1c2230;
+  border-top: 3px solid #2a3142;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: opacity 0.2s;
+}
+.radar-card.radar-b1 { border-top-color: #16a34a; }
+.radar-card.radar-b1-strong {
+  border-top-color: #22c55e;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.25), 0 0 14px rgba(34, 197, 94, 0.15);
+}
+.radar-card.radar-b3 { border-top-color: #dc2626; }
+.radar-card.radar-b3-strong {
+  border-top-color: #ef4444;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25), 0 0 14px rgba(239, 68, 68, 0.15);
+}
+.radar-card.radar-trap { border-top-color: #facc15; }
+.radar-card.radar-expired,
+.radar-card.radar-toowide { opacity: 0.55; }
+
+.radar-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.radar-pair { font-size: 14px; font-weight: 700; color: #e6e8eb; display: flex; align-items: center; gap: 8px; }
+.radar-pair-op {
+  font-size: 9px; font-weight: 600; color: #4ade80;
+  background: #052e16; padding: 2px 6px; border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+.radar-price { font-size: 17px; font-weight: 700; color: #e6e8eb; margin-top: 2px; }
+
+.radar-badges { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.radar-badge {
+  display: inline-block; padding: 3px 8px; border-radius: 5px;
+  font-weight: 700; font-size: 10px; letter-spacing: 0.3px;
+  background: #1c2230; color: #e6e8eb;
+}
+.radar-badge.radar-b1 { background: #052e16; color: #4ade80; }
+.radar-badge.radar-b1-strong { background: #16a34a; color: #052e16; }
+.radar-badge.radar-b3 { background: #450a0a; color: #f87171; }
+.radar-badge.radar-b3-strong { background: #dc2626; color: #450a0a; }
+.radar-badge.radar-trap { background: #3b2e0d; color: #facc15; }
+.radar-badge-expired { background: #1c2230; color: #8a92a3; }
+.radar-badge-toowide { background: #7c2d12; color: #fb923c; }
+
+.radar-meta-row {
+  font-size: 11px; color: #8a92a3; display: flex; gap: 6px; flex-wrap: wrap;
+}
+
+.radar-levels {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px; background: #0b0e13; border-radius: 7px;
+  border: 1px solid #1c2230;
+}
+.radar-level {
+  display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; align-items: baseline;
+  font-size: 12px;
+}
+.radar-level.near .radar-level-dist { color: #4ade80; font-weight: 600; }
+.radar-level-label { color: #8a92a3; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.radar-level-value { color: #e6e8eb; font-weight: 600; }
+.radar-level-dist { color: #b8becc; font-size: 11px; }
+
+.radar-sl {
+  display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; align-items: baseline;
+  padding: 8px 10px; background: #11151d; border-radius: 7px;
+  border: 1px solid #1c2230;
+  font-size: 12px;
+}
+.radar-sl-label { color: #8a92a3; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.radar-sl-value { color: #e6e8eb; font-weight: 600; }
+.radar-sl-pips { color: #b8becc; font-size: 11px; }
+.radar-sl.radar-sl-wide { border-color: #7c2d12; background: #2d1307; }
+.radar-sl.radar-sl-wide .radar-sl-pips { color: #fb923c; font-weight: 600; }
+
+.radar-signal {
+  font-size: 12px; color: #b8becc; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+}
+.radar-signal-ico { font-size: 13px; }
+.radar-signal-age { color: #8a92a3; font-size: 11px; }
+
+.radar-trap-copy {
+  padding: 10px 12px;
+  background: #2a2009; border-left: 3px solid #facc15;
+  border-radius: 6px;
+}
+.radar-trap-title { font-size: 12px; font-weight: 700; color: #facc15; margin-bottom: 3px; }
+.radar-trap-detail { font-size: 11px; color: #b8becc; line-height: 1.45; }
+
+.radar-align {
+  padding: 6px 10px; border-radius: 6px;
+  font-size: 11px; line-height: 1.4;
+}
+.radar-align-ok { background: #052e16; color: #4ade80; }
+.radar-align-warn { background: #3b2e0d; color: #facc15; }
+.radar-align-neutral { background: #11151d; color: #8a92a3; }

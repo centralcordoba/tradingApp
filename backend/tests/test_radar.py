@@ -14,8 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.radar import (  # noqa: E402
     _classify_reversal_setup,
+    _cross_check_alignment,
+    _detect_recent_rejection,
     _detect_rejection_candle,
     _detect_rsi_divergence,
+    _estimate_sl,
     _find_key_levels,
     _rsi_series,
     build_radar_setups,
@@ -221,6 +224,161 @@ def test_rsi_series_length_matches_closes():
     # Los primeros 14 son warm-up (None), el resto son floats válidos
     assert all(v is None for v in rsi[:14])
     assert all(isinstance(v, float) and 0.0 <= v <= 100.0 for v in rsi[14:])
+
+
+# ---------------------------------------------------------------------------
+# _detect_recent_rejection: escaneo de últimas 3 velas con edad
+# ---------------------------------------------------------------------------
+
+def test_recent_rejection_finds_fresh_pin_bar_age_1():
+    # Última vela es pin bar alcista
+    opens = [1.0, 1.0, 1.0000]
+    highs = [1.0005, 1.0005, 1.0015]
+    lows = [0.9995, 0.9995, 0.9970]
+    closes = [1.0, 1.0, 1.0010]
+    ts = ["t-2", "t-1", "t-0"]
+
+    res = _detect_recent_rejection(opens, highs, lows, closes, ts)
+    assert res["rejection"] is True
+    assert res["candle_age"] == 1
+    assert res["candle_ts"] == "t-0"
+    assert res["expired"] is False
+    assert res["direction"] == "LONG"
+
+
+def test_recent_rejection_finds_pin_bar_age_2():
+    # Pin bar en [-2]. [-1] es una vela de cuerpo dominante (no rechazo).
+    opens = [1.0, 1.0000, 1.0011]
+    highs = [1.0005, 1.0015, 1.0016]
+    lows = [0.9995, 0.9970, 1.0010]
+    closes = [1.0, 1.0010, 1.0015]
+    ts = ["t-2", "t-1", "t-0"]
+
+    res = _detect_recent_rejection(opens, highs, lows, closes, ts)
+    assert res["rejection"] is True
+    assert res["candle_age"] == 2
+    assert res["candle_ts"] == "t-1"
+    assert res["expired"] is False
+
+
+def test_recent_rejection_marks_expired_at_age_3():
+    # Pin bar en [-3], [-2] y [-1] son velas pequeñas sin rechazo
+    opens = [1.0000, 1.0012, 1.0013]
+    highs = [1.0015, 1.0014, 1.0015]
+    lows = [0.9970, 1.0011, 1.0012]
+    closes = [1.0010, 1.0013, 1.0014]
+    ts = ["t-2", "t-1", "t-0"]
+
+    res = _detect_recent_rejection(opens, highs, lows, closes, ts)
+    assert res["rejection"] is True
+    assert res["candle_age"] == 3
+    assert res["expired"] is True
+
+
+def test_recent_rejection_returns_false_when_no_rejection_in_window():
+    opens = [1.0, 1.0, 1.0]
+    highs = [1.0005, 1.0005, 1.0005]
+    lows = [0.9995, 0.9995, 0.9995]
+    closes = [1.0, 1.0, 1.0]
+    ts = ["t-2", "t-1", "t-0"]
+
+    res = _detect_recent_rejection(opens, highs, lows, closes, ts)
+    assert res["rejection"] is False
+    assert res["candle_age"] is None
+
+
+# ---------------------------------------------------------------------------
+# _estimate_sl: cálculo y cap too_wide
+# ---------------------------------------------------------------------------
+
+def test_sl_within_cap_for_eurusd():
+    # EURUSD cap = 25 pips. Support a 0.0010 debajo, ATR 0.0002 → SL ~0.0011 = 11 pips
+    sl = _estimate_sl("EURUSD", "LONG", price=1.1000, support=1.0990, resistance=1.1020, atr=0.0002)
+    assert sl is not None
+    assert sl["too_wide"] is False
+    assert sl["cap_pips"] == 25
+    assert 10.5 < sl["distance_pips"] < 11.5
+
+
+def test_sl_too_wide_for_xauusd():
+    # XAUUSD cap = 40 pips (0.40 USD de distancia). Support 1.5 USD lejos → ~160 pips, excede cap
+    sl = _estimate_sl("XAUUSD", "LONG", price=2350.0, support=2348.5, resistance=2355.0, atr=0.5)
+    assert sl is not None
+    assert sl["too_wide"] is True
+    assert sl["distance_pips"] > 40
+
+
+def test_sl_short_uses_resistance_plus_buffer():
+    sl = _estimate_sl("EURUSD", "SHORT", price=1.1000, support=1.0980, resistance=1.1010, atr=0.0002)
+    assert sl is not None
+    assert sl["price"] > 1.1010  # SL encima de la resistencia
+    assert sl["too_wide"] is False
+
+
+def test_sl_none_when_missing_data():
+    assert _estimate_sl("EURUSD", "LONG", 1.1, None, 1.2, 0.0002) is None
+    assert _estimate_sl("EURUSD", "LONG", 1.1, 1.099, 1.2, None) is None
+
+
+# ---------------------------------------------------------------------------
+# _cross_check_alignment: reclasificación por sesgo del escáner
+# ---------------------------------------------------------------------------
+
+def _mk_setup(symbol, bloque, side, strength="NORMAL"):
+    return {
+        "symbol": symbol,
+        "bloque": bloque,
+        "side": side,
+        "strength": strength,
+        "sl": {"price": 1.0, "distance_pips": 10, "cap_pips": 25, "too_wide": False},
+    }
+
+
+def test_alignment_marks_aligned_when_bias_matches():
+    setups = [_mk_setup("EURUSD", 1, "LONG")]
+    scanner_items = [{"pair": "EURUSD", "side": "LONG", "bias": 5, "confluence": 5}]
+    out = _cross_check_alignment(setups, scanner_items)
+    assert out[0]["alignment"]["status"] == "aligned"
+    assert out[0]["bloque"] == 1  # sin reclasificar
+    assert out[0]["sl"] is not None
+
+
+def test_alignment_reclassifies_b1_to_b2_on_conflict():
+    setups = [_mk_setup("EURUSD", 1, "LONG")]
+    scanner_items = [{"pair": "EURUSD", "side": "SHORT", "bias": -5, "confluence": 5}]
+    out = _cross_check_alignment(setups, scanner_items)
+    assert out[0]["alignment"]["status"] == "conflict"
+    assert out[0]["alignment"]["reclassified"] is True
+    assert out[0]["alignment"]["original_bloque"] == 1
+    assert out[0]["bloque"] == 2
+    assert out[0]["side"] == "TRAP_LONG"
+    assert out[0]["strength"] == "WARN"
+    assert out[0]["sl"] is None  # trampa = no se entra
+
+
+def test_alignment_reclassifies_b3_to_b4_on_conflict():
+    setups = [_mk_setup("XAUUSD", 3, "SHORT")]
+    scanner_items = [{"pair": "XAUUSD", "side": "LONG", "bias": 4, "confluence": 4}]
+    out = _cross_check_alignment(setups, scanner_items)
+    assert out[0]["bloque"] == 4
+    assert out[0]["side"] == "TRAP_SHORT"
+    assert out[0]["alignment"]["reclassified"] is True
+
+
+def test_alignment_neutral_scanner_keeps_setup():
+    setups = [_mk_setup("EURUSD", 1, "LONG")]
+    scanner_items = [{"pair": "EURUSD", "side": "NEUTRAL", "bias": 1, "confluence": 1}]
+    out = _cross_check_alignment(setups, scanner_items)
+    assert out[0]["alignment"]["status"] == "neutral"
+    assert out[0]["bloque"] == 1  # sin tocar
+    assert out[0]["alignment"]["reclassified"] is False
+
+
+def test_alignment_unknown_when_scanner_has_no_data():
+    setups = [_mk_setup("EURUSD", 1, "LONG")]
+    out = _cross_check_alignment(setups, [])  # escáner vacío
+    assert out[0]["alignment"]["status"] == "unknown"
+    assert out[0]["bloque"] == 1
 
 
 # ---------------------------------------------------------------------------

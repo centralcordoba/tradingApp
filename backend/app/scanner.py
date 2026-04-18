@@ -44,7 +44,8 @@ def _td_symbol(pair: str) -> str:
 
 # TTL alto para proteger el presupuesto del plan free (800 créditos/día)
 CACHE_TTL_SECONDS = 300  # 5 min
-_cache: dict[str, tuple[float, dict]] = {}
+_cache: dict[str, tuple[float, dict]] = {}          # scored cards (scan_pairs)
+_ohlc_cache: dict[str, tuple[float, dict]] = {}     # raw OHLC (compartido con radar)
 _last_error: str = ""
 
 
@@ -53,11 +54,18 @@ _last_error: str = ""
 # ---------------------------------------------------------------------------
 
 def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> Optional[dict]:
-    """Descarga OHLC de Twelve Data. None si falla."""
+    """Descarga OHLC de Twelve Data. None si falla. Cachea el crudo 5 min
+    para que scanner y radar compartan la misma respuesta sin duplicar fetches."""
     global _last_error
     if not TWELVEDATA_API_KEY:
         _last_error = "TWELVEDATA_API_KEY no configurada"
         return None
+
+    cache_key = f"{pair}:{interval}:{outputsize}"
+    now = time.time()
+    entry = _ohlc_cache.get(cache_key)
+    if entry and (now - entry[0]) < CACHE_TTL_SECONDS:
+        return entry[1]
 
     params = {
         "symbol": _td_symbol(pair),
@@ -89,6 +97,8 @@ def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> O
     if isinstance(data, dict) and data.get("status") == "error":
         _last_error = f"{pair}: {data.get('message', 'error')}"
         return None
+
+    _ohlc_cache[cache_key] = (now, data)
     return data
 
 

@@ -404,7 +404,65 @@ function zonaTooltip(zona: string, side: string): string {
   }
 }
 
-type View = "dashboard" | "zones";
+type View = "dashboard" | "zones" | "radar";
+
+// Pares operativos del usuario — usados por el radar para filtrar ruido.
+const WATCHLIST = ["XAUUSD", "EURUSD"];
+
+type RadarSetup = {
+  symbol: string;
+  price: number;
+  bloque: 1 | 2 | 3 | 4;
+  side: "LONG" | "SHORT" | "TRAP_LONG" | "TRAP_SHORT";
+  strength: "STRONG" | "NORMAL" | "WARN" | null;
+  quality: number;
+  range_pos: number;
+  rsi: number | null;
+  atr: number | null;
+  key_levels: {
+    support: number | null;
+    resistance: number | null;
+    dist_support: number | null;
+    dist_resistance: number | null;
+    near_support: boolean;
+    near_resistance: boolean;
+  };
+  rejection: {
+    rejection: boolean;
+    type: string | null;
+    wick_ratio: number;
+    direction: string | null;
+    candle_age: number | null;
+    candle_ts: string | null;
+    expired: boolean;
+  };
+  divergence: {
+    divergence: boolean;
+    type: string | null;
+    direction: string | null;
+  };
+  sl: {
+    price: number;
+    distance_pips: number;
+    cap_pips: number;
+    too_wide: boolean;
+  } | null;
+  alignment: {
+    status: "aligned" | "conflict" | "neutral" | "unknown";
+    scanner_bias: string | null;
+    scanner_confluence: number | null;
+    scanner_bias_value?: number | null;
+    reclassified: boolean;
+    original_bloque?: number;
+  } | null;
+};
+
+type RadarResponse = {
+  timestamp: string;
+  total_setups: number;
+  strong_setups: number;
+  setups: RadarSetup[];
+};
 
 const PRESET_SYMBOLS = [
   "XAUUSD",
@@ -667,6 +725,308 @@ function ZoneAnalysisView() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Radar de setups — reversiones en soporte/resistencia (M15)
+// ─────────────────────────────────────────────────────────────────────────
+
+const REJECTION_LABELS: Record<string, string> = {
+  pin_bar_bull: "Pin bar alcista",
+  pin_bar_bear: "Pin bar bajista",
+  engulf_bull: "Envolvente alcista",
+  engulf_bear: "Envolvente bajista",
+};
+
+function formatCandleTime(iso: string | null): string {
+  if (!iso) return "";
+  // Twelve Data devuelve "YYYY-MM-DD HH:MM:SS" en UTC
+  try {
+    const d = new Date(iso.replace(" ", "T") + "Z");
+    return d.toLocaleTimeString("es-ES", {
+      hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid",
+    });
+  } catch { return ""; }
+}
+
+function ageText(age: number | null, ts: string | null): string {
+  if (age == null) return "";
+  const hhmm = formatCandleTime(ts);
+  const suffix = hhmm ? ` (${hhmm})` : "";
+  if (age === 1) return `vela recién cerrada${suffix}`;
+  return `hace ${age} velas${suffix}`;
+}
+
+function blockMeta(bloque: number, strength: string | null) {
+  switch (bloque) {
+    case 1: return {
+      label: strength === "STRONG" ? "B1 ★ STRONG" : "B1",
+      cls: strength === "STRONG" ? "radar-b1-strong" : "radar-b1",
+      tone: "Compra válida",
+    };
+    case 3: return {
+      label: strength === "STRONG" ? "B3 ★ STRONG" : "B3",
+      cls: strength === "STRONG" ? "radar-b3-strong" : "radar-b3",
+      tone: "Venta válida",
+    };
+    case 2: return { label: "B2 ⚠ TRAMPA", cls: "radar-trap", tone: "Trampa long" };
+    case 4: return { label: "B4 ⚠ TRAMPA", cls: "radar-trap", tone: "Trampa short" };
+    default: return { label: "—", cls: "", tone: "" };
+  }
+}
+
+function trapCopy(bloque: number): { title: string; detail: string } {
+  if (bloque === 2) return {
+    title: "Trampa long — no comprar aquí",
+    detail: "El soporte parece válido pero el rechazo es bajista. Esperar ruptura del soporte confirmada.",
+  };
+  if (bloque === 4) return {
+    title: "Trampa short — no vender aquí",
+    detail: "La resistencia parece válida pero el rechazo es alcista. Esperar ruptura confirmada.",
+  };
+  return { title: "", detail: "" };
+}
+
+function RadarCard({ setup }: { setup: RadarSetup }) {
+  const meta = blockMeta(setup.bloque, setup.strength);
+  const isTrap = setup.bloque === 2 || setup.bloque === 4;
+  const expired = setup.rejection?.expired;
+  const tooWide = setup.sl?.too_wide;
+  const inWatchlist = WATCHLIST.includes(setup.symbol);
+  const trap = isTrap ? trapCopy(setup.bloque) : null;
+
+  const cls = [
+    "radar-card",
+    meta.cls,
+    expired ? "radar-expired" : "",
+    tooWide ? "radar-toowide" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <article className={cls}>
+      <header className="radar-head">
+        <div>
+          <div className="radar-pair">
+            {setup.symbol}
+            {inWatchlist && <span className="radar-pair-op">● Operativo</span>}
+          </div>
+          <div className="radar-price">{setup.price}</div>
+        </div>
+        <div className="radar-badges">
+          <span className={`radar-badge ${meta.cls}`}>{meta.label}</span>
+          {expired && <span className="radar-badge radar-badge-expired">EXPIRADO</span>}
+          {tooWide && <span className="radar-badge radar-badge-toowide">SL EXCEDE</span>}
+        </div>
+      </header>
+
+      <div className="radar-meta-row">
+        <span>{setup.side.replace("_", " ")}</span>
+        {setup.rsi != null && <span>· RSI {setup.rsi}</span>}
+        <span>· Rango {Math.round(setup.range_pos * 100)}%</span>
+      </div>
+
+      <div className="radar-levels">
+        {setup.key_levels.support != null && (
+          <div className={`radar-level ${setup.key_levels.near_support ? "near" : ""}`}>
+            <span className="radar-level-label">Soporte</span>
+            <span className="radar-level-value">{setup.key_levels.support}</span>
+            <span className="radar-level-dist">
+              {setup.key_levels.dist_support?.toFixed(2)}%
+              {setup.key_levels.near_support && " ◉ cerca"}
+            </span>
+          </div>
+        )}
+        {setup.key_levels.resistance != null && (
+          <div className={`radar-level ${setup.key_levels.near_resistance ? "near" : ""}`}>
+            <span className="radar-level-label">Resistencia</span>
+            <span className="radar-level-value">{setup.key_levels.resistance}</span>
+            <span className="radar-level-dist">
+              {setup.key_levels.dist_resistance?.toFixed(2)}%
+              {setup.key_levels.near_resistance && " ◉ cerca"}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {setup.sl && !isTrap && (
+        <div className={`radar-sl ${tooWide ? "radar-sl-wide" : ""}`}>
+          <span className="radar-sl-label">SL estimado</span>
+          <span className="radar-sl-value">{setup.sl.price}</span>
+          <span className="radar-sl-pips">
+            {setup.sl.distance_pips} pips (cap {setup.sl.cap_pips})
+          </span>
+        </div>
+      )}
+
+      {setup.rejection.rejection && (
+        <div className="radar-signal">
+          <span className="radar-signal-ico">🕯</span>
+          {REJECTION_LABELS[setup.rejection.type || ""] || setup.rejection.type}
+          {setup.rejection.wick_ratio ? ` · ratio ${setup.rejection.wick_ratio}` : ""}
+          <span className="radar-signal-age">· {ageText(setup.rejection.candle_age, setup.rejection.candle_ts)}</span>
+        </div>
+      )}
+
+      {setup.divergence.divergence && (
+        <div className="radar-signal">
+          <span className="radar-signal-ico">📈</span>
+          Divergencia {setup.divergence.type === "bullish" ? "alcista" : "bajista"} activa
+        </div>
+      )}
+
+      {trap && (
+        <div className="radar-trap-copy">
+          <div className="radar-trap-title">⚠ {trap.title}</div>
+          <div className="radar-trap-detail">{trap.detail}</div>
+        </div>
+      )}
+
+      {setup.alignment && <RadarAlignment a={setup.alignment} />}
+    </article>
+  );
+}
+
+function RadarAlignment({ a }: { a: NonNullable<RadarSetup["alignment"]> }) {
+  const conf = a.scanner_confluence;
+  const bias = a.scanner_bias;
+  if (a.status === "aligned") {
+    return (
+      <div className="radar-align radar-align-ok">
+        ✓ Alineado con sesgo {bias} del escáner{conf != null ? ` (${conf}/7)` : ""}
+      </div>
+    );
+  }
+  if (a.status === "conflict" && a.reclassified) {
+    return (
+      <div className="radar-align radar-align-warn">
+        ⚠ Reclasificado: escáner dice {bias}{conf != null ? ` (${conf}/7)` : ""} → tratado como trampa
+      </div>
+    );
+  }
+  if (a.status === "conflict") {
+    return (
+      <div className="radar-align radar-align-warn">
+        ⚠ Conflicto con sesgo {bias} del escáner{conf != null ? ` (${conf}/7)` : ""}
+      </div>
+    );
+  }
+  if (a.status === "neutral") {
+    return (
+      <div className="radar-align radar-align-neutral">
+        · Escáner sin sesgo claro en este par
+      </div>
+    );
+  }
+  return null;
+}
+
+function RadarView() {
+  const [data, setData] = useState<RadarResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [onlyWatchlist, setOnlyWatchlist] = useState(true);
+  const [showLegend, setShowLegend] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/radar`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j: RadarResponse = await r.json();
+      setData(j);
+      setError(null);
+      setLastUpdate(new Date());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error de red");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 300000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const setups = data?.setups || [];
+  const visible = onlyWatchlist
+    ? setups.filter(s => WATCHLIST.includes(s.symbol))
+    : setups;
+
+  const strongN = visible.filter(s => s.strength === "STRONG" && !s.sl?.too_wide && !s.rejection?.expired).length;
+  const trapN = visible.filter(s => s.bloque === 2 || s.bloque === 4).length;
+  const totalValid = visible.filter(s => !s.sl?.too_wide && !s.rejection?.expired).length;
+
+  return (
+    <div className="radar-view">
+      <div className="radar-intro">
+        <div>
+          <div className="radar-intro-title">📡 Radar de setups · reversiones en S/R</div>
+          <div className="radar-intro-sub">
+            Pin bar / envolventes sobre soporte o resistencia, cruzado con el sesgo macro del escáner.
+            Un conflicto reclasifica el setup como trampa.
+          </div>
+        </div>
+        <div className="radar-intro-meta">
+          <div className="radar-meta-kpis">
+            <span className="radar-kpi">{totalValid} setups</span>
+            <span className="radar-kpi radar-kpi-strong">{strongN} STRONG</span>
+            <span className="radar-kpi radar-kpi-trap">{trapN} trampas</span>
+          </div>
+          {lastUpdate && (
+            <div className="radar-meta-time">
+              Actualizado: {lastUpdate.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="radar-controls">
+        <label className="radar-toggle">
+          <input
+            type="checkbox"
+            checked={onlyWatchlist}
+            onChange={e => setOnlyWatchlist(e.target.checked)}
+          />
+          Solo mis pares ({WATCHLIST.join(" · ")})
+        </label>
+        <button
+          className={`tab block-info-btn ${showLegend ? "active" : ""}`}
+          onClick={() => setShowLegend(s => !s)}
+          title="¿Qué son los bloques?"
+        >ⓘ Bloques</button>
+        <button className="refresh" onClick={load}>↻ Refrescar ahora</button>
+      </div>
+
+      {showLegend && (
+        <div className="radar-legend">
+          <div className="radar-legend-row"><span className="radar-legend-badge radar-b1">B1</span> Compra válida — precio en soporte + rechazo alcista</div>
+          <div className="radar-legend-row"><span className="radar-legend-badge radar-b1-strong">B1 ★</span> Compra STRONG — B1 + divergencia alcista</div>
+          <div className="radar-legend-row"><span className="radar-legend-badge radar-b3">B3</span> Venta válida — precio en resistencia + rechazo bajista</div>
+          <div className="radar-legend-row"><span className="radar-legend-badge radar-b3-strong">B3 ★</span> Venta STRONG — B3 + divergencia bajista</div>
+          <div className="radar-legend-row"><span className="radar-legend-badge radar-trap">B2/B4</span> Trampas — no operar, esperar ruptura confirmada</div>
+        </div>
+      )}
+
+      {loading && !data ? (
+        <div className="zone-empty">Analizando mercados… (primera llamada puede tardar 5-10s)</div>
+      ) : error ? (
+        <div className="zone-empty" style={{ color: "#f87171" }}>
+          No se pudo cargar el radar: {error}
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="zone-empty">
+          No hay setups activos {onlyWatchlist ? "en tu watchlist" : ""}.
+          {" "}El radar busca pin bars / envolventes en soporte o resistencia.
+        </div>
+      ) : (
+        <div className="radar-grid">
+          {visible.map(s => <RadarCard key={s.symbol} setup={s} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DailyBriefPanel({ brief }: { brief: DailyBrief }) {
   return (
     <section className="brief-panel">
@@ -898,6 +1258,12 @@ export default function Home() {
         >
           <span className="view-nav-ico">🎯</span> Análisis de zonas
         </button>
+        <button
+          className={`view-nav-btn ${view === "radar" ? "active" : ""}`}
+          onClick={() => setView("radar")}
+        >
+          <span className="view-nav-ico">📡</span> Radar de setups
+        </button>
       </nav>
 
       <SessionsPanel />
@@ -913,6 +1279,8 @@ export default function Home() {
 
       {view === "zones" ? (
         <ZoneAnalysisView />
+      ) : view === "radar" ? (
+        <RadarView />
       ) : (
       <>
       {stats && (
