@@ -8,6 +8,10 @@ Contexto operativo del proyecto para futuras sesiones de Claude Code.
 
 **No genera señales** — recibe las que dispara un Pine script propio del usuario y decide **ENTER / WAIT / AVOID** según calidad, contexto y timing. Cuando una señal está fuerte pero el precio está extendido, **degrada a WAIT y emite un plan operativo concreto** (zona de espera, precio trigger, invalidación, instrucciones) para evitar entradas tardías — ese fue el dolor original del usuario: entraba en la vela explosiva y perdía.
 
+**Dos capas de análisis independientes que complementan al Pine**:
+- **Scanner en vivo** (pestaña "Análisis de zonas"): sesgo macro y tendencia por confluencia técnica multi-factor (EMA9/21/50/200, RSI, rango, impulso) sobre ~11 pares. Clasifica en 3 bloques (trend / sin edge / reversión).
+- **Radar de setups** (pestaña "Radar"): segunda capa que busca puntos concretos de entrada en zonas clave (pin bar / envolvente sobre soporte/resistencia + divergencia RSI). Clasifica en 4 bloques (B1 compra válida, B2 trampa long, B3 venta válida, B4 trampa short). Cross-check con el sesgo del scanner — si hay conflicto, reclasifica B1/B3 → B2/B4.
+
 ## Stack
 
 - **Backend**: FastAPI (`backend/`). Python 3.11+. Desplegado en **Render free tier** (URL: `https://tradingapp-2glz.onrender.com`).
@@ -25,14 +29,19 @@ TradingView (Pine) ─alert()→ Render (URL fija) ─POST→ FastAPI ─→ Sup
                                                       ├─→ decision_engine (vetos + score)
                                                       ├─→ entry_planner (plan operativo)
                                                       ├─→ news_client (warnings, NO bloquea)
-                                                      └─→ ai_client (OpenRouter, opcional)
+                                                      ├─→ ai_client (OpenRouter, opcional)
+                                                      │
+                                                      ├─→ scanner ──┐
+                                                      │             ├─→ Twelve Data (OHLC 15m)
+                                                      └─→ radar  ───┘   via _ohlc_cache compartido
 
-Frontend Next.js (local) ←─polling 5s── Render
-                         ├── /signals, /stats, /symbols
-                         ├── /news/warnings (banner avisos activos)
-                         ├── /news/calendar (sección colapsable, hora Madrid)
-                         └── POST W/L/BE ─→ /signals/{id}/result (con journal opcional)
+Frontend Next.js (local) ←─polling── Render
+        ├── dashboard: polling 5s (/signals, /stats, /news/warnings)
+        ├── scanner:  polling 5min (/scanner/pairs) — pausa si market_closed
+        └── radar:    polling 5min (/api/radar)     — pausa si market_closed
 ```
+
+**Cache de OHLC crudo compartido**: scanner y radar llaman a `scanner._fetch_chart()` — misma entrada en `_ohlc_cache` (key `f"{pair}:15min:200"`). TTL 15 min. Evita pagar 2 veces por los mismos datos.
 
 ## Estructura
 
@@ -47,7 +56,11 @@ tradingApp/
 │   │   ├── tv_parser.py        # Acepta JSON o texto legacy multilínea
 │   │   ├── ai_client.py        # OpenRouter via urllib (sin deps extra)
 │   │   ├── news_client.py      # ForexFactory fetch + cache + warnings por ventana
+│   │   ├── scanner.py          # Scanner en vivo (Twelve Data OHLC 15m, 3 bloques) + cache OHLC
+│   │   ├── radar.py            # Radar de setups (pin bar/envolv + divergencia + SL cap) + cross-check con scanner
 │   │   └── storage.py          # Dual-mode: PostgreSQL (Supabase) / SQLite
+│   ├── tests/
+│   │   └── test_radar.py       # 46 tests unitarios del radar (pivots, rechazo, SL, alignment, market_closed)
 │   ├── requirements.txt
 │   ├── render.yaml             # Config deploy Render
 │   ├── supabase_init.sql       # SQL inicial para tabla signals en Supabase
@@ -55,7 +68,8 @@ tradingApp/
 │   └── signals.db              # solo en dev local
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx            # Dashboard + sesiones + kill zones + banner news + modal journal + calendario
+│   │   ├── page.tsx            # Dashboard + scanner + radar + sessions + kill zones + news + journal
+│   │   ├── radarChart.ts       # drawRadarChart(canvas, setup) — minigráfico Canvas 2D (7 capas)
 │   │   ├── layout.tsx
 │   │   └── globals.css
 │   ├── .env.local              # NEXT_PUBLIC_API_URL → Render
@@ -223,8 +237,13 @@ Valores categóricos esperados:
 | GET | `/news?symbol=X&hours=24` | Próximas high-impact news relevantes al símbolo |
 | GET | `/news/warnings?currencies=USD,EUR&now=ISO` | Warnings activos (frontend polea cada 5s). `now` para simular |
 | GET | `/news/calendar?date=YYYY-MM-DD&impact=high` | Eventos de un día en hora Madrid |
+| GET | `/scanner/pairs?pairs=XAUUSD,EURUSD` | Scanner en vivo (consume Twelve Data). Devuelve `market_closed` para pausar polling |
+| GET | `/scanner/debug` | Diagnóstico de API key + `last_error` del scanner |
+| GET | `/api/radar?pairs=XAUUSD,EURUSD` | Radar de setups con active/expired separados, candles, alignment, market_closed |
 
 `?ai=1` activa el refinamiento OpenRouter (si está configurado). El motor heurístico siempre corre primero; si la IA falla, cae a heurística.
+
+**Solo `/scanner/pairs` y `/api/radar` consumen créditos de Twelve Data**. El resto de endpoints son gratis.
 
 ## Tabla `signals` (idéntica en SQLite y PostgreSQL)
 
@@ -279,12 +298,108 @@ TWELVEDATA_API_KEY=
 Análisis **independiente** (no depende de las señales del Pine). Hace su propia lectura técnica multi-factor sobre OHLC 15m y devuelve los pares rankeados por confluencia.
 
 - **Fuente**: Twelve Data (`api.twelvedata.com/time_series`, free tier 800 créditos/día, 8 req/min). **Yahoo Finance no funciona desde Render** — bloquea IPs datacenter, por eso migramos a Twelve Data que requiere API key pero es estable desde cloud.
-- **Símbolos**: conversión automática `XAUUSD → XAU/USD`, `EURUSD → EUR/USD`, etc.
-- **Cache**: 5 min por par (`CACHE_TTL_SECONDS = 300` en `scanner.py`) + poll frontend cada 5 min. Respeta el presupuesto de créditos diarios.
+- **Símbolos**: conversión automática `XAUUSD → XAU/USD`, `EURUSD → EUR/USD`, etc. `_parse_ohlc` extrae `open`/`high`/`low`/`close`/`ts` (el `open` lo usa el radar para pin bars).
+- **Cache**: 15 min (`CACHE_TTL_SECONDS = 900` en `scanner.py`). Dos caches internos — `_cache` guarda las cards scored, `_ohlc_cache` el OHLC crudo **compartido con el radar**. Frontend puede poleear a 5 min sin gastar créditos (cache hit).
 - **Indicadores**: EMA9/21/50/200, RSI14, ATR14, posición en rango 50v, impulso 5v.
 - **Scoring**: 7 factores direccionales cada uno vale +1/-1/0. `bias = Σfactores`, `side = LONG` si `bias≥3`, `SHORT` si `bias≤-3`, `NEUTRAL` en medio. `confluence = |bias|` (0-7).
-- **Endpoint**: `GET /scanner/pairs?pairs=XAUUSD,EURUSD,...` (pairs opcional, default 12 pares). Devuelve `{items, count, last_error}` — si count=0, `last_error` explica por qué (key faltante, rate limit, etc.).
-- **Diagnóstico**: cuando el scanner devuelve 0 items, el frontend muestra el `last_error` en rojo.
+- **Endpoint**: `GET /scanner/pairs?pairs=XAUUSD,EURUSD,...` (pairs opcional, default 11 pares). Devuelve `{items, count, brief, last_error, market_closed, data_age_minutes}`. `market_closed=true` si la vela más reciente en cache tiene >30 min desde cierre (fin de semana, feed caído) → frontend pausa polling.
+- **Diagnóstico**: cuando el scanner devuelve 0 items, el frontend muestra el `last_error` en rojo. `GET /scanner/debug` confirma que la API key llega al servidor.
+
+## Radar de setups (solapa "Radar")
+
+Segunda capa de análisis que convive con el scanner. Busca **puntos concretos de entrada en zonas clave (M15)** usando price action puro: pin bar / envolvente sobre soporte o resistencia + divergencia RSI opcional.
+
+### Pipeline por par (`radar._analyze_symbol`)
+
+1. `scanner._fetch_chart` → reutiliza `_ohlc_cache` (compartido).
+2. `_find_key_levels` → pivots fractales (2 velas a cada lado) + clustering 0.2% → soporte/resistencia más cercanos.
+3. **Filtro de rango comprimido**: si `(R - S) / price < MIN_RANGE_PCT` (0.15% XAU / 0.10% EUR / 0.12% default) → `return None`. El par está en consolidación, no operable. Log DEBUG `COMPRESSED_RANGE`.
+4. `_detect_recent_rejection` → escanea las últimas 3 velas buscando pin bar / envolvente. Devuelve `candle_age` (1/2/3) y `candle_ts`. Si `age=3` → `expired=True`.
+5. `_detect_rsi_divergence` → divergencia alcista (precio nuevo mínimo + RSI sube + RSI<50) o bajista (simétrico).
+6. `_classify_reversal_setup` → 5 bloques (ver tabla abajo).
+7. `_estimate_sl` → SL = soporte/resistencia ± 0.5·ATR. Distancia en pips con cap por instrumento.
+8. **Stale data check**: si la última vela se cerró hace >30 min, fuerza `rejection.expired=True` (evita mostrar setups "frescos" con datos del viernes el lunes por la mañana).
+9. Adjunta `candles` = últimas 20 OHLC en formato ISO 8601 (para el minigráfico del frontend).
+
+### Bloques del radar
+
+| Bloque | Condición | Side | Strength |
+|---|---|---|---|
+| **B1 STRONG** | soporte + rechazo LONG + range_pos<0.35 + divergencia alcista | LONG | STRONG |
+| **B1 NORMAL** | soporte + rechazo LONG + range_pos<0.35 | LONG | NORMAL |
+| **B3 STRONG** | resistencia + rechazo SHORT + range_pos>0.65 + divergencia bajista | SHORT | STRONG |
+| **B3 NORMAL** | resistencia + rechazo SHORT + range_pos>0.65 | SHORT | NORMAL |
+| **B2 TRAP** | soporte + rechazo SHORT (soporte va a ceder) | TRAP_LONG | WARN |
+| **B4 TRAP** | resistencia + rechazo LONG (resistencia va a ceder) | TRAP_SHORT | WARN |
+| B0 | nada cumple | — | — (no se devuelve) |
+
+`quality` = cuenta de señales positivas (near_level + rejection + divergence) — máx 3.
+
+### Cross-check con scanner (reclasificación)
+
+En `get_radar_response`, tras armar los setups, se llama `scanner.scan_pairs()` (cache compartido → sin fetch extra) y se cruza el bias macro:
+
+- Radar B1 LONG + scanner bias LONG → ✓ `alignment="aligned"`, mantener B1.
+- **Radar B1 LONG + scanner bias SHORT → ⚠ reclasificar a B2 TRAP_LONG** (conflict) — el setup técnico existe pero va contra el sesgo macro.
+- Scanner NEUTRAL → `alignment="neutral"`, mantener clasificación (no contradice ni respalda).
+- Sin data del scanner → `alignment="unknown"`.
+
+Reclasificar = `bloque` cambia, `strength="WARN"`, `sl=None`, `alignment.reclassified=true`, `alignment.original_bloque=1|3`.
+
+### SL caps (pips absolutos por instrumento)
+
+```python
+SL_MAX_PIPS = {
+    "XAUUSD": 40,   # 40 pips × $0.25 (0.25 lotes) = $10
+    "EURUSD": 25,   # 25 pips × $1.00 (1 lote)    = $25
+    "default": 20,
+}
+```
+
+Si `distance_pips > cap` → `too_wide=true`, la card se pinta dimmed con badge "SL EXCEDE" y NO cuenta en `total_setups`.
+
+### Detección de mercado cerrado
+
+`_minutes_since_candle_close(ts)` calcula el gap entre la última vela cacheada y ahora. Si > 30 min → `market_closed=true`. Se expone a nivel de respuesta junto con `data_age_minutes` y `last_candle_ts`. Frontend:
+- Banner superior 🌙 "Mercado cerrado · última vela hace Xd Yh".
+- Empty state específico distingue "mercado cerrado" de "sin setups".
+- **Pausa `setInterval` de polling** — cero tráfico a Twelve Data en fin de semana. Se reactiva al refrescar manualmente cuando el mercado reabre.
+
+### Payload del endpoint `/api/radar`
+
+```json
+{
+  "timestamp": "...",
+  "active_setups": [ ... age ≤ 2, con campo `candles` ... ],
+  "expired_setups": [ ... age = 3 ó stale, sin `candles` ... ],
+  "total_setups": N,         // solo activos y sin too_wide
+  "strong_setups": N,        // solo activos STRONG
+  "total_expired": N,
+  "market_closed": bool,
+  "data_age_minutes": N,
+  "last_candle_ts": "ISO"
+}
+```
+
+### Minigráfico frontend (`radarChart.ts`)
+
+Canvas 2D puro, **sin librerías**. Función pura `drawRadarChart(canvas, setup)`. 7 capas en orden: fondo, soporte (verde), resistencia (roja), SL (naranja punteado), 20 velas japonesas, triángulo marcador en la vela de rechazo, zona TP sombreada (solo B1/B3). Responsive vía `ResizeObserver` sobre el parent. Labels mínimos (10px mono): precio S/R solo si `near_*`, texto "SL" solo si no too_wide.
+
+### Watchlist operativa
+
+`WATCHLIST = ["XAUUSD", "EURUSD"]` en frontend. Toggle "Solo mis pares" (default OFF) filtra los cards. Los pares operativos muestran badge `● Operativo` sutil. El radar por backend escanea los 11 pares por defecto para tener contexto de reclasificación aunque no operes esos pares.
+
+## Polling y consumo de créditos Twelve Data
+
+- **Frontend**: scanner y radar poleen cada 5 min. TTL backend 15 min → 2 de cada 3 polls son cache hit (0 créditos).
+- **`market_closed` pausa el `setInterval`** en ambas vistas. Fin de semana = 0 tráfico upstream (ahorro ~900 créditos/semana).
+- **Webhook TradingView, `/health`, `/signals`, `/stats`, `/news/*` NO tocan Twelve Data**. Solo los endpoints de datos de mercado consumen: `/scanner/pairs` y `/api/radar`.
+- **El backend NO tiene cron/scheduler propio** — es 100% reactivo. Si ves créditos subir sin nadie usando la app, sospechas:
+  1. Pinger mal configurado (UptimeRobot apuntando a `/scanner/pairs` en vez de `/health`).
+  2. Otra sesión del frontend abierta.
+  3. Bot/crawler en la URL pública.
+
+Verificar en Render Dashboard → Logs qué IPs pegan a `/scanner/pairs` y `/api/radar`.
 
 ## Convenciones del usuario
 
@@ -331,6 +446,11 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 - **Panel Kill Zones**: ✓ timeline vertical con 8 franjas horarias (hora Madrid), detección de sesión activa, barra de progreso, header con badge de sesión actual.
 - **Zona chips coloreados**: ✓ chips con color coding (deep-discount → deep-premium) + tooltips contextuales según zona+lado en la tabla de señales.
 - **Decisión de diseño UI**: se descartó un panel independiente de zonas compra/venta por redundancia con el motor y principio pro-scalper de "menos indicadores = mejor ejecución". Se optó por color coding inline.
+- **Scanner + Radar comparten cache de OHLC**: `scanner._ohlc_cache` (TTL 15 min) usado por ambos — una fetch por par por 15 min, independiente de cuántas vistas lo consulten.
+- **Radar de setups (pestaña "Radar")**: ✓ detecta pin bars / envolventes en soporte/resistencia, filtra rango comprimido (MIN_RANGE_PCT), SL estimado con cap por instrumento en pips absolutos (XAU=40, EUR=25), reclasificación automática a trampa si hay conflicto con sesgo del scanner, separación active/expired en el payload, minigráfico Canvas 2D por card.
+- **Market closed pause**: ✓ backend detecta vela cacheada >30min (fin de semana o feed caído), frontend pausa `setInterval` → cero tráfico upstream en finde. Banner distintivo 🌙 en radar, indicador sutil en scanner.
+- **46 tests unitarios del radar**: ✓ `backend/tests/test_radar.py` cubre pivots, rejection en 3 velas, divergencia, SL cap, alignment, compression, stale data, normalización ISO. Ejecutable con `python tests/test_radar.py`.
+- **Decisión operativa confirmada**: watchlist del radar = XAUUSD + EURUSD (toggle frontend default OFF). Los demás pares se escanean por contexto para el cross-check de sesgo, no para operar.
 
 ## Próximos pasos posibles (mencionados, no hechos)
 
@@ -348,7 +468,9 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 
 - **PowerShell + curl**: ver convenciones arriba.
 - **`localhost` vs `127.0.0.1`**: ver convenciones arriba.
-- **Render free spin-down**: tras 15min de inactividad el servicio se apaga, cold start ~30-50s. Mitigación: UptimeRobot/cron-job.org pinging `/health` cada 5min.
+- **Render free spin-down**: tras 15min de inactividad el servicio se apaga, cold start ~30-50s. Mitigación: UptimeRobot/cron-job.org pinging `/health` cada 5min. **CRÍTICO**: el pinger debe apuntar a `/health` (gratis) — NUNCA a `/scanner/pairs` o `/api/radar` (queman ~11 créditos por ping × 288 pings/día = ~3168 créditos/día, muy por encima del cap 800).
+- **Consumo de créditos Twelve Data**: el backend es 100% reactivo — no tiene cron propio. Solo consume al llamar `/scanner/pairs` o `/api/radar`. TTL 15 min + market_closed pause hace el resto. Si ves créditos subir con frontend cerrado, revisa (1) pinger, (2) otra sesión abierta, (3) logs de Render.
+- **Cold start borra cache**: tras spin-down Render arranca con cache vacío. Primera llamada a endpoint de datos tras el wake refetchea todos los pares. Pinger `/health` evita este escenario.
 - **Supabase password con caracteres especiales**: `@`, `#`, `:`, etc. rompen el parsing del `DATABASE_URL`. Resetear con solo letras y números.
 - **Supabase Direct Connection no funciona en Render** (IPv4 only). Usar **Transaction pooler** (port 6543, user `postgres.PROJECT_REF`).
 - **`zoneinfo` en Windows**: requiere paquete `tzdata` (está en `requirements.txt`). Linux/Render trae la base IANA del sistema.
