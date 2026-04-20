@@ -329,7 +329,40 @@ def test_sl_none_when_missing_data():
 
 
 # ---------------------------------------------------------------------------
-# _cross_check_alignment: reclasificación por sesgo del escáner
+# _estimate_sl: RRR + flag rrr_below_min contra el nivel opuesto
+# ---------------------------------------------------------------------------
+
+def test_sl_rrr_long_computes_against_resistance():
+    # LONG @ 1.1000, support 1.0990 (SL≈1.09896, risk≈11 pips), resistance 1.1030 (reward≈30 pips)
+    # RRR ≈ 30/11 ≈ 2.7 → pasa el mínimo
+    sl = _estimate_sl("EURUSD", "LONG", price=1.1000, support=1.0990, resistance=1.1030, atr=0.0002)
+    assert sl is not None
+    assert sl["rrr"] is not None and sl["rrr"] > 2.0
+    assert sl["rrr_below_min"] is False
+    assert sl["tp_price"] == 1.1030
+    assert sl["reward_pips"] is not None and sl["reward_pips"] > 0
+
+
+def test_sl_rrr_below_min_when_target_too_close():
+    # LONG @ 1.1000, support 1.0990 (risk≈11 pips), resistance 1.1010 (reward≈10 pips)
+    # RRR ≈ 0.9 → debajo del mínimo
+    sl = _estimate_sl("EURUSD", "LONG", price=1.1000, support=1.0990, resistance=1.1010, atr=0.0002)
+    assert sl is not None
+    assert sl["rrr"] is not None and sl["rrr"] < 2.0
+    assert sl["rrr_below_min"] is True
+
+
+def test_sl_rrr_none_when_no_opposite_level():
+    # LONG sin resistance → no se puede calcular RRR, pero SL sí
+    sl = _estimate_sl("EURUSD", "LONG", price=1.1000, support=1.0990, resistance=None, atr=0.0002)
+    assert sl is not None
+    assert sl["rrr"] is None
+    assert sl["rrr_below_min"] is False
+    assert sl["tp_price"] is None
+
+
+# ---------------------------------------------------------------------------
+# _cross_check_alignment: MTF LOCK explícito (sin reclasificar)
 # ---------------------------------------------------------------------------
 
 def _mk_setup(symbol, bloque, side, strength="NORMAL"):
@@ -347,30 +380,37 @@ def test_alignment_marks_aligned_when_bias_matches():
     scanner_items = [{"pair": "EURUSD", "side": "LONG", "bias": 5, "confluence": 5}]
     out = _cross_check_alignment(setups, scanner_items)
     assert out[0]["alignment"]["status"] == "aligned"
-    assert out[0]["bloque"] == 1  # sin reclasificar
+    assert out[0]["alignment"]["mtf_lock_passed"] is True
+    assert out[0]["alignment"]["mtf_lock_failed"] is False
+    assert out[0]["bloque"] == 1
     assert out[0]["sl"] is not None
 
 
-def test_alignment_reclassifies_b1_to_b2_on_conflict():
+def test_alignment_marks_mtf_lock_failed_b1_on_conflict():
+    """B1 LONG contra sesgo SHORT: no reclasificar — marcar mtf_lock_failed."""
     setups = [_mk_setup("EURUSD", 1, "LONG")]
     scanner_items = [{"pair": "EURUSD", "side": "SHORT", "bias": -5, "confluence": 5}]
     out = _cross_check_alignment(setups, scanner_items)
     assert out[0]["alignment"]["status"] == "conflict"
-    assert out[0]["alignment"]["reclassified"] is True
-    assert out[0]["alignment"]["original_bloque"] == 1
-    assert out[0]["bloque"] == 2
-    assert out[0]["side"] == "TRAP_LONG"
-    assert out[0]["strength"] == "WARN"
-    assert out[0]["sl"] is None  # trampa = no se entra
+    assert out[0]["alignment"]["mtf_lock_passed"] is False
+    assert out[0]["alignment"]["mtf_lock_failed"] is True
+    assert out[0]["alignment"]["reclassified"] is False
+    # Bloque/side/strength/sl se conservan — el frontend lo dimea con badge
+    assert out[0]["bloque"] == 1
+    assert out[0]["side"] == "LONG"
+    assert out[0]["strength"] == "NORMAL"
+    assert out[0]["sl"] is not None
 
 
-def test_alignment_reclassifies_b3_to_b4_on_conflict():
+def test_alignment_marks_mtf_lock_failed_b3_on_conflict():
     setups = [_mk_setup("XAUUSD", 3, "SHORT")]
     scanner_items = [{"pair": "XAUUSD", "side": "LONG", "bias": 4, "confluence": 4}]
     out = _cross_check_alignment(setups, scanner_items)
-    assert out[0]["bloque"] == 4
-    assert out[0]["side"] == "TRAP_SHORT"
-    assert out[0]["alignment"]["reclassified"] is True
+    assert out[0]["bloque"] == 3
+    assert out[0]["side"] == "SHORT"
+    assert out[0]["alignment"]["mtf_lock_failed"] is True
+    assert out[0]["alignment"]["reclassified"] is False
+    assert out[0]["sl"] is not None
 
 
 def test_alignment_neutral_scanner_keeps_setup():
@@ -378,14 +418,17 @@ def test_alignment_neutral_scanner_keeps_setup():
     scanner_items = [{"pair": "EURUSD", "side": "NEUTRAL", "bias": 1, "confluence": 1}]
     out = _cross_check_alignment(setups, scanner_items)
     assert out[0]["alignment"]["status"] == "neutral"
-    assert out[0]["bloque"] == 1  # sin tocar
-    assert out[0]["alignment"]["reclassified"] is False
+    assert out[0]["alignment"]["mtf_lock_passed"] is None
+    assert out[0]["alignment"]["mtf_lock_failed"] is False
+    assert out[0]["bloque"] == 1
 
 
 def test_alignment_unknown_when_scanner_has_no_data():
     setups = [_mk_setup("EURUSD", 1, "LONG")]
     out = _cross_check_alignment(setups, [])  # escáner vacío
     assert out[0]["alignment"]["status"] == "unknown"
+    assert out[0]["alignment"]["mtf_lock_passed"] is None
+    assert out[0]["alignment"]["mtf_lock_failed"] is False
     assert out[0]["bloque"] == 1
 
 

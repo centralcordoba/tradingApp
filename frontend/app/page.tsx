@@ -452,12 +452,19 @@ type RadarSetup = {
     distance_pips: number;
     cap_pips: number;
     too_wide: boolean;
+    tp_price: number | null;
+    reward_pips: number | null;
+    rrr: number | null;
+    rrr_below_min: boolean;
+    rrr_min: number;
   } | null;
   alignment: {
     status: "aligned" | "conflict" | "neutral" | "unknown";
     scanner_bias: string | null;
     scanner_confluence: number | null;
     scanner_bias_value?: number | null;
+    mtf_lock_passed: boolean | null;
+    mtf_lock_failed: boolean;
     reclassified: boolean;
     original_bloque?: number;
   } | null;
@@ -840,6 +847,145 @@ function trapCopy(bloque: number): { title: string; detail: string } {
   return { title: "", detail: "" };
 }
 
+// A+ filters por setup. Cada filtro vale 1 punto. 5/5 = operar, 3-4 = esperar,
+// <3 = evitar. La evaluación es determinista y visible al usuario — no hay que
+// valorar mentalmente.
+type AplusCheck = { key: string; label: string; passed: boolean; detail?: string };
+
+function evalSetup(
+  s: RadarSetup,
+  killZoneStatus: "fire" | "ok" | "warn" | "avoid" | null,
+): { checks: AplusCheck[]; passed: number; total: number } {
+  const checks: AplusCheck[] = [];
+
+  const kz = killZoneStatus;
+  checks.push({
+    key: "killzone",
+    label: "Kill zone activa",
+    passed: kz === "fire" || kz === "ok",
+    detail: kz ? `Actual: ${kz}` : "fuera de ventana operable",
+  });
+
+  const mtfPassed = s.alignment?.mtf_lock_passed === true;
+  const mtfFailed = s.alignment?.mtf_lock_failed === true;
+  checks.push({
+    key: "mtf",
+    label: "MTF LOCK (alineado con escáner)",
+    passed: mtfPassed,
+    detail: mtfFailed
+      ? `Escáner dice ${s.alignment?.scanner_bias}, setup va en contra`
+      : s.alignment?.status === "neutral"
+      ? "Escáner neutral"
+      : s.alignment?.status === "unknown"
+      ? "Sin data del escáner"
+      : undefined,
+  });
+
+  checks.push({
+    key: "strength",
+    label: "Fuerza STRONG (con divergencia)",
+    passed: s.strength === "STRONG",
+    detail: s.strength === "NORMAL" ? "Solo rechazo, sin divergencia" : undefined,
+  });
+
+  const rrr = s.sl?.rrr;
+  const rrrMin = s.sl?.rrr_min ?? 2.0;
+  checks.push({
+    key: "rrr",
+    label: `RRR ≥ ${rrrMin}:1`,
+    passed: !!s.sl && rrr != null && rrr >= rrrMin,
+    detail: rrr != null ? `Actual: ${rrr.toFixed(2)}:1` : "Sin TP calculable",
+  });
+
+  checks.push({
+    key: "sl",
+    label: "SL dentro del cap",
+    passed: !!s.sl && !s.sl.too_wide,
+    detail: s.sl?.too_wide ? `${s.sl.distance_pips} pips > cap ${s.sl.cap_pips}` : undefined,
+  });
+
+  const passed = checks.filter(c => c.passed).length;
+  return { checks, passed, total: checks.length };
+}
+
+function aplusDecision(passed: number): {
+  label: "OPERAR" | "ESPERAR" | "EVITAR";
+  cls: string;
+  ico: string;
+} {
+  if (passed >= 5) return { label: "OPERAR", cls: "sem-go", ico: "✅" };
+  if (passed >= 3) return { label: "ESPERAR", cls: "sem-wait", ico: "⏳" };
+  return { label: "EVITAR", cls: "sem-stop", ico: "❌" };
+}
+
+function RadarSemaforo({
+  setups,
+  marketClosed,
+  killZone,
+}: {
+  setups: RadarSetup[];
+  marketClosed: boolean;
+  killZone: KillZone | null;
+}) {
+  if (marketClosed) {
+    return (
+      <div className="radar-sem radar-sem-stop">
+        <div className="radar-sem-ico">🌙</div>
+        <div className="radar-sem-body">
+          <div className="radar-sem-label">EVITAR</div>
+          <div className="radar-sem-reason">Mercado cerrado — sin feed M15 activo</div>
+        </div>
+      </div>
+    );
+  }
+
+  const kzStatus = killZone?.status ?? null;
+  const operable = setups.filter(s => !(s.sl?.too_wide));
+  const evaluated = operable.map(s => ({ setup: s, eval: evalSetup(s, kzStatus) }));
+  evaluated.sort((a, b) => b.eval.passed - a.eval.passed);
+
+  const best = evaluated[0];
+  const bestPassed = best?.eval.passed ?? 0;
+  const decision = aplusDecision(bestPassed);
+
+  const goN = evaluated.filter(e => e.eval.passed >= 5).length;
+  const waitN = evaluated.filter(e => e.eval.passed >= 3 && e.eval.passed < 5).length;
+
+  let reason = "";
+  if (evaluated.length === 0) {
+    reason = "Sin setups activos — no hay nada que evaluar";
+  } else if (decision.label === "OPERAR") {
+    reason = `${goN} setup${goN === 1 ? "" : "s"} A+ · mejor: ${best!.setup.symbol} (${bestPassed}/${best!.eval.total})`;
+  } else if (decision.label === "ESPERAR") {
+    reason = `0 A+, ${waitN} próximo${waitN === 1 ? "" : "s"} · mejor: ${best!.setup.symbol} (${bestPassed}/${best!.eval.total})`;
+  } else {
+    reason = `Ningún setup cumple filtros mínimos · mejor: ${best!.setup.symbol} (${bestPassed}/${best!.eval.total})`;
+  }
+
+  return (
+    <div className={`radar-sem ${decision.cls}`}>
+      <div className="radar-sem-ico">{decision.ico}</div>
+      <div className="radar-sem-body">
+        <div className="radar-sem-label">{decision.label}</div>
+        <div className="radar-sem-reason">{reason}</div>
+        {best && (
+          <div className="radar-sem-checks">
+            {best.eval.checks.map(c => (
+              <span
+                key={c.key}
+                className={`radar-sem-chk ${c.passed ? "on" : "off"}`}
+                title={c.detail || c.label}
+              >
+                {c.passed ? "✓" : "·"} {c.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RadarChart({ setup }: { setup: RadarSetup }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -867,6 +1013,8 @@ function RadarCard({ setup }: { setup: RadarSetup }) {
   const isTrap = setup.bloque === 2 || setup.bloque === 4;
   const expired = setup.rejection?.expired;
   const tooWide = setup.sl?.too_wide;
+  const rrrBelowMin = setup.sl?.rrr_below_min === true;
+  const mtfLockFailed = setup.alignment?.mtf_lock_failed === true;
   const inWatchlist = WATCHLIST.includes(setup.symbol);
   const trap = isTrap ? trapCopy(setup.bloque) : null;
 
@@ -875,6 +1023,8 @@ function RadarCard({ setup }: { setup: RadarSetup }) {
     meta.cls,
     expired ? "radar-expired" : "",
     tooWide ? "radar-toowide" : "",
+    rrrBelowMin ? "radar-rrr-low" : "",
+    mtfLockFailed ? "radar-mtf-failed" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -889,6 +1039,12 @@ function RadarCard({ setup }: { setup: RadarSetup }) {
         </div>
         <div className="radar-badges">
           <span className={`radar-badge ${meta.cls}`}>{meta.label}</span>
+          {mtfLockFailed && (
+            <span className="radar-badge radar-badge-mtf">⛔ NO CUMPLE MTF LOCK</span>
+          )}
+          {rrrBelowMin && (
+            <span className="radar-badge radar-badge-rrr-low">RRR &lt; {setup.sl?.rrr_min ?? 2}</span>
+          )}
           {expired && <span className="radar-badge radar-badge-expired">EXPIRADO</span>}
           {tooWide && <span className="radar-badge radar-badge-toowide">SL EXCEDE</span>}
         </div>
@@ -928,13 +1084,26 @@ function RadarCard({ setup }: { setup: RadarSetup }) {
       )}
 
       {setup.sl && !isTrap && (
-        <div className={`radar-sl ${tooWide ? "radar-sl-wide" : ""}`}>
-          <span className="radar-sl-label">SL estimado</span>
-          <span className="radar-sl-value">{setup.sl.price}</span>
-          <span className="radar-sl-pips">
-            {setup.sl.distance_pips} pips (cap {setup.sl.cap_pips})
-          </span>
-        </div>
+        <>
+          <div className={`radar-sl ${tooWide ? "radar-sl-wide" : ""}`}>
+            <span className="radar-sl-label">SL estimado</span>
+            <span className="radar-sl-value">{setup.sl.price}</span>
+            <span className="radar-sl-pips">
+              {setup.sl.distance_pips} pips (cap {setup.sl.cap_pips})
+            </span>
+          </div>
+          {setup.sl.tp_price != null && setup.sl.rrr != null && (
+            <div className={`radar-rrr ${rrrBelowMin ? "radar-rrr-bad" : "radar-rrr-ok"}`}>
+              <span className="radar-rrr-label">TP / RRR</span>
+              <span className="radar-rrr-value">{setup.sl.tp_price}</span>
+              <span className="radar-rrr-ratio">
+                {setup.sl.rrr.toFixed(2)}:1
+                {setup.sl.reward_pips != null && ` · ${setup.sl.reward_pips} pips`}
+                {rrrBelowMin && ` · < ${setup.sl.rrr_min}`}
+              </span>
+            </div>
+          )}
+        </>
       )}
 
       {setup.rejection.rejection && (
@@ -971,28 +1140,21 @@ function RadarAlignment({ a }: { a: NonNullable<RadarSetup["alignment"]> }) {
   if (a.status === "aligned") {
     return (
       <div className="radar-align radar-align-ok">
-        ✓ Alineado con sesgo {bias} del escáner{conf != null ? ` (${conf}/7)` : ""}
-      </div>
-    );
-  }
-  if (a.status === "conflict" && a.reclassified) {
-    return (
-      <div className="radar-align radar-align-warn">
-        ⚠ Reclasificado: escáner dice {bias}{conf != null ? ` (${conf}/7)` : ""} → tratado como trampa
+        ✓ MTF LOCK — alineado con sesgo {bias} del escáner{conf != null ? ` (${conf}/7)` : ""}
       </div>
     );
   }
   if (a.status === "conflict") {
     return (
       <div className="radar-align radar-align-warn">
-        ⚠ Conflicto con sesgo {bias} del escáner{conf != null ? ` (${conf}/7)` : ""}
+        ⛔ NO CUMPLE MTF LOCK — escáner dice {bias}{conf != null ? ` (${conf}/7)` : ""}, setup va en contra
       </div>
     );
   }
   if (a.status === "neutral") {
     return (
       <div className="radar-align radar-align-neutral">
-        · Escáner sin sesgo claro en este par
+        · Escáner sin sesgo claro — MTF LOCK indeterminado
       </div>
     );
   }
@@ -1004,9 +1166,14 @@ function RadarView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [onlyWatchlist, setOnlyWatchlist] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [showExpired, setShowExpired] = useState(false);
+
+  // Tick lento — la kill zone cambia cada N minutos, no hace falta refrescar 1s.
+  const tick = useClockTick(30000);
+  const activeKillZone = tick
+    ? KILL_ZONES.find(kz => isInKillZone(tick, kz)) ?? null
+    : null;
 
   const load = useCallback(async () => {
     try {
@@ -1036,11 +1203,8 @@ function RadarView() {
     return () => clearInterval(id);
   }, [load, marketClosed]);
 
-  const applyWatchlist = (arr: RadarSetup[]) =>
-    onlyWatchlist ? arr.filter(s => WATCHLIST.includes(s.symbol)) : arr;
-
-  const active = applyWatchlist(data?.active_setups || []);
-  const expired = applyWatchlist(data?.expired_setups || []);
+  const active = data?.active_setups || [];
+  const expired = data?.expired_setups || [];
 
   const strongN = active.filter(s => s.strength === "STRONG" && !s.sl?.too_wide).length;
   const trapN = active.filter(s => s.bloque === 2 || s.bloque === 4).length;
@@ -1050,12 +1214,17 @@ function RadarView() {
 
   return (
     <div className="radar-view">
+      <RadarSemaforo
+        setups={active}
+        marketClosed={marketClosed}
+        killZone={activeKillZone}
+      />
       <div className="radar-intro">
         <div>
           <div className="radar-intro-title">📡 Radar de setups · reversiones en S/R</div>
           <div className="radar-intro-sub">
             Pin bar / envolventes sobre soporte o resistencia, cruzado con el sesgo macro del escáner.
-            Un conflicto reclasifica el setup como trampa.
+            Un conflicto marca el setup con <b>NO CUMPLE MTF LOCK</b> (no reclasifica a trampa).
           </div>
         </div>
         <div className="radar-intro-meta">
@@ -1091,14 +1260,6 @@ function RadarView() {
       )}
 
       <div className="radar-controls">
-        <label className="radar-toggle">
-          <input
-            type="checkbox"
-            checked={onlyWatchlist}
-            onChange={e => setOnlyWatchlist(e.target.checked)}
-          />
-          Solo mis pares ({WATCHLIST.join(" · ")})
-        </label>
         <button
           className={`tab block-info-btn ${showLegend ? "active" : ""}`}
           onClick={() => setShowLegend(s => !s)}
@@ -1146,7 +1307,7 @@ function RadarView() {
         </div>
       ) : active.length === 0 ? (
         <div className="zone-empty">
-          No hay setups activos {onlyWatchlist ? "en tu watchlist" : ""}.
+          No hay setups activos.
           {" "}El radar busca pin bars / envolventes en soporte o resistencia.
         </div>
       ) : (

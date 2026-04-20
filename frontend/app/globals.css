@@ -1383,6 +1383,104 @@ tr:hover { background: #11151d; }
 .radar-align-warn { background: #3b2e0d; color: #facc15; }
 .radar-align-neutral { background: #11151d; color: #8a92a3; }
 
+/* RRR / TP fila — mismo layout que SL */
+.radar-rrr {
+  display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; align-items: baseline;
+  padding: 8px 10px; background: #11151d; border-radius: 7px;
+  border: 1px solid #1c2230;
+  font-size: 12px;
+}
+.radar-rrr-label { color: #8a92a3; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.radar-rrr-value { color: #e6e8eb; font-weight: 600; }
+.radar-rrr-ratio { color: #b8becc; font-size: 11px; }
+.radar-rrr.radar-rrr-ok .radar-rrr-ratio { color: #4ade80; font-weight: 600; }
+.radar-rrr.radar-rrr-bad {
+  border-color: #7c2d12; background: #2d1307;
+}
+.radar-rrr.radar-rrr-bad .radar-rrr-value,
+.radar-rrr.radar-rrr-bad .radar-rrr-ratio {
+  color: #fb923c; text-decoration: line-through; text-decoration-thickness: 1px;
+}
+
+/* Card state: RRR debajo del mínimo → dim + tachado general */
+.radar-card.radar-rrr-low { opacity: 0.55; }
+.radar-card.radar-rrr-low .radar-price,
+.radar-card.radar-rrr-low .radar-sl-value,
+.radar-card.radar-rrr-low .radar-sl-pips {
+  text-decoration: line-through; text-decoration-color: #fb923c; text-decoration-thickness: 1px;
+}
+
+/* Card state: NO CUMPLE MTF LOCK — marca roja distintiva */
+.radar-card.radar-mtf-failed {
+  border-top-color: #b91c1c !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35), 0 0 12px rgba(239, 68, 68, 0.18);
+  opacity: 0.78;
+}
+
+/* Badges nuevos */
+.radar-badge-mtf {
+  background: #450a0a; color: #fecaca;
+  border: 1px solid #dc2626;
+}
+.radar-badge-rrr-low {
+  background: #2d1307; color: #fb923c;
+  border: 1px solid #7c2d12;
+}
+
+/* ───────────────────────────────────────────── */
+/* Semáforo consolidado del radar               */
+/* ───────────────────────────────────────────── */
+.radar-sem {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px 22px;
+  border-radius: 14px;
+  border: 1px solid #1c2230;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.radar-sem::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 6px;
+}
+.radar-sem.sem-go {
+  background: linear-gradient(90deg, rgba(22,163,74,0.15) 0%, rgba(22,163,74,0.03) 100%);
+  border-color: rgba(22,163,74,0.45);
+}
+.radar-sem.sem-go::before { background: #22c55e; box-shadow: 0 0 18px rgba(34,197,94,0.6); }
+.radar-sem.sem-wait {
+  background: linear-gradient(90deg, rgba(234,179,8,0.12) 0%, rgba(234,179,8,0.02) 100%);
+  border-color: rgba(234,179,8,0.45);
+}
+.radar-sem.sem-wait::before { background: #eab308; box-shadow: 0 0 18px rgba(234,179,8,0.55); }
+.radar-sem.sem-stop {
+  background: linear-gradient(90deg, rgba(185,28,28,0.15) 0%, rgba(185,28,28,0.03) 100%);
+  border-color: rgba(185,28,28,0.45);
+}
+.radar-sem.sem-stop::before { background: #ef4444; box-shadow: 0 0 18px rgba(239,68,68,0.55); }
+.radar-sem-ico { font-size: 38px; line-height: 1; }
+.radar-sem-body { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.radar-sem-label {
+  font-size: 28px; font-weight: 800; letter-spacing: 1.5px;
+}
+.radar-sem.sem-go .radar-sem-label { color: #4ade80; }
+.radar-sem.sem-wait .radar-sem-label { color: #facc15; }
+.radar-sem.sem-stop .radar-sem-label { color: #f87171; }
+.radar-sem-reason { font-size: 13px; color: #b8becc; }
+.radar-sem-checks {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+}
+.radar-sem-chk {
+  font-size: 11px; padding: 3px 8px; border-radius: 5px;
+  background: #11151d; color: #8a92a3;
+  border: 1px solid #1c2230;
+}
+.radar-sem-chk.on {
+  color: #4ade80; background: #052e16; border-color: #166534;
+}
+.radar-sem-chk.off {
+  color: #f87171; background: #2d0a0a; border-color: #7f1d1d;
+}
+
 .radar-expired-section { margin-top: 4px; }
 .radar-expired-toggle {
   display: flex; align-items: center; gap: 8px; width: 100%;

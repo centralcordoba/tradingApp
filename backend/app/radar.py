@@ -534,6 +534,11 @@ def _classify_reversal_setup(
 # SL estimado
 # ---------------------------------------------------------------------------
 
+# RRR mínimo para que el setup se considere operable. Por debajo, el frontend
+# dimea la card y tacha los valores — es una regla de higiene de scalper.
+MIN_RRR = 2.0
+
+
 def _estimate_sl(
     symbol: str,
     side: str,
@@ -545,7 +550,9 @@ def _estimate_sl(
     """SL = nivel ± 0.5·ATR. Solo para setups direccionales (B1/B3).
 
     Devuelve None si faltan datos. `too_wide=True` si distance_pips > cap del
-    instrumento — frontend muestra badge y no cuenta el setup como válido.
+    instrumento. Incluye RRR calculado contra el nivel opuesto (TP natural del
+    reverse-to-level): `rrr` y `rrr_below_min` — frontend dimea y tacha la
+    card si `rrr_below_min`.
     """
     if atr is None:
         return None
@@ -554,9 +561,13 @@ def _estimate_sl(
     if side == "LONG" and support is not None:
         sl_price = support - buffer
         distance_price = price - sl_price
+        tp_price = resistance
+        reward_price = (resistance - price) if resistance is not None else None
     elif side == "SHORT" and resistance is not None:
         sl_price = resistance + buffer
         distance_price = sl_price - price
+        tp_price = support
+        reward_price = (price - support) if support is not None else None
     else:
         return None
 
@@ -567,12 +578,21 @@ def _estimate_sl(
     cap = _sl_cap_pips(symbol)
     distance_pips = distance_price / pip
 
+    rrr: Optional[float] = None
+    if reward_price is not None and reward_price > 0:
+        rrr = reward_price / distance_price
+
     return {
         "price": round(sl_price, 5),
         "distance_pips": round(distance_pips, 1),
         "distance_price": round(distance_price, 5),
         "cap_pips": cap,
         "too_wide": distance_pips > cap,
+        "tp_price": round(tp_price, 5) if tp_price is not None else None,
+        "reward_pips": round(reward_price / pip, 1) if reward_price and reward_price > 0 else None,
+        "rrr": round(rrr, 2) if rrr is not None else None,
+        "rrr_below_min": (rrr is not None and rrr < MIN_RRR),
+        "rrr_min": MIN_RRR,
     }
 
 
@@ -719,8 +739,15 @@ def build_radar_setups(symbols: list[str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _cross_check_alignment(setups: list[dict], scanner_items: list[dict]) -> list[dict]:
-    """Muta cada setup con `alignment` y reclasifica B1/B3 a trampa si el
-    sesgo del escáner los contradice. Mantiene trampas ya detectadas."""
+    """Muta cada setup con `alignment`. NO reclasifica — el bloque original se
+    preserva para que el frontend pueda mostrar una etiqueta explícita
+    "NO CUMPLE MTF LOCK" cuando el sesgo del escáner contradice el setup.
+
+    `mtf_lock_passed`:
+      - True  → setup alineado con sesgo macro (o trampa confirmada por el macro)
+      - False → setup contra el sesgo macro (no tomar)
+      - None  → escáner neutral o sin data (indeterminado, no bloquea)
+    """
     bias_by_pair = {x["pair"]: x for x in scanner_items}
 
     for s in setups:
@@ -730,6 +757,8 @@ def _cross_check_alignment(setups: list[dict], scanner_items: list[dict]) -> lis
                 "status": "unknown",
                 "scanner_bias": None,
                 "scanner_confluence": None,
+                "mtf_lock_passed": None,
+                "mtf_lock_failed": False,
                 "reclassified": False,
             }
             continue
@@ -745,11 +774,13 @@ def _cross_check_alignment(setups: list[dict], scanner_items: list[dict]) -> lis
                 "scanner_bias": "NEUTRAL",
                 "scanner_confluence": sb_conf,
                 "scanner_bias_value": sb_bias,
+                "mtf_lock_passed": None,
+                "mtf_lock_failed": False,
                 "reclassified": False,
             }
             continue
 
-        # Trampas ya existentes: anotar alineación sin reclasificar.
+        # Trampas ya existentes (B2/B4): la dirección implícita es la opuesta.
         if s["bloque"] in (2, 4):
             radar_implied = "SHORT" if s["side"] == "TRAP_LONG" else "LONG"
             status = "aligned" if sb_side == radar_implied else "conflict"
@@ -758,39 +789,23 @@ def _cross_check_alignment(setups: list[dict], scanner_items: list[dict]) -> lis
                 "scanner_bias": sb_side,
                 "scanner_confluence": sb_conf,
                 "scanner_bias_value": sb_bias,
+                "mtf_lock_passed": status == "aligned",
+                "mtf_lock_failed": status == "conflict",
                 "reclassified": False,
             }
             continue
 
-        # B1 LONG o B3 SHORT — candidatos a reclasificación.
-        if s["side"] == sb_side:
-            s["alignment"] = {
-                "status": "aligned",
-                "scanner_bias": sb_side,
-                "scanner_confluence": sb_conf,
-                "scanner_bias_value": sb_bias,
-                "reclassified": False,
-            }
-            continue
-
-        # Conflicto: el setup del radar va contra el sesgo macro → reclasificar
-        original_bloque = s["bloque"]
+        # B1 LONG o B3 SHORT: comparar dirección con sesgo macro.
+        aligned = (s["side"] == sb_side)
         s["alignment"] = {
-            "status": "conflict",
+            "status": "aligned" if aligned else "conflict",
             "scanner_bias": sb_side,
             "scanner_confluence": sb_conf,
             "scanner_bias_value": sb_bias,
-            "original_bloque": original_bloque,
-            "reclassified": True,
+            "mtf_lock_passed": aligned,
+            "mtf_lock_failed": not aligned,
+            "reclassified": False,
         }
-        if original_bloque == 1:
-            s["bloque"] = 2
-            s["side"] = "TRAP_LONG"
-        elif original_bloque == 3:
-            s["bloque"] = 4
-            s["side"] = "TRAP_SHORT"
-        s["strength"] = "WARN"
-        s["sl"] = None  # en una trampa no se entra — SL no aplica
 
     return setups
 
