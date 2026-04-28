@@ -187,6 +187,13 @@ def delete_signal(signal_id: int):
     return {"ok": True, "deleted_id": signal_id}
 
 
+@app.delete("/signals")
+def delete_all_signals(symbol: str | None = None):
+    """Elimina todas las señales, opcionalmente filtradas por símbolo."""
+    n = storage.delete_all_signals(symbol)
+    return {"ok": True, "deleted": n, "symbol": symbol}
+
+
 @app.get("/stats")
 def get_stats():
     return storage.stats()

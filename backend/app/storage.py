@@ -252,6 +252,16 @@ def delete_signal(signal_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def delete_all_signals(symbol: Optional[str] = None) -> int:
+    ph = _PH
+    with _db() as cur:
+        if symbol:
+            cur.execute(f"DELETE FROM signals WHERE symbol = {ph}", (symbol,))
+        else:
+            cur.execute("DELETE FROM signals")
+        return cur.rowcount or 0
+
+
 def distinct_symbols() -> List[str]:
     with _db() as cur:
         _exec(cur, "SELECT DISTINCT symbol FROM signals ORDER BY symbol", ())

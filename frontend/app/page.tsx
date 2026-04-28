@@ -58,6 +58,14 @@ type JournalDraft = {
   emotion: Emotion | null;
 };
 
+type ConfirmDialogState = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  itemHint?: string;
+  onConfirm: () => void | Promise<void>;
+};
+
 type NewsWarning = {
   title: string;
   country: string;
@@ -1471,6 +1479,22 @@ export default function Home() {
   const [calendarOpen, setCalendarOpen] = useState<boolean>(false);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const saved = (typeof window !== "undefined" && localStorage.getItem("theme")) as "dark" | "light" | null;
+    const initial = saved === "light" || saved === "dark" ? saved : "dark";
+    setTheme(initial);
+    document.documentElement.setAttribute("data-theme", initial);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch {}
+  };
 
   const totalPages = Math.max(1, Math.ceil(totalSignals / PAGE_SIZE));
 
@@ -1529,6 +1553,35 @@ export default function Home() {
     setJournal({ signalId: id, result, taken: null, respected_plan: null, closed_early: null, emotion: null });
   };
 
+  const deleteSignal = (id: number) => {
+    setConfirmDialog({
+      title: "Eliminar señal",
+      message: "Vas a eliminar esta señal del historial. Esta acción no se puede deshacer.",
+      confirmLabel: "Eliminar",
+      itemHint: `Señal #${id}`,
+      onConfirm: async () => {
+        await fetch(`${API}/signals/${id}`, { method: "DELETE" });
+        load();
+      },
+    });
+  };
+
+  const deleteAllSignals = () => {
+    const scopeLabel = filter === "ALL" ? "todas las señales" : `todas las señales de ${filter}`;
+    setConfirmDialog({
+      title: filter === "ALL" ? "Eliminar todo el historial" : `Eliminar señales de ${filter}`,
+      message: `Vas a eliminar ${scopeLabel} (${totalSignals} ${totalSignals === 1 ? "registro" : "registros"}). Esta acción no se puede deshacer.`,
+      confirmLabel: "Eliminar todas",
+      itemHint: filter === "ALL" ? `${totalSignals} señales` : `${filter} · ${totalSignals} señales`,
+      onConfirm: async () => {
+        const qs = filter === "ALL" ? "" : `?symbol=${encodeURIComponent(filter)}`;
+        await fetch(`${API}/signals${qs}`, { method: "DELETE" });
+        setPage(1);
+        load();
+      },
+    });
+  };
+
   const submitJournal = async () => {
     if (!journal || !journal.taken) return;
     const body: Record<string, unknown> = { result: journal.result, taken: journal.taken };
@@ -1553,7 +1606,17 @@ export default function Home() {
           <h1>AI Trading Assistant</h1>
           <div className="sub">Motor de decisión contextual · auto-refresh 5s</div>
         </div>
-        <button className="refresh" onClick={load}>Refrescar</button>
+        <div className="head-actions">
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+            aria-label="Cambiar tema"
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
+          <button className="refresh" onClick={load}>Refrescar</button>
+        </div>
       </div>
 
       <nav className="view-nav">
@@ -1674,6 +1737,16 @@ export default function Home() {
         {symbols.map((s) => (
           <button key={s} className={filter === s ? "tab active" : "tab"} onClick={() => { setFilter(s); setPage(1); }}>{s}</button>
         ))}
+        {totalSignals > 0 && (
+          <button
+            className="tab tab-danger"
+            onClick={deleteAllSignals}
+            title={filter === "ALL" ? "Eliminar todas las señales" : `Eliminar todas las señales de ${filter}`}
+            style={{ marginLeft: "auto" }}
+          >
+            🗑 Eliminar {filter === "ALL" ? "todas" : filter}
+          </button>
+        )}
       </div>
 
       {stats && stats.closed > 0 && (
@@ -1704,6 +1777,7 @@ export default function Home() {
               <th>Decisión</th>
               <th>Razón</th>
               <th>Resultado</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -1752,6 +1826,14 @@ export default function Home() {
                       <button className="btn-be"   onClick={() => openJournal(it.id, "BE")}>BE</button>
                     </div>
                   )}
+                </td>
+                <td>
+                  <button
+                    className="btn-delete-row"
+                    onClick={() => deleteSignal(it.id)}
+                    title="Eliminar esta señal"
+                    aria-label="Eliminar señal"
+                  >✕</button>
                 </td>
               </tr>
             ))}
@@ -1832,6 +1914,79 @@ export default function Home() {
           onClose={() => setJournal(null)}
         />
       )}
+
+      {confirmDialog && (
+        <ConfirmModal
+          state={confirmDialog}
+          onClose={() => setConfirmDialog(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmModal({
+  state, onClose,
+}: {
+  state: ConfirmDialogState;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  const handleConfirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await state.onConfirm();
+      onClose();
+    } catch (e) {
+      setBusy(false);
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={busy ? undefined : onClose}>
+      <div className="modal modal-confirm" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-confirm-icon-wrap">
+          <div className="modal-confirm-icon">🗑</div>
+        </div>
+        <div className="modal-confirm-body">
+          <h3 className="modal-confirm-title">{state.title}</h3>
+          <p className="modal-confirm-message">{state.message}</p>
+          {state.itemHint && (
+            <div className="modal-confirm-hint">
+              <span className="modal-confirm-hint-dot" />
+              {state.itemHint}
+            </div>
+          )}
+        </div>
+        <div className="modal-confirm-foot">
+          <button
+            className="modal-btn modal-btn-cancel"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancelar
+          </button>
+          <button
+            className="modal-btn modal-btn-danger"
+            onClick={handleConfirm}
+            disabled={busy}
+            autoFocus
+          >
+            {busy ? "Eliminando…" : state.confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

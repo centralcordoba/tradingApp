@@ -10,7 +10,7 @@ Contexto operativo del proyecto para futuras sesiones de Claude Code.
 
 **Dos capas de análisis independientes que complementan al Pine**:
 - **Scanner en vivo** (pestaña "Análisis de zonas"): sesgo macro y tendencia por confluencia técnica multi-factor (EMA9/21/50/200, RSI, rango, impulso) sobre ~11 pares. Clasifica en 3 bloques (trend / sin edge / reversión).
-- **Radar de setups** (pestaña "Radar"): segunda capa que busca puntos concretos de entrada en zonas clave (pin bar / envolvente sobre soporte/resistencia + divergencia RSI). Clasifica en 4 bloques (B1 compra válida, B2 trampa long, B3 venta válida, B4 trampa short). Cross-check con el sesgo del scanner — si hay conflicto, reclasifica B1/B3 → B2/B4.
+- **Radar de setups** (pestaña "Radar"): segunda capa que busca puntos concretos de entrada en zonas clave (pin bar / envolvente sobre soporte/resistencia + divergencia RSI). Clasifica en 4 bloques (B1 compra válida, B2 trampa long, B3 venta válida, B4 trampa short). Cross-check con el sesgo del scanner — si hay conflicto el setup se marca con **NO CUMPLE MTF LOCK** (no se reclasifica a trampa, se preserva el bloque original pero con badge explícito y card dimeada). Encima de la grilla hay un **semáforo consolidado** (OPERAR / ESPERAR / EVITAR) que evalúa 5 filtros A+ por setup: kill zone, MTF LOCK, fuerza STRONG, RRR≥2:1, SL dentro del cap.
 
 ## Stack
 
@@ -60,7 +60,7 @@ tradingApp/
 │   │   ├── radar.py            # Radar de setups (pin bar/envolv + divergencia + SL cap) + cross-check con scanner
 │   │   └── storage.py          # Dual-mode: PostgreSQL (Supabase) / SQLite
 │   ├── tests/
-│   │   └── test_radar.py       # 46 tests unitarios del radar (pivots, rechazo, SL, alignment, market_closed)
+│   │   └── test_radar.py       # 49 tests unitarios del radar (pivots, rechazo, SL, RRR, alignment/MTF LOCK, market_closed)
 │   ├── requirements.txt
 │   ├── render.yaml             # Config deploy Render
 │   ├── supabase_init.sql       # SQL inicial para tabla signals en Supabase
@@ -317,7 +317,7 @@ Segunda capa de análisis que convive con el scanner. Busca **puntos concretos d
 4. `_detect_recent_rejection` → escanea las últimas 3 velas buscando pin bar / envolvente. Devuelve `candle_age` (1/2/3) y `candle_ts`. Si `age=3` → `expired=True`.
 5. `_detect_rsi_divergence` → divergencia alcista (precio nuevo mínimo + RSI sube + RSI<50) o bajista (simétrico).
 6. `_classify_reversal_setup` → 5 bloques (ver tabla abajo).
-7. `_estimate_sl` → SL = soporte/resistencia ± 0.5·ATR. Distancia en pips con cap por instrumento.
+7. `_estimate_sl` → SL = soporte/resistencia ± 0.5·ATR. Distancia en pips con cap por instrumento. **También calcula RRR** contra el nivel opuesto como TP natural: LONG → `tp=resistance`, SHORT → `tp=support`. Devuelve `rrr`, `rrr_below_min` (true si `rrr < MIN_RRR=2.0`), `reward_pips`, `tp_price`, `rrr_min`.
 8. **Stale data check**: si la última vela se cerró hace >30 min, fuerza `rejection.expired=True` (evita mostrar setups "frescos" con datos del viernes el lunes por la mañana).
 9. Adjunta `candles` = últimas 20 OHLC en formato ISO 8601 (para el minigráfico del frontend).
 
@@ -335,16 +335,21 @@ Segunda capa de análisis que convive con el scanner. Busca **puntos concretos d
 
 `quality` = cuenta de señales positivas (near_level + rejection + divergence) — máx 3.
 
-### Cross-check con scanner (reclasificación)
+### Cross-check con scanner (MTF LOCK explícito — sin reclasificar)
 
-En `get_radar_response`, tras armar los setups, se llama `scanner.scan_pairs()` (cache compartido → sin fetch extra) y se cruza el bias macro:
+En `get_radar_response`, tras armar los setups, se llama `scanner.scan_pairs()` (cache compartido → sin fetch extra) y se cruza el bias macro. **Importante**: desde la revisión de mejoras UX, el cross-check **NO reclasifica** bloques a trampa — preserva `bloque`, `side`, `strength` y `sl` originales, y solo expone flags explícitos en `alignment`:
 
-- Radar B1 LONG + scanner bias LONG → ✓ `alignment="aligned"`, mantener B1.
-- **Radar B1 LONG + scanner bias SHORT → ⚠ reclasificar a B2 TRAP_LONG** (conflict) — el setup técnico existe pero va contra el sesgo macro.
-- Scanner NEUTRAL → `alignment="neutral"`, mantener clasificación (no contradice ni respalda).
-- Sin data del scanner → `alignment="unknown"`.
+- `mtf_lock_passed: boolean | null` — true si alineado con sesgo macro, false si conflicto, null si neutral/unknown.
+- `mtf_lock_failed: boolean` — true solo cuando hay conflicto claro (escáner con bias LONG/SHORT opuesto al setup).
+- `reclassified: false` siempre — se mantiene el campo por compat, pero ya no se reclasifica.
 
-Reclasificar = `bloque` cambia, `strength="WARN"`, `sl=None`, `alignment.reclassified=true`, `alignment.original_bloque=1|3`.
+Casos:
+- Radar B1 LONG + scanner bias LONG → `status="aligned"`, `mtf_lock_passed=true`.
+- **Radar B1 LONG + scanner bias SHORT → `status="conflict"`, `mtf_lock_failed=true`** — el frontend muestra badge rojo "⛔ NO CUMPLE MTF LOCK" y dimea la card, pero el SL y los valores siguen visibles para referencia.
+- Scanner NEUTRAL → `status="neutral"`, `mtf_lock_passed=null` (no bloquea, no respalda).
+- Sin data del scanner → `status="unknown"`, `mtf_lock_passed=null`.
+
+**Por qué este cambio**: reclasificar ocultaba información operativa. Con el semáforo consolidado + badge explícito, el usuario ve la señal completa y el sistema le dice claramente cuándo no operarla.
 
 ### SL caps (pips absolutos por instrumento)
 
@@ -357,6 +362,37 @@ SL_MAX_PIPS = {
 ```
 
 Si `distance_pips > cap` → `too_wide=true`, la card se pinta dimmed con badge "SL EXCEDE" y NO cuenta en `total_setups`.
+
+### RRR y `rrr_below_min` (filtro visual de calidad)
+
+`_estimate_sl` calcula RRR contra el nivel opuesto (reverse-to-level target):
+
+- **LONG**: `risk = price - sl_price`, `reward = resistance - price`, `rrr = reward / risk`.
+- **SHORT**: `risk = sl_price - price`, `reward = price - support`, `rrr = reward / risk`.
+- `MIN_RRR = 2.0` (constante en `radar.py`). Debajo de ese umbral, `rrr_below_min=true`.
+- Si no hay nivel opuesto calculable (`resistance=None` en LONG, etc), `rrr=None` y `rrr_below_min=false` (no castigamos lo indeterminable).
+
+**Frontend**: cards con `rrr_below_min=true` se dimean (opacity 0.55), los valores de precio/SL se tachan, badge naranja `RRR < 2`. Fila TP/RRR se muestra bajo el SL con el valor numérico del ratio.
+
+### Semáforo consolidado (OPERAR / ESPERAR / EVITAR)
+
+Componente `RadarSemaforo` al tope de la vista radar. Evalúa cada setup contra **5 filtros A+** y decide globalmente:
+
+| Filtro | Cumple si... |
+|---|---|
+| Kill zone activa | sesión actual (hora Madrid) es `fire` u `ok` |
+| MTF LOCK | `alignment.mtf_lock_passed === true` |
+| Fuerza STRONG | `strength === "STRONG"` (setup con divergencia) |
+| RRR ≥ 2:1 | `sl.rrr >= sl.rrr_min` |
+| SL dentro del cap | `sl.too_wide === false` |
+
+Decisión global (por el **mejor** setup del batch):
+- **5/5 → OPERAR** (verde, pulsing)
+- **3-4/5 → ESPERAR** (amarillo)
+- **<3/5 → EVITAR** (rojo)
+- **market_closed → EVITAR** (override, sin evaluar)
+
+Los 5 chips ✓/· se pintan bajo la decisión para que el usuario vea exactamente qué filtro falló. La idea: **el sistema decide, el usuario ejecuta** — no más "evaluar mentalmente" si entrar.
 
 ### Detección de mercado cerrado
 
@@ -381,13 +417,39 @@ Si `distance_pips > cap` → `too_wide=true`, la card se pinta dimmed con badge 
 }
 ```
 
+Dentro de cada setup, los campos clave añadidos por las mejoras UX:
+
+```json
+{
+  "sl": {
+    "price": 1.0985,
+    "distance_pips": 14.5,
+    "cap_pips": 25,
+    "too_wide": false,
+    "tp_price": 1.1030,         // nivel opuesto (= resistance para LONG, support para SHORT)
+    "reward_pips": 30.0,
+    "rrr": 2.07,                // reward / risk
+    "rrr_below_min": false,
+    "rrr_min": 2.0
+  },
+  "alignment": {
+    "status": "aligned|conflict|neutral|unknown",
+    "scanner_bias": "LONG|SHORT|NEUTRAL|null",
+    "scanner_confluence": 5,
+    "mtf_lock_passed": true,    // true=aligned, false=conflict, null=neutral/unknown
+    "mtf_lock_failed": false,   // explícito para el badge del frontend
+    "reclassified": false       // siempre false (compat; ya no se reclasifica)
+  }
+}
+```
+
 ### Minigráfico frontend (`radarChart.ts`)
 
 Canvas 2D puro, **sin librerías**. Función pura `drawRadarChart(canvas, setup)`. 7 capas en orden: fondo, soporte (verde), resistencia (roja), SL (naranja punteado), 20 velas japonesas, triángulo marcador en la vela de rechazo, zona TP sombreada (solo B1/B3). Responsive vía `ResizeObserver` sobre el parent. Labels mínimos (10px mono): precio S/R solo si `near_*`, texto "SL" solo si no too_wide.
 
 ### Watchlist operativa
 
-`WATCHLIST = ["XAUUSD", "EURUSD"]` en frontend. Toggle "Solo mis pares" (default OFF) filtra los cards. Los pares operativos muestran badge `● Operativo` sutil. El radar por backend escanea los 11 pares por defecto para tener contexto de reclasificación aunque no operes esos pares.
+`WATCHLIST = ["XAUUSD", "EURUSD"]` en frontend. **No hay filtro** — el toggle "Solo mis pares" se eliminó por completo. La constante solo pinta el badge `● Operativo` en las cards de tus pares para identificarlas visualmente. El radar por backend escanea los 11 pares por defecto para tener contexto de MTF LOCK aunque no operes esos pares.
 
 ## Polling y consumo de créditos Twelve Data
 
@@ -447,16 +509,20 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 - **Zona chips coloreados**: ✓ chips con color coding (deep-discount → deep-premium) + tooltips contextuales según zona+lado en la tabla de señales.
 - **Decisión de diseño UI**: se descartó un panel independiente de zonas compra/venta por redundancia con el motor y principio pro-scalper de "menos indicadores = mejor ejecución". Se optó por color coding inline.
 - **Scanner + Radar comparten cache de OHLC**: `scanner._ohlc_cache` (TTL 15 min) usado por ambos — una fetch por par por 15 min, independiente de cuántas vistas lo consulten.
-- **Radar de setups (pestaña "Radar")**: ✓ detecta pin bars / envolventes en soporte/resistencia, filtra rango comprimido (MIN_RANGE_PCT), SL estimado con cap por instrumento en pips absolutos (XAU=40, EUR=25), reclasificación automática a trampa si hay conflicto con sesgo del scanner, separación active/expired en el payload, minigráfico Canvas 2D por card.
+- **Radar de setups (pestaña "Radar")**: ✓ detecta pin bars / envolventes en soporte/resistencia, filtra rango comprimido (MIN_RANGE_PCT), SL estimado con cap por instrumento en pips absolutos (XAU=40, EUR=25), separación active/expired en el payload, minigráfico Canvas 2D por card.
+- **RRR calculado en backend**: ✓ `_estimate_sl` devuelve `tp_price`, `reward_pips`, `rrr`, `rrr_below_min`, `rrr_min=2.0`. TP natural = nivel opuesto. Frontend dimea + tacha cards con `rrr < 2`.
+- **MTF LOCK explícito (sin reclasificación)**: ✓ `_cross_check_alignment` ya no muta `bloque/side/strength/sl` en conflicto. Solo marca `alignment.mtf_lock_passed/mtf_lock_failed`. Frontend muestra badge rojo "⛔ NO CUMPLE MTF LOCK" sobre la card. Decisión: mejor mostrar la señal completa + razón de rechazo que ocultarla reclasificándola a trampa.
+- **Semáforo consolidado OPERAR/ESPERAR/EVITAR**: ✓ componente `RadarSemaforo` al tope del radar. Evalúa cada setup contra 5 filtros A+ (kill zone, MTF LOCK, STRONG, RRR≥2, SL cap) y pinta la decisión global del mejor setup. Chips ✓/· visibles para entender qué falla.
+- **Filtro "Solo mis pares" eliminado**: ✓ toggle removido por completo (estado, helper, UI, texto del empty state). La constante `WATCHLIST` sobrevive solo para el badge `● Operativo` sutil en las cards.
 - **Market closed pause**: ✓ backend detecta vela cacheada >30min (fin de semana o feed caído), frontend pausa `setInterval` → cero tráfico upstream en finde. Banner distintivo 🌙 en radar, indicador sutil en scanner.
-- **46 tests unitarios del radar**: ✓ `backend/tests/test_radar.py` cubre pivots, rejection en 3 velas, divergencia, SL cap, alignment, compression, stale data, normalización ISO. Ejecutable con `python tests/test_radar.py`.
-- **Decisión operativa confirmada**: watchlist del radar = XAUUSD + EURUSD (toggle frontend default OFF). Los demás pares se escanean por contexto para el cross-check de sesgo, no para operar.
+- **49 tests unitarios del radar**: ✓ `backend/tests/test_radar.py` cubre pivots, rejection en 3 velas, divergencia, SL cap, RRR, alignment/MTF LOCK, compression, stale data, normalización ISO. Ejecutable con `.venv/Scripts/python tests/test_radar.py`.
+- **Decisión operativa confirmada**: watchlist del radar = XAUUSD + EURUSD. Los demás pares se escanean por contexto para el cross-check de sesgo (MTF LOCK), no para operar.
 
 ## Próximos pasos posibles (mencionados, no hechos)
 
 - Notificaciones a Telegram cuando llega ENTER.
 - Calculadora de tamaño de posición integrada (capital + % riesgo → lotes).
-- R:R floor como veto duro (rechazar si `(tp-entry)/(entry-sl) < 1.5`).
+- R:R floor como veto duro en el motor del Pine (rechazar si `(tp-entry)/(entry-sl) < 1.5`). Nota: el radar ya filtra visualmente con `rrr_below_min`; lo pendiente es integrarlo como veto en `decision_engine.py` para las señales del Pine.
 - Kill zone como veto duro en el backend (fuera de London/NY → WAIT automático). Nota: el panel visual ya existe, falta integrar como veto en `decision_engine.py`.
 - Daily loss limit + cooldown post-trade (circuit breaker anti-revenge-trading).
 - Equity curve y heatmap hora-del-día vs PnL en frontend.
