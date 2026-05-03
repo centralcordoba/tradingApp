@@ -8,11 +8,12 @@
 
 /* === Color, spacing & type tokens === */
 :root, html[data-theme="dark"] {
-  /* Backgrounds */
-  --bg: #0A0E14;
-  --bg-elev: #131822;
-  --bg-hover: #1A2030;
-  --bg-row: #0F141C;
+  /* Backgrounds — slate muy ligeramente cálido para diferenciar del slate
+     puro de Linear/Vercel. Mantenemos contraste alto. */
+  --bg: #0B0D12;
+  --bg-elev: #14171F;
+  --bg-hover: #1B1F2A;
+  --bg-row: #10131A;
 
   /* Borders */
   --border-subtle: #1F2937;
@@ -24,24 +25,26 @@
   --text-2: #9CA3AF;
   --text-3: #6B7280;
 
-  /* Semantic */
+  /* Semantic — accent es ÁMBAR (terminal financiero clásico).
+     warn movido a naranja para no chocar con accent. */
   --buy: #22C55E;
   --sell: #EF4444;
-  --warn: #F59E0B;
-  --info: #3B82F6;
+  --warn: #FB923C;
+  --info: #38BDF8;
   --aplus: #10B981;
-  --accent: #6366F1;
+  --accent: #F59E0B;
 
   /* Tinted semantic backgrounds */
   --buy-bg: rgba(34, 197, 94, 0.12);
   --buy-bg-strong: rgba(34, 197, 94, 0.20);
   --sell-bg: rgba(239, 68, 68, 0.12);
   --sell-bg-strong: rgba(239, 68, 68, 0.20);
-  --warn-bg: rgba(245, 158, 11, 0.12);
-  --info-bg: rgba(59, 130, 246, 0.12);
+  --warn-bg: rgba(251, 146, 60, 0.14);
+  --info-bg: rgba(56, 189, 248, 0.12);
   --aplus-bg: rgba(16, 185, 129, 0.14);
   --aplus-bg-strong: rgba(16, 185, 129, 0.28);
-  --accent-bg: rgba(99, 102, 241, 0.15);
+  --accent-bg: rgba(245, 158, 11, 0.14);
+  --accent-bg-strong: rgba(245, 158, 11, 0.25);
 
   /* Mockup naming aliases — pegar CSS del mockup literal sin renombrar.
      Apuntan a los mismos valores. */
@@ -67,17 +70,18 @@
   --border-2: var(--border-default);
   --text-muted: var(--text-3);
 
-  /* Typography */
-  --font-ui: var(--font-inter, -apple-system), BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono: var(--font-mono-jb, ui-monospace), "JetBrains Mono", "SF Mono", Consolas, monospace;
+  /* Typography — Space Grotesk + Space Mono (ver layout.tsx). */
+  --font-ui: var(--font-sans, -apple-system), BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-mono-prim, ui-monospace), "Space Mono", "SF Mono", Consolas, monospace;
 
-  /* Type scale */
-  --fs-label: 11px;
-  --fs-body: 13px;
-  --fs-sub: 15px;
-  --fs-section: 18px;
-  --fs-kpi: 24px;
-  --fs-hero: 32px;
+  /* Type scale — bump general para legibilidad + jerarquía más marcada
+     en hero numbers (KPI value, decisión SignalCard). */
+  --fs-label: 12px;
+  --fs-body: 14px;
+  --fs-sub: 16px;
+  --fs-section: 20px;
+  --fs-kpi: 32px;
+  --fs-hero: 44px;
 
   /* Spacing — 4px grid */
   --sp-1: 4px;
@@ -122,19 +126,20 @@ html[data-theme="light"] {
   --text-3: #6B7280;
   --buy: #16A34A;
   --sell: #DC2626;
-  --warn: #B45309;
-  --info: #2563EB;
+  --warn: #C2410C;
+  --info: #0284C7;
   --aplus: #047857;
-  --accent: #4F46E5;
+  --accent: #B45309;
   --buy-bg: rgba(22, 163, 74, 0.12);
   --buy-bg-strong: rgba(22, 163, 74, 0.20);
   --sell-bg: rgba(220, 38, 38, 0.12);
   --sell-bg-strong: rgba(220, 38, 38, 0.20);
-  --warn-bg: rgba(180, 83, 9, 0.12);
-  --info-bg: rgba(37, 99, 235, 0.12);
+  --warn-bg: rgba(194, 65, 12, 0.12);
+  --info-bg: rgba(2, 132, 199, 0.12);
   --aplus-bg: rgba(4, 120, 87, 0.12);
   --aplus-bg-strong: rgba(4, 120, 87, 0.22);
-  --accent-bg: rgba(79, 70, 229, 0.15);
+  --accent-bg: rgba(180, 83, 9, 0.14);
+  --accent-bg-strong: rgba(180, 83, 9, 0.24);
 }
 
 /* === Base === */

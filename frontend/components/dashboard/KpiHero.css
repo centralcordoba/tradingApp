@@ -20,18 +20,18 @@
 }
 
 .kpi-label {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.10em;
   font-weight: 600;
   color: var(--text-tertiary);
 }
 
 .kpi-value {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
 }
 
 .kpi-value.pnl-positive { color: var(--buy); }
@@ -42,7 +42,7 @@
 .kpi-value.kpi-open     { color: var(--accent); }
 
 .kpi-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-tertiary);
 }
 .kpi-sub .num { color: var(--text-secondary); }

@@ -1,19 +1,19 @@
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Space_Grotesk, Space_Mono } from "next/font/google";
 import "./globals.css";
 import type { Metadata } from "next";
 
-const inter = Inter({
+const sans = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-sans",
   display: "swap",
   weight: ["400", "500", "600", "700"],
 });
 
-const jbMono = JetBrains_Mono({
+const mono = Space_Mono({
   subsets: ["latin"],
-  variable: "--font-mono-jb",
+  variable: "--font-mono-prim",
   display: "swap",
-  weight: ["400", "500", "700"],
+  weight: ["400", "700"],
 });
 
 export const metadata: Metadata = {
@@ -25,7 +25,7 @@ const themeInit = `(function(){try{var t=localStorage.getItem('theme');if(t!=='l
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" data-theme="dark" className={`${inter.variable} ${jbMono.variable}`}>
+    <html lang="es" data-theme="dark" className={`${sans.variable} ${mono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
