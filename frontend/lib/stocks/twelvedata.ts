@@ -60,29 +60,40 @@ export function clearStocksCache(symbol?: string): void {
   }
 }
 
-// ─── Retry con backoff exponencial (429) ───────────────────────
+// ─── Retry con backoff diferenciado ───────────────────────────
+//
+// Twelve Data free tier limita a 8 req/min (rolling window). Cuando
+// ese tope se cruza, esperar 1-4s no alcanza — el window es de 60s.
+// Por eso separamos:
+//   - 429 (rate limit) → 3s, 8s, 20s = 31s total. Da chance a que el
+//     window se vacíe sin bloquear al usuario indefinidamente.
+//   - Network errors → 1s, 2s, 4s = 7s total. Son transitorios cortos.
 
-const RETRY_DELAYS_MS = [1000, 2000, 4000];
+const RATE_LIMIT_RETRY_MS = [3000, 8000, 20000];
+const NETWORK_RETRY_MS = [1000, 2000, 4000];
 
 async function fetchWithRetry(url: string, init?: RequestInit): Promise<Response> {
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+  let rlAttempt = 0;
+  let netAttempt = 0;
+
+  while (true) {
     try {
       const r = await fetch(url, { cache: "no-store", ...init });
-      if (r.status === 429 && attempt < RETRY_DELAYS_MS.length) {
-        await sleep(RETRY_DELAYS_MS[attempt]);
+      if (r.status === 429 && rlAttempt < RATE_LIMIT_RETRY_MS.length) {
+        await sleep(RATE_LIMIT_RETRY_MS[rlAttempt++]);
         continue;
       }
       return r;
     } catch (err) {
       lastErr = err;
-      if (attempt < RETRY_DELAYS_MS.length) {
-        await sleep(RETRY_DELAYS_MS[attempt]);
+      if (netAttempt < NETWORK_RETRY_MS.length) {
+        await sleep(NETWORK_RETRY_MS[netAttempt++]);
         continue;
       }
+      throw new StocksApiError(0, "NETWORK", `Fallo de red: ${String(lastErr)}`);
     }
   }
-  throw new StocksApiError(0, "NETWORK", `Fallo de red: ${String(lastErr)}`);
 }
 
 function sleep(ms: number): Promise<void> {

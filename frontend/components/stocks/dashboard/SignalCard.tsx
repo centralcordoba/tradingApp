@@ -62,7 +62,9 @@ function relativeTime(iso: string): string {
 
 function errorMessage(code: string, message: string): string {
   if (code === "NOT_FOUND") return `Ticker no encontrado: ${message}`;
-  if (code === "RATE_LIMIT") return "Límite de la API alcanzado — probá en unos segundos";
+  if (code === "RATE_LIMIT") {
+    return "Twelve Data limita 8 consultas por minuto en el plan free. Esperá ~30 segundos y reintentá. Si pasa seguido, puede ser que el cap diario (800 créditos) se haya alcanzado.";
+  }
   if (code === "NETWORK") return "Error de red — revisá tu conexión";
   return message;
 }
