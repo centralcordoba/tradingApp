@@ -20,14 +20,14 @@
   margin-bottom: 10px;
 }
 .timeline-title {
-  font-size: 11px;
+  font-size: 14.3px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-3);
 }
 .timeline-now {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-2);
   display: flex;
   gap: 8px;
@@ -52,7 +52,7 @@
   display: flex;
   align-items: center;
   padding: 0 10px;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -80,7 +80,7 @@
   transform: translate(-50%, -50%);
   background: var(--aplus);
   color: #022C22;
-  font-size: 9px;
+  font-size: 11.7px;
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 3px;
@@ -149,7 +149,7 @@
 .timeline-axis {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  font-size: 9px;
+  font-size: 11.7px;
   color: var(--text-3);
 }
 .timeline-axis div {

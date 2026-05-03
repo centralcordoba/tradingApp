@@ -35,7 +35,7 @@
   gap: 4px;
 }
 .signal-card-symbol {
-  font-size: 26px;
+  font-size: 33.8px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text-primary);
@@ -47,20 +47,20 @@
   gap: 10px;
 }
 .signal-card-price-num {
-  font-size: 22px;
+  font-size: 28.6px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 .signal-card-change {
-  font-size: 13px;
+  font-size: 16.9px;
   font-weight: 600;
 }
 .ch-up   { color: var(--buy); }
 .ch-down { color: var(--sell); }
 
 .signal-card-status-pill {
-  font-size: 9px;
+  font-size: 11.7px;
   font-weight: 700;
   letter-spacing: 0.06em;
   padding: 3px 7px;
@@ -83,7 +83,7 @@
   padding: 6px 0;
 }
 .decision-label {
-  font-size: 44px;
+  font-size: 57.2px;
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1;
@@ -92,7 +92,7 @@
 .decision-label.decision-sell  { color: var(--sell); }
 .decision-label.decision-hold  { color: var(--warn); }
 .decision-meta {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
 }
 .decision-meta b {
@@ -110,7 +110,7 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 11px;
+  font-size: 14.3px;
 }
 .confidence-label {
   color: var(--text-tertiary);
@@ -119,7 +119,7 @@
   font-weight: 600;
 }
 .confidence-value {
-  font-size: 13px;
+  font-size: 16.9px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -148,7 +148,7 @@
   gap: 4px;
 }
 .signal-card-reason {
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-secondary);
   padding-left: 16px;
   position: relative;
@@ -168,7 +168,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 7px 10px;
-  font-size: 11px;
+  font-size: 14.3px;
   font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
@@ -190,7 +190,7 @@
   border-top: 1px solid var(--border-subtle);
 }
 .signal-card-fresh {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
 }
 .signal-card-refresh {
@@ -201,7 +201,7 @@
   border-radius: 5px;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 18.2px;
   transition: all 120ms;
   font-family: inherit;
 }
@@ -213,7 +213,7 @@
 
 /* Disclaimer */
 .signal-card-disclaimer {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-tertiary);
   line-height: 1.5;
   margin: 0;
@@ -254,11 +254,11 @@
   text-align: center;
 }
 .signal-card-error-icon {
-  font-size: 28px;
+  font-size: 36.4px;
   color: var(--warn);
 }
 .signal-card-error-msg {
-  font-size: 13px;
+  font-size: 16.9px;
   color: var(--text-secondary);
   max-width: 320px;
   line-height: 1.5;
@@ -270,7 +270,7 @@
   border: 1px solid var(--border-default);
   border-radius: 6px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 15.6px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;

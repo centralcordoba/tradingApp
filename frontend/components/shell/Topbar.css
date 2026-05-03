@@ -18,7 +18,7 @@
   align-items: center;
   gap: 8px;
   font-weight: 700;
-  font-size: 15px;
+  font-size: 19.5px;
   letter-spacing: -0.02em;
   color: var(--text);
 }
@@ -30,7 +30,7 @@
   display: grid;
   place-items: center;
   color: #1A1208;
-  font-size: 11px;
+  font-size: 14.3px;
   font-weight: 700;
 }
 .brand-name { white-space: nowrap; }
@@ -46,7 +46,7 @@
 }
 .tab {
   padding: 6px 13px;
-  font-size: 13px;
+  font-size: 16.9px;
   font-weight: 500;
   color: var(--text-2);
   background: transparent;
@@ -76,7 +76,7 @@
   background: var(--bg);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-2);
   white-space: nowrap;
 }

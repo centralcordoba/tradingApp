@@ -18,7 +18,7 @@
 
 .sb-label {
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--text-tertiary);
@@ -33,7 +33,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 15.6px;
   font-family: inherit;
   margin-bottom: 8px;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>");
@@ -73,11 +73,11 @@
 
 .pair-name {
   font-weight: 500;
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-primary);
 }
 .pair-sub {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-tertiary);
   margin-top: 1px;
 }
@@ -97,7 +97,7 @@
   border: none;
   cursor: pointer;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 15.6px;
   padding: 4px 8px;
   line-height: 1;
 }
@@ -105,7 +105,7 @@
 .star.filled { color: var(--warning); }
 
 .pair-empty {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   padding: 8px;
   text-align: center;
@@ -126,11 +126,11 @@
   padding: 7px 8px;
   border-radius: 5px;
   align-items: center;
-  font-size: 11px;
+  font-size: 14.3px;
 }
 .event-item:hover { background: var(--bg-hover); }
-.event-time { color: var(--text-tertiary); font-size: 10px; }
-.event-flag { font-size: 12px; }
+.event-time { color: var(--text-tertiary); font-size: 13px; }
+.event-flag { font-size: 15.6px; }
 .event-name {
   color: var(--text-secondary);
   white-space: nowrap;
@@ -148,7 +148,7 @@
 .impact-low  { background: var(--text-tertiary); }
 
 .sb-events-empty {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   padding: 8px;
   text-align: center;

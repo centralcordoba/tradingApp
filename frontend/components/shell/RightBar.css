@@ -35,7 +35,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -45,7 +45,7 @@
 .next-setup-label .star { color: var(--aplus); }
 
 .next-setup-time {
-  font-size: 28px;
+  font-size: 36.4px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.02em;
@@ -53,7 +53,7 @@
   margin-bottom: 4px;
 }
 .next-setup-name {
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
@@ -68,7 +68,7 @@
   background: var(--bg-base);
   border: 1px solid var(--border-default);
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 13px;
   font-family: var(--font-mono);
   color: var(--text-primary);
   cursor: pointer;
@@ -83,7 +83,7 @@
   color: #022C22;
   border: none;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 14.3px;
   font-weight: 600;
   cursor: pointer;
   letter-spacing: 0.02em;
@@ -106,18 +106,18 @@
   justify-content: space-between;
 }
 .panel-title {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-tertiary);
 }
 .panel-counter {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 .panel-empty {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   padding: 14px;
   text-align: center;
@@ -137,12 +137,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 15.6px;
   font-weight: 600;
 }
 
 .signal-pl {
-  font-size: 13px;
+  font-size: 16.9px;
   font-weight: 600;
   text-align: right;
 }
@@ -150,12 +150,12 @@
 .pl-down { color: var(--sell); }
 
 .signal-entry {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 .signal-meta {
   grid-column: 1 / -1;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
@@ -163,7 +163,7 @@
   display: inline-block;
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -171,7 +171,7 @@
 .side-pill.side-sell    { background: var(--sell-bg); color: var(--sell); }
 .side-pill.side-wait    { background: var(--warn-bg); color: var(--warn); }
 .side-pill.side-neutral { background: var(--bg-hover); color: var(--text-tertiary); }
-.side-pill.side-decision { font-size: 9px; padding: 1px 5px; }
+.side-pill.side-decision { font-size: 11.7px; padding: 1px 5px; }
 
 /* === Próxima ventana panel === */
 .window-info {
@@ -184,7 +184,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 14.3px;
 }
 .window-label { color: var(--text-tertiary); }
 .window-value { color: var(--text-primary); }
@@ -195,7 +195,7 @@
 
 /* === Disclaimer === */
 .rb-disclaimer {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-tertiary);
   padding: 6px 4px;
   line-height: 1.5;

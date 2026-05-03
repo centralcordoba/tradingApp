@@ -26,7 +26,7 @@
 }
 
 .pb-label {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -35,17 +35,17 @@
 
 .pb-sep {
   color: var(--border-default);
-  font-size: 11px;
+  font-size: 14.3px;
 }
 
 .pb-value {
-  font-size: 12px;
+  font-size: 15.6px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .pb-meta {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
 }
 .pb-meta b {
@@ -56,7 +56,7 @@
 .pb-spacer { flex: 1; min-width: 8px; }
 
 .pb-edit {
-  font-size: 11px;
+  font-size: 14.3px;
   font-weight: 600;
   color: var(--text-secondary);
   padding: 2px 8px;

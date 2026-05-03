@@ -35,7 +35,7 @@
 }
 
 .mh-pill {
-  font-size: 9px;
+  font-size: 11.7px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -49,13 +49,13 @@
 .mh-pill.mh-closed-pill  { background: var(--bg-hover); color: var(--text-tertiary); }
 
 .mh-et {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   font-weight: 600;
 }
 
 .mh-time {
-  font-size: 28px;
+  font-size: 36.4px;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1;
@@ -64,7 +64,7 @@
 }
 
 .mh-sub {
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
@@ -93,13 +93,13 @@
 }
 .mh-slot.is-active .mh-slot-label { color: var(--accent); }
 .mh-slot-label {
-  font-size: 9px;
+  font-size: 11.7px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-tertiary);
 }
 .mh-slot-time {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text-secondary);
 }

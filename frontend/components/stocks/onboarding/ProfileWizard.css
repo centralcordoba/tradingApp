@@ -39,7 +39,7 @@
   gap: 8px;
 }
 .wizard-step-num {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   font-weight: 600;
 }
@@ -51,7 +51,7 @@
   border-radius: 5px;
   color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 15.6px;
   transition: all 120ms;
 }
 .wizard-cancel:hover {
@@ -70,14 +70,14 @@
   gap: 18px;
 }
 .wizard-title {
-  font-size: 18px;
+  font-size: 23.4px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.01em;
 }
 .wizard-subtitle {
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-tertiary);
   margin: 0;
   line-height: 1.5;
@@ -88,7 +88,7 @@
 }
 
 .wizard-disclaimer {
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--text-tertiary);
   background: var(--bg-base);
@@ -107,7 +107,7 @@
 .wizard-btn {
   padding: 9px 18px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 15.6px;
   font-weight: 600;
   cursor: pointer;
   border: 1px solid var(--border-subtle);
@@ -165,15 +165,15 @@
 }
 .step-option.is-selected .step-option-title { color: var(--accent); }
 .step-option-title {
-  font-size: 13px;
+  font-size: 16.9px;
   font-weight: 600;
 }
 .step-option-sub {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-secondary);
 }
 .step-option-detail {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   line-height: 1.45;
   margin-top: 2px;
@@ -196,25 +196,25 @@
   gap: 6px;
 }
 .risk-value {
-  font-size: 42px;
+  font-size: 54.6px;
   font-weight: 600;
   color: var(--accent);
   line-height: 1;
   letter-spacing: -0.03em;
 }
 .risk-of {
-  font-size: 18px;
+  font-size: 23.4px;
   color: var(--text-tertiary);
   font-weight: 500;
   margin-left: 2px;
 }
 .risk-label {
-  font-size: 13px;
+  font-size: 16.9px;
   font-weight: 600;
   color: var(--text-primary);
 }
 .risk-detail {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   line-height: 1.5;
   max-width: 460px;
@@ -265,7 +265,7 @@
   border-radius: 50%;
   cursor: pointer;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 14.3px;
   transition: all 120ms;
   font-family: inherit;
 }
@@ -296,7 +296,7 @@
   background: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 15.6px;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 120ms;
@@ -316,11 +316,11 @@
   font-weight: 600;
 }
 .sector-check {
-  font-size: 11px;
+  font-size: 14.3px;
   font-weight: 700;
 }
 .sectors-hint {
-  font-size: 11px;
+  font-size: 14.3px;
   color: var(--text-tertiary);
   font-style: italic;
 }
