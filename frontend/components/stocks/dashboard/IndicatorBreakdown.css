@@ -1,0 +1,57 @@
+/* IndicatorBreakdown — tabla votos/pesos del SignalCard expandido. */
+
+.ind-breakdown {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.ind-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  table-layout: auto;
+}
+
+.ind-table thead th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-row);
+}
+.ind-table thead th.right { text-align: right; }
+.ind-table thead th.center { text-align: center; }
+
+.ind-table tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+.ind-table tbody tr:last-child td { border-bottom: none; }
+.ind-table tbody tr:hover { background: var(--bg-hover); }
+
+.ind-table .right { text-align: right; }
+.ind-table .center { text-align: center; }
+.ind-name { font-weight: 600; color: var(--text-primary); }
+.ind-reason { color: var(--text-tertiary); font-size: 11px; }
+
+.vote-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  min-width: 28px;
+  text-align: center;
+}
+.vote-pill.vote-buy     { background: var(--buy-bg);   color: var(--buy); }
+.vote-pill.vote-sell    { background: var(--sell-bg);  color: var(--sell); }
+.vote-pill.vote-neutral { background: var(--bg-hover); color: var(--text-tertiary); }

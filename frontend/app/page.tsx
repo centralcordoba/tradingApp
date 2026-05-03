@@ -1,6 +1,14 @@
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { drawRadarChart } from "./radarChart";
+import { AppShell } from "@/components/shell/AppShell";
+import { Topbar } from "@/components/shell/Topbar";
+import { Sidebar } from "@/components/shell/Sidebar";
+import { RightBar } from "@/components/shell/RightBar";
+import { SessionsTimeline } from "@/components/dashboard/SessionsTimeline";
+import { KpiHero } from "@/components/dashboard/KpiHero";
+import { EquityCurve } from "@/components/dashboard/EquityCurve";
+import { StocksView } from "@/components/stocks/StocksView";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -74,26 +82,6 @@ type NewsWarning = {
   minutes_until: number;
   status: "past" | "imminent" | "upcoming";
 };
-
-type CalendarEvent = {
-  title: string;
-  country: string;
-  impact: string;
-  date_utc: string;
-  time_madrid: string;
-  forecast?: string | null;
-  previous?: string | null;
-};
-
-function todayMadrid(): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Madrid",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return fmt.format(new Date()); // YYYY-MM-DD
-}
 
 type Agg = { n: number; wins: number; losses: number; be: number; win_rate: number; pnl: number };
 type Stats = {
@@ -418,7 +406,7 @@ function zonaTooltip(zona: string, side: string): string {
   }
 }
 
-type View = "dashboard" | "zones" | "radar";
+type View = "dashboard" | "zones" | "radar" | "stocks";
 
 // Pares operativos del usuario — usados por el radar para filtrar ruido.
 const WATCHLIST = ["XAUUSD", "EURUSD"];
@@ -1475,12 +1463,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [journal, setJournal] = useState<JournalDraft | null>(null);
   const [newsWarnings, setNewsWarnings] = useState<NewsWarning[]>([]);
-  const [calendarDate, setCalendarDate] = useState<string>(todayMadrid);
-  const [calendarOpen, setCalendarOpen] = useState<boolean>(false);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
-  const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
+  const [openSignals, setOpenSignals] = useState<Signal[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
+  const [activeStockSymbol, setActiveStockSymbol] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = (typeof window !== "undefined" && localStorage.getItem("theme")) as "dark" | "light" | null;
@@ -1488,6 +1475,19 @@ export default function Home() {
     setTheme(initial);
     document.documentElement.setAttribute("data-theme", initial);
   }, []);
+
+  // Persistencia del ticker activo de stocks (compartido entre Sidebar y Dashboard).
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("tradingapp:stocks_last_ticker");
+      if (saved) setActiveStockSymbol(saved);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try {
+      if (activeStockSymbol) localStorage.setItem("tradingapp:stocks_last_ticker", activeStockSymbol);
+    } catch { /* ignore */ }
+  }, [activeStockSymbol]);
 
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
@@ -1503,11 +1503,12 @@ export default function Home() {
       const offset = (page - 1) * PAGE_SIZE;
       const symParam = filter === "ALL" ? "" : `&symbol=${filter}`;
       const signalsUrl = `${API}/signals?limit=${PAGE_SIZE}&offset=${offset}${symParam}`;
-      const [sR, stR, syR, nR] = await Promise.all([
+      const [sR, stR, syR, nR, oR] = await Promise.all([
         fetch(signalsUrl, { cache: "no-store" }),
         fetch(`${API}/stats`, { cache: "no-store" }),
         fetch(`${API}/symbols`, { cache: "no-store" }),
         fetch(`${API}/news/warnings`, { cache: "no-store" }),
+        fetch(`${API}/signals?limit=50`, { cache: "no-store" }),
       ]);
       const signalsData = await sR.json();
       setItems(signalsData.items || []);
@@ -1516,11 +1517,15 @@ export default function Home() {
       setSymbols(mergeSymbols(await syR.json()));
       const nj = await nR.json();
       setNewsWarnings(nj.warnings || []);
+      const oj = await oR.json();
+      const allItems: Signal[] = oj.items || [];
+      setOpenSignals(allItems.filter(s => s.result == null));
     } catch {
       setItems([]);
       setTotalSignals(0);
       setStats(null);
       setNewsWarnings([]);
+      setOpenSignals([]);
     } finally {
       setLoading(false);
     }
@@ -1531,23 +1536,6 @@ export default function Home() {
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, [load]);
-
-  const loadCalendar = useCallback(async (date: string) => {
-    setCalendarLoading(true);
-    try {
-      const r = await fetch(`${API}/news/calendar?date=${date}&impact=high`, { cache: "no-store" });
-      const j = await r.json();
-      setCalendarEvents(j.events || []);
-    } catch {
-      setCalendarEvents([]);
-    } finally {
-      setCalendarLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (calendarOpen) loadCalendar(calendarDate);
-  }, [calendarOpen, calendarDate, loadCalendar]);
 
   const openJournal = (id: number, result: "WIN" | "LOSS" | "BE") => {
     setJournal({ signalId: id, result, taken: null, respected_plan: null, closed_early: null, emotion: null });
@@ -1600,50 +1588,49 @@ export default function Home() {
   };
 
   return (
-    <div className="container">
-      <div className="head">
-        <div>
-          <h1>AI Trading Assistant</h1>
-          <div className="sub">Motor de decisión contextual · auto-refresh 5s</div>
-        </div>
-        <div className="head-actions">
-          <button
-            className="theme-toggle"
-            onClick={toggleTheme}
-            title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-            aria-label="Cambiar tema"
-          >
-            {theme === "dark" ? "☀️" : "🌙"}
-          </button>
-          <button className="refresh" onClick={load}>Refrescar</button>
-        </div>
-      </div>
+    <AppShell
+      topbar={
+        <Topbar
+          view={view}
+          onViewChange={setView}
+          onRefresh={load}
+          theme={theme}
+          onThemeToggle={toggleTheme}
+        />
+      }
+      sidebar={
+        <Sidebar
+          context={view === "stocks" ? "stocks" : "forex"}
+          symbols={symbols}
+          filter={filter}
+          onFilterChange={(s) => { setFilter(s); setPage(1); }}
+          stocksActiveSymbol={activeStockSymbol}
+          onStocksSelect={(s) => { setActiveStockSymbol(s); setView("stocks"); }}
+        />
+      }
+      rightbar={
+        <RightBar
+          context={view === "stocks" ? "stocks" : "forex"}
+          openSignals={openSignals.map(it => ({
+            id: it.id,
+            received_at: it.received_at,
+            signal: { symbol: it.signal.symbol, signal: it.signal.signal, price: it.signal.price },
+            response: { decision: it.response.decision },
+            pnl: it.pnl,
+          }))}
+          openCount={stats?.open ?? openSignals.length}
+          totalSignals={stats?.total_signals ?? totalSignals}
+          onPairClick={(p) => { setFilter(p); setPage(1); }}
+          onRadarOpen={() => setView("radar")}
+          stocksActiveSymbol={activeStockSymbol}
+          onStocksSelect={(s) => { setActiveStockSymbol(s); setView("stocks"); }}
+        />
+      }
+      main={
+        <div className="legacy-main-pad">
+      {view !== "stocks" && <SessionsTimeline />}
 
-      <nav className="view-nav">
-        <button
-          className={`view-nav-btn ${view === "dashboard" ? "active" : ""}`}
-          onClick={() => setView("dashboard")}
-        >
-          <span className="view-nav-ico">📊</span> Dashboard
-        </button>
-        <button
-          className={`view-nav-btn ${view === "zones" ? "active" : ""}`}
-          onClick={() => setView("zones")}
-        >
-          <span className="view-nav-ico">🎯</span> Análisis de zonas
-        </button>
-        <button
-          className={`view-nav-btn ${view === "radar" ? "active" : ""}`}
-          onClick={() => setView("radar")}
-        >
-          <span className="view-nav-ico">📡</span> Radar de setups
-        </button>
-      </nav>
-
-      <SessionsPanel />
-      <KillZonesPanel />
-
-      {newsWarnings.length > 0 && (
+      {view !== "stocks" && newsWarnings.length > 0 && (
         <div className="news-banner">
           {newsWarnings.map((w, i) => (
             <NewsBannerItem key={`${w.date_utc}-${i}`} warning={w} />
@@ -1655,99 +1642,26 @@ export default function Home() {
         <ZoneAnalysisView />
       ) : view === "radar" ? (
         <RadarView />
+      ) : view === "stocks" ? (
+        <StocksView
+          activeSymbol={activeStockSymbol}
+          onSymbolChange={setActiveStockSymbol}
+        />
       ) : (
       <>
       {stats && (
         <>
-          <div className="stats">
-            <StatCard label="Total" value={stats.total_signals} />
-            <StatCard label="Cerradas" value={stats.closed} />
-            <StatCard label="Abiertas" value={stats.open} />
-            <StatCard label="Win rate" value={`${(stats.overall.win_rate * 100).toFixed(0)}%`} accent />
-            <StatCard label={`W/L/BE`} value={`${stats.overall.wins}/${stats.overall.losses}/${stats.overall.be}`} />
-            <StatCard label="PnL ($)" value={stats.overall.pnl.toFixed(2)} accent={stats.overall.pnl >= 0 ? "good" : "bad"} />
-          </div>
-          <div className="stats-split">
-            <SplitCard
-              title="Ejecutadas"
-              subtitle="PnL real de las que operaste"
-              agg={stats.overall_taken ?? EMPTY_AGG}
-              variant="taken"
-            />
-            <SplitCard
-              title="Calificadas"
-              subtitle="Edge del sistema sin ejecución"
-              agg={stats.overall_rated ?? EMPTY_AGG}
-              variant="rated"
-            />
-            <div className="split-card exec-rate">
-              <div className="card-label">Execution rate</div>
-              <div className="card-value">{((stats.execution_rate ?? 0) * 100).toFixed(0)}%</div>
-              <div className="split-sub">
-                {(stats.overall_taken ?? EMPTY_AGG).n} ejecutadas / {stats.closed} evaluadas
-              </div>
-            </div>
-          </div>
+          <KpiHero
+            totalSignals={stats.total_signals}
+            closed={stats.closed}
+            open={stats.open}
+            overall={stats.overall}
+            taken={stats.overall_taken ?? EMPTY_AGG}
+            executionRate={stats.execution_rate ?? 0}
+          />
+          <EquityCurve />
         </>
       )}
-
-      <div className="calendar-section">
-        <button className="calendar-toggle" onClick={() => setCalendarOpen(!calendarOpen)}>
-          📅 Calendario económico {calendarOpen ? "▲" : "▼"}
-        </button>
-        {calendarOpen && (
-          <div className="calendar-body">
-            <div className="calendar-controls">
-              <input
-                type="date"
-                value={calendarDate}
-                onChange={(e) => setCalendarDate(e.target.value)}
-                className="calendar-date"
-              />
-              <button className="calendar-today" onClick={() => setCalendarDate(todayMadrid())}>Hoy</button>
-              <span className="calendar-tz">hora Madrid</span>
-            </div>
-            {calendarLoading ? (
-              <div className="calendar-empty">Cargando…</div>
-            ) : calendarEvents.length === 0 ? (
-              <div className="calendar-empty">Sin eventos high-impact este día</div>
-            ) : (
-              <table className="calendar-table">
-                <tbody>
-                  {calendarEvents.map((e, i) => (
-                    <tr key={`${e.date_utc}-${i}`}>
-                      <td className="cal-time">{e.time_madrid}</td>
-                      <td><span className="cal-country">{e.country}</span></td>
-                      <td className="cal-title">{e.title}</td>
-                      <td className="cal-nums">
-                        {e.forecast && <span>F: <b>{e.forecast}</b></span>}
-                        {e.previous && <span className="cal-prev">P: {e.previous}</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="tabs">
-        <button className={filter === "ALL" ? "tab active" : "tab"} onClick={() => { setFilter("ALL"); setPage(1); }}>TODOS</button>
-        {symbols.map((s) => (
-          <button key={s} className={filter === s ? "tab active" : "tab"} onClick={() => { setFilter(s); setPage(1); }}>{s}</button>
-        ))}
-        {totalSignals > 0 && (
-          <button
-            className="tab tab-danger"
-            onClick={deleteAllSignals}
-            title={filter === "ALL" ? "Eliminar todas las señales" : `Eliminar todas las señales de ${filter}`}
-            style={{ marginLeft: "auto" }}
-          >
-            🗑 Eliminar {filter === "ALL" ? "todas" : filter}
-          </button>
-        )}
-      </div>
 
       {stats && stats.closed > 0 && (
         <div className="breakdowns">
@@ -1758,19 +1672,70 @@ export default function Home() {
         </div>
       )}
 
-      {loading && items.length === 0 ? (
-        <div className="empty">Cargando…</div>
-      ) : items.length === 0 ? (
-        <div className="empty">Sin señales todavía. Configura el webhook a <code>{API}/webhook/tradingview</code></div>
-      ) : (
-        <table>
+      <section className="table-card">
+        <div className="table-header-row">
+          <div className="table-title-block">
+            <div className="chart-title">Operaciones</div>
+            <div className="table-subtitle">
+              {filter === "ALL" ? "Todos los pares" : <span className="num">{filter}</span>}
+              {" · "}
+              <span className="num">{totalSignals}</span> señales
+            </div>
+          </div>
+          <div className="table-actions">
+            <div className="chart-toggle" role="tablist">
+              <button
+                role="tab"
+                aria-selected={statusFilter === "all"}
+                className={statusFilter === "all" ? "active" : ""}
+                onClick={() => setStatusFilter("all")}
+              >Todas</button>
+              <button
+                role="tab"
+                aria-selected={statusFilter === "open"}
+                className={statusFilter === "open" ? "active" : ""}
+                onClick={() => setStatusFilter("open")}
+              >Activas</button>
+              <button
+                role="tab"
+                aria-selected={statusFilter === "closed"}
+                className={statusFilter === "closed" ? "active" : ""}
+                onClick={() => setStatusFilter("closed")}
+              >Cerradas</button>
+            </div>
+            {totalSignals > 0 && (
+              <button
+                className="table-delete-btn"
+                onClick={deleteAllSignals}
+                title={filter === "ALL" ? "Eliminar todas las señales" : `Eliminar todas las señales de ${filter}`}
+                aria-label="Eliminar señales"
+              >🗑</button>
+            )}
+          </div>
+        </div>
+
+        {loading && items.length === 0 ? (
+          <div className="empty">Cargando…</div>
+        ) : items.filter(it =>
+            statusFilter === "all" ? true :
+            statusFilter === "open" ? it.result == null :
+            it.result != null
+          ).length === 0 ? (
+          <div className="empty">
+            {items.length === 0
+              ? "Sin operaciones todavía. Las señales aparecerán acá cuando se ejecuten."
+              : statusFilter === "open" ? "Sin señales activas en esta página"
+              : "Sin señales cerradas en esta página"}
+          </div>
+        ) : (
+        <table className="dashboard-table">
           <thead>
             <tr>
               <th>Hora</th>
               <th>Símbolo</th>
               <th>Lado</th>
-              <th>Precio</th>
-              <th>Conf</th>
+              <th className="right">Precio</th>
+              <th className="right">Conf</th>
               <th>Calidad</th>
               <th>MTF</th>
               <th>Zona</th>
@@ -1781,13 +1746,24 @@ export default function Home() {
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => (
-              <tr key={it.id}>
-                <td>{new Date(it.received_at).toLocaleTimeString()}</td>
-                <td>{it.signal.symbol}</td>
-                <td className={it.signal.signal}>{it.signal.signal}</td>
-                <td>{it.signal.price}</td>
-                <td>{it.signal.conf}/19</td>
+            {items.filter(it =>
+                statusFilter === "all" ? true :
+                statusFilter === "open" ? it.result == null :
+                it.result != null
+              ).map((it) => {
+              const isOpen = it.result == null;
+              const sideClassName = (it.signal.signal === "LONG" || it.signal.signal === "BUY")
+                ? "side-buy"
+                : (it.signal.signal === "SHORT" || it.signal.signal === "SELL")
+                ? "side-sell"
+                : "side-neutral";
+              return (
+              <tr key={it.id} className={isOpen ? "row-open" : "row-closed"}>
+                <td className="num td-time">{new Date(it.received_at).toLocaleTimeString()}</td>
+                <td className="num td-symbol"><strong>{it.signal.symbol}</strong></td>
+                <td><span className={`side-pill ${sideClassName}`}>{it.signal.signal}</span></td>
+                <td className="right num">{it.signal.price}</td>
+                <td className="right num">{it.signal.conf}/19</td>
                 <td>{it.signal.quality}</td>
                 <td>{it.signal.mtf}</td>
                 <td>
@@ -1836,10 +1812,11 @@ export default function Home() {
                   >✕</button>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
-      )}
+        )}
+      </section>
 
       {totalSignals > 0 && (
         <div className="pagination">
@@ -1921,7 +1898,9 @@ export default function Home() {
           onClose={() => setConfirmDialog(null)}
         />
       )}
-    </div>
+        </div>
+      }
+    />
   );
 }
 
@@ -2119,50 +2098,6 @@ function JournalModal({
 
         <div className="modal-foot">
           <button className="modal-save" onClick={onSave} disabled={!canSave}>Guardar</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: boolean | "good" | "bad" }) {
-  const cls = accent === "good" ? "good" : accent === "bad" ? "bad" : accent ? "accent" : "";
-  return (
-    <div className={`card ${cls}`}>
-      <div className="card-label">{label}</div>
-      <div className="card-value">{value}</div>
-    </div>
-  );
-}
-
-function SplitCard({
-  title, subtitle, agg, variant,
-}: {
-  title: string;
-  subtitle: string;
-  agg: Agg;
-  variant: "taken" | "rated";
-}) {
-  const pnlCls = agg.pnl >= 0 ? "good" : "bad";
-  return (
-    <div className={`split-card split-${variant}`}>
-      <div className="split-head">
-        <div className="split-title">{title}</div>
-        <div className="split-n">{agg.n}</div>
-      </div>
-      <div className="split-sub">{subtitle}</div>
-      <div className="split-metrics">
-        <div className="split-metric">
-          <span className="split-metric-label">WR</span>
-          <span className="split-metric-value">{(agg.win_rate * 100).toFixed(0)}%</span>
-        </div>
-        <div className="split-metric">
-          <span className="split-metric-label">W/L/BE</span>
-          <span className="split-metric-value">{agg.wins}/{agg.losses}/{agg.be}</span>
-        </div>
-        <div className="split-metric">
-          <span className="split-metric-label">PnL</span>
-          <span className={`split-metric-value ${pnlCls}`}>{agg.pnl.toFixed(2)}</span>
         </div>
       </div>
     </div>

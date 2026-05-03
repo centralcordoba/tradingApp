@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner, radar
+from . import storage, ai_client, news_client, scanner, radar, stocks_client
+from .stocks_client import StocksUpstreamError
 
 USE_AI_DEFAULT = os.getenv("USE_AI", "0") == "1"
 
@@ -308,3 +309,152 @@ def get_news_warnings(currencies: str | None = None, now: str | None = None):
         "simulated_now": sim_now.isoformat() if sim_now else None,
         "warnings": warnings,
     }
+
+
+# ---------------------------------------------------------------------------
+# Stocks — proxy a Twelve Data + perfil + watchlist
+# ---------------------------------------------------------------------------
+
+VALID_STOCK_INTERVALS = {"15min", "1h", "4h", "1day"}
+VALID_HORIZONS = {"day_trader", "swing", "long_term"}
+VALID_CAPITAL = {"<1k", "1k-10k", "10k-50k", "50k+"}
+VALID_EXPERIENCE = {"novice", "intermediate", "advanced"}
+VALID_DECISIONS = {"BUY", "SELL", "HOLD"}
+
+
+def _raise_upstream(e: StocksUpstreamError) -> None:
+    """Mapea StocksUpstreamError → HTTPException con status equivalente."""
+    if e.status == 404:
+        raise HTTPException(status_code=404, detail=str(e))
+    if e.status == 429:
+        raise HTTPException(status_code=429, detail=str(e))
+    if e.status == 400:
+        raise HTTPException(status_code=400, detail=str(e))
+    if 500 <= e.status < 600:
+        raise HTTPException(status_code=502, detail=f"Twelve Data: {e}")
+    raise HTTPException(status_code=502, detail=f"Twelve Data: {e}")
+
+
+@app.get("/stocks/search")
+def stocks_search(q: str):
+    """Búsqueda de tickers (TD symbol_search — gratis, no consume créditos)."""
+    if not q or not q.strip():
+        return {"matches": []}
+    try:
+        matches = stocks_client.search(q.strip())
+        return {"matches": matches}
+    except StocksUpstreamError as e:
+        _raise_upstream(e)
+
+
+@app.get("/stocks/quote")
+def stocks_quote(symbol: str):
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(status_code=400, detail="symbol requerido")
+    try:
+        return stocks_client.quote(sym)
+    except StocksUpstreamError as e:
+        _raise_upstream(e)
+
+
+@app.get("/stocks/indicators")
+def stocks_indicators(symbol: str, interval: str = "1day"):
+    """Devuelve el IndicatorBundle listo para signalEngine.
+
+    El cálculo (SMA/EMA/RSI/MACD/BBANDS/ADX) se hace acá en Python para
+    minimizar créditos (1 fetch a /time_series + 1 a /quote = 2 créditos).
+    """
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(status_code=400, detail="symbol requerido")
+    if interval not in VALID_STOCK_INTERVALS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"interval inválido (use {sorted(VALID_STOCK_INTERVALS)})",
+        )
+    try:
+        return stocks_client.indicator_bundle(sym, interval)
+    except StocksUpstreamError as e:
+        _raise_upstream(e)
+
+
+# ─── Profile ──────────────────────────────────────────────────
+
+@app.get("/stocks/profile")
+def stocks_get_profile():
+    return storage.get_investor_profile()
+
+
+@app.post("/stocks/profile")
+def stocks_save_profile(payload: dict):
+    horizon = payload.get("horizon")
+    risk = payload.get("riskTolerance")
+    cap = payload.get("capitalRange")
+    exp = payload.get("experience")
+    sectors = payload.get("sectors", [])
+    if horizon not in VALID_HORIZONS:
+        raise HTTPException(status_code=400, detail="horizon inválido")
+    try:
+        risk_int = int(risk)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="riskTolerance debe ser entero 1-5")
+    if risk_int < 1 or risk_int > 5:
+        raise HTTPException(status_code=400, detail="riskTolerance fuera de rango (1-5)")
+    if cap not in VALID_CAPITAL:
+        raise HTTPException(status_code=400, detail="capitalRange inválido")
+    if exp not in VALID_EXPERIENCE:
+        raise HTTPException(status_code=400, detail="experience inválido")
+    if not isinstance(sectors, list) or not all(isinstance(s, str) for s in sectors):
+        raise HTTPException(status_code=400, detail="sectors debe ser lista de strings")
+    return storage.save_investor_profile({
+        "horizon": horizon,
+        "riskTolerance": risk_int,
+        "capitalRange": cap,
+        "experience": exp,
+        "sectors": sectors,
+    })
+
+
+@app.delete("/stocks/profile")
+def stocks_clear_profile():
+    storage.clear_investor_profile()
+    return {"ok": True}
+
+
+# ─── Watchlist ────────────────────────────────────────────────
+
+@app.get("/stocks/watchlist")
+def stocks_get_watchlist():
+    return {"items": storage.get_stocks_watchlist()}
+
+
+@app.post("/stocks/watchlist")
+def stocks_add_watchlist(payload: dict):
+    sym = (payload.get("symbol") or "").upper().strip()
+    if not sym:
+        raise HTTPException(status_code=400, detail="symbol requerido")
+    if len(sym) > 16:
+        raise HTTPException(status_code=400, detail="symbol demasiado largo")
+    return {"items": storage.add_to_stocks_watchlist(sym)}
+
+
+@app.delete("/stocks/watchlist/{symbol}")
+def stocks_remove_watchlist(symbol: str):
+    return {"items": storage.remove_from_stocks_watchlist(symbol)}
+
+
+@app.patch("/stocks/watchlist/{symbol}")
+def stocks_patch_watchlist(symbol: str, payload: dict):
+    last_decision = payload.get("lastDecision")
+    last_confidence = payload.get("lastConfidence")
+    if last_decision is not None and last_decision not in VALID_DECISIONS:
+        raise HTTPException(status_code=400, detail="lastDecision inválido")
+    if last_confidence is not None:
+        try:
+            last_confidence = float(last_confidence)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="lastConfidence debe ser número")
+        if last_confidence < 0 or last_confidence > 1:
+            raise HTTPException(status_code=400, detail="lastConfidence fuera de rango (0-1)")
+    return {"items": storage.update_stocks_watchlist_item(symbol, last_decision, last_confidence)}

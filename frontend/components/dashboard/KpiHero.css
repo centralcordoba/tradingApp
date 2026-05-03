@@ -1,0 +1,71 @@
+/* ──────────────────────────────────────────────────────────────────
+   KPI Hero — 4 métricas principales del dashboard.
+   Píxel-fiel al mockup (líneas 345-391).
+   ────────────────────────────────────────────────────────────────── */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.kpi {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kpi-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.kpi-value {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.kpi-value.pnl-positive { color: var(--buy); }
+.kpi-value.pnl-negative { color: var(--sell); }
+.kpi-value.pnl-zero     { color: var(--text-secondary); }
+.kpi-value.kpi-wr       { color: var(--text-primary); }
+.kpi-value.kpi-er       { color: var(--text-primary); }
+.kpi-value.kpi-open     { color: var(--accent); }
+
+.kpi-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.kpi-sub .num { color: var(--text-secondary); }
+
+.kpi-bar {
+  height: 3px;
+  background: var(--border-subtle);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.kpi-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 200ms var(--ease);
+}
+.kpi-bar-good { background: var(--buy); }
+.kpi-bar-bad  { background: var(--sell); }
+.kpi-bar-info { background: var(--info); }
+
+@media (max-width: 1199px) {
+  .kpi-row { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 599px) {
+  .kpi-row { grid-template-columns: 1fr; }
+}

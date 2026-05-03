@@ -1,37 +1,194 @@
-* { box-sizing: border-box; }
+/* ──────────────────────────────────────────────────────────────────
+   AI Trading Assistant — design tokens, base, global utilities.
+   La sección final marcada LEGACY contiene reglas heredadas que
+   se migran a CSS por componente en Fases 4-8.
+   ────────────────────────────────────────────────────────────────── */
 
+*, *::before, *::after { box-sizing: border-box; }
+
+/* === Color, spacing & type tokens === */
 :root, html[data-theme="dark"] {
-  --bg: #0b0e13;
-  --surface: #11151d;
-  --surface-elev: #0f131b;
-  --surface-2: var(--border);
-  --surface-3: var(--border-2);
-  --border: var(--border);
-  --border-2: var(--border-2);
-  --text: #e6e8eb;
-  --text-2: #b8becc;
-  --text-muted: #8a92a3;
+  /* Backgrounds */
+  --bg: #0A0E14;
+  --bg-elev: #131822;
+  --bg-hover: #1A2030;
+  --bg-row: #0F141C;
+
+  /* Borders */
+  --border-subtle: #1F2937;
+  --border-default: #2A3441;
+  --border-strong: #3A4554;
+
+  /* Text */
+  --text: #E8EAED;
+  --text-2: #9CA3AF;
+  --text-3: #6B7280;
+
+  /* Semantic */
+  --buy: #22C55E;
+  --sell: #EF4444;
+  --warn: #F59E0B;
+  --info: #3B82F6;
+  --aplus: #10B981;
+  --accent: #6366F1;
+
+  /* Tinted semantic backgrounds */
+  --buy-bg: rgba(34, 197, 94, 0.12);
+  --buy-bg-strong: rgba(34, 197, 94, 0.20);
+  --sell-bg: rgba(239, 68, 68, 0.12);
+  --sell-bg-strong: rgba(239, 68, 68, 0.20);
+  --warn-bg: rgba(245, 158, 11, 0.12);
+  --info-bg: rgba(59, 130, 246, 0.12);
+  --aplus-bg: rgba(16, 185, 129, 0.14);
+  --aplus-bg-strong: rgba(16, 185, 129, 0.28);
+  --accent-bg: rgba(99, 102, 241, 0.15);
+
+  /* Mockup naming aliases — pegar CSS del mockup literal sin renombrar.
+     Apuntan a los mismos valores. */
+  --bg-base: var(--bg);
+  --bg-elevated: var(--bg-elev);
+  --text-primary: var(--text);
+  --text-secondary: var(--text-2);
+  --text-tertiary: var(--text-3);
+  --warning: var(--warn);
+  --buy-soft: var(--buy-bg);
+  --sell-soft: var(--sell-bg);
+  --warning-soft: var(--warn-bg);
+  --info-soft: var(--info-bg);
+  --accent-soft: var(--accent-bg);
+
+  /* Legacy aliases (se eliminan en Fase 8 cuando termina la migración).
+     El legacy CSS abajo todavía consume estos nombres viejos. */
+  --surface: var(--bg-elev);
+  --surface-elev: var(--bg-elev);
+  --surface-2: var(--bg-hover);
+  --surface-3: var(--border-default);
+  --border: var(--border-subtle);
+  --border-2: var(--border-default);
+  --text-muted: var(--text-3);
+
+  /* Typography */
+  --font-ui: var(--font-inter, -apple-system), BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-mono-jb, ui-monospace), "JetBrains Mono", "SF Mono", Consolas, monospace;
+
+  /* Type scale */
+  --fs-label: 11px;
+  --fs-body: 13px;
+  --fs-sub: 15px;
+  --fs-section: 18px;
+  --fs-kpi: 24px;
+  --fs-hero: 32px;
+
+  /* Spacing — 4px grid */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* Radius */
+  --r-sm: 4px;
+  --r: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+
+  /* Layout invariants (AppShell consume desde Fase 3) */
+  --topbar-h: 52px;
+  --sidebar-w: 232px;
+  --rightbar-w: 320px;
+
+  /* Motion */
+  --t-fast: 120ms;
+  --t-base: 200ms;
+  --t-slow: 300ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 html[data-theme="light"] {
-  --bg: #f5f7fa;
-  --surface: #ffffff;
-  --surface-elev: #f9fafc;
-  --surface-2: #eef1f6;
-  --surface-3: #e2e7ee;
-  --border: #e2e7ee;
-  --border-2: #d8dde6;
-  --text: #1a1f2c;
-  --text-2: #4a5262;
-  --text-muted: #6b7280;
+  --bg: #FAFBFC;
+  --bg-elev: #FFFFFF;
+  --bg-hover: #F1F4F9;
+  --bg-row: #F8F9FB;
+  --border-subtle: #E5E7EB;
+  --border-default: #D1D5DB;
+  --border-strong: #9CA3AF;
+  --text: #111827;
+  --text-2: #4B5563;
+  --text-3: #6B7280;
+  --buy: #16A34A;
+  --sell: #DC2626;
+  --warn: #B45309;
+  --info: #2563EB;
+  --aplus: #047857;
+  --accent: #4F46E5;
+  --buy-bg: rgba(22, 163, 74, 0.12);
+  --buy-bg-strong: rgba(22, 163, 74, 0.20);
+  --sell-bg: rgba(220, 38, 38, 0.12);
+  --sell-bg-strong: rgba(220, 38, 38, 0.20);
+  --warn-bg: rgba(180, 83, 9, 0.12);
+  --info-bg: rgba(37, 99, 235, 0.12);
+  --aplus-bg: rgba(4, 120, 87, 0.12);
+  --aplus-bg-strong: rgba(4, 120, 87, 0.22);
+  --accent-bg: rgba(79, 70, 229, 0.15);
 }
 
+/* === Base === */
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* AppShell se activa con data-shell="active" sobre <body>.
+   Mientras esté inactivo (Fases 1-2), la home legacy conserva su scroll. */
+body[data-shell="active"] {
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* === Scrollbars (fino, sutil) === */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* === Focus visible === */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* === Utility: tabular-num monospace === */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   === LEGACY (a migrar/eliminar en Fases 4-8) ===
+   Reglas heredadas que aún consume page.tsx mientras se descompone
+   en componentes. NO añadir reglas aquí: agregar al CSS del
+   componente correspondiente.
+   ────────────────────────────────────────────────────────────────── */
 .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
 h1 { margin: 0 0 8px; font-size: 22px; }
 .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
@@ -56,37 +213,6 @@ tr:hover { background: var(--surface); }
 .refresh { background: var(--surface-2); color: var(--text); border: 1px solid var(--border-2); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .refresh:hover { background: var(--surface-3); }
 .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-
-.stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 16px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
-.card-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
-.card-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-.card.accent .card-value { color: #60a5fa; }
-.card.good .card-value { color: #4ade80; }
-.card.bad  .card-value { color: #f87171; }
-
-/* Split stats: Ejecutadas vs Calificadas vs Execution rate */
-.stats-split {
-  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;
-  margin-bottom: 20px;
-}
-.split-card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px;
-}
-.split-taken { border-left: 3px solid #4ade80; }
-.split-rated { border-left: 3px solid #60a5fa; }
-.split-card.exec-rate { border-left: 3px solid #facc15; text-align: left; }
-.split-card.exec-rate .card-value { font-size: 26px; margin-top: 4px; }
-.split-head { display: flex; justify-content: space-between; align-items: baseline; }
-.split-title { color: var(--text); font-weight: 700; font-size: 13px; }
-.split-n { color: var(--text-muted); font-size: 11px; }
-.split-sub { color: var(--text-muted); font-size: 10px; margin-top: 2px; margin-bottom: 10px; }
-.split-metrics { display: flex; gap: 14px; }
-.split-metric { display: flex; flex-direction: column; }
-.split-metric-label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
-.split-metric-value { color: var(--text); font-size: 15px; font-weight: 700; }
-.split-metric-value.good { color: #4ade80; }
-.split-metric-value.bad  { color: #f87171; }
 
 /* Badge ejecutada / calificada en tabla */
 .result-cell { display: flex; align-items: center; gap: 6px; }
@@ -321,50 +447,6 @@ tr:hover { background: var(--surface); }
   0%, 100% { box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.4); }
   50%      { box-shadow: 0 0 0 6px rgba(185, 28, 28, 0); }
 }
-
-/* Calendario económico (sección compacta) */
-.calendar-section { margin-bottom: 16px; }
-.calendar-toggle {
-  background: var(--surface); color: var(--text-2); border: 1px solid var(--border);
-  padding: 8px 14px; border-radius: 6px; cursor: pointer;
-  font-size: 12px; font-weight: 600;
-}
-.calendar-toggle:hover { background: var(--surface-2); color: var(--text); }
-.calendar-body {
-  margin-top: 8px; background: var(--surface-elev); border: 1px solid var(--border);
-  border-radius: 8px; padding: 14px;
-}
-.calendar-controls {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
-}
-.calendar-date {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border-2);
-  padding: 6px 10px; border-radius: 6px; font-size: 12px;
-  color-scheme: dark;
-}
-.calendar-today {
-  background: var(--surface-2); color: #60a5fa; border: 1px solid #2563eb;
-  padding: 6px 12px; border-radius: 6px; cursor: pointer;
-  font-size: 11px; font-weight: 700;
-}
-.calendar-today:hover { background: #1e3a5f; }
-.calendar-tz { color: var(--text-muted); font-size: 11px; margin-left: auto; }
-.calendar-empty { color: var(--text-muted); font-size: 12px; padding: 12px 0; }
-.calendar-table { width: 100%; font-size: 12px; }
-.calendar-table td {
-  padding: 6px 8px; border-bottom: 1px solid var(--border);
-}
-.calendar-table tr:last-child td { border-bottom: none; }
-.cal-time { color: #60a5fa; font-weight: 700; font-family: ui-monospace, monospace; width: 60px; }
-.cal-country {
-  background: var(--surface-2); color: #facc15;
-  padding: 2px 6px; border-radius: 4px;
-  font-weight: 700; font-size: 10px;
-}
-.cal-title { color: var(--text); }
-.cal-nums { color: var(--text-muted); font-size: 11px; text-align: right; white-space: nowrap; }
-.cal-nums b { color: var(--text); }
-.cal-prev { margin-left: 8px; opacity: 0.7; }
 
 /* Modal journal post-mortem */
 .modal-overlay {
@@ -801,19 +883,20 @@ tr:hover { background: var(--surface); }
   background: linear-gradient(135deg, #0d1320 0%, #11151d 100%);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   margin-bottom: 16px;
 }
 .zone-intro-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  letter-spacing: .2px;
 }
 .zone-intro-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.55;
 }
 .zone-intro-sub b { color: #facc15; }
 
@@ -1022,14 +1105,15 @@ tr:hover { background: var(--surface); }
   text-align: right; min-width: 200px;
 }
 .zone-meta-row {
-  font-size: 11px; color: var(--text-2); display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
 }
 .zone-meta-dot {
-  width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 2px;
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 3px;
 }
 .zone-dot-neutral { background: #60a5fa; box-shadow: 0 0 6px #60a5fa; }
 .zone-meta-time {
-  font-size: 10px; color: #6b7280; margin-top: 4px;
+  font-size: 11px; color: var(--text-muted); margin-top: 6px;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -1169,20 +1253,20 @@ tr:hover { background: var(--surface); }
   background: linear-gradient(135deg, #0d1320 0%, #11151d 100%);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   margin-bottom: 18px;
 }
 .brief-head {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px;
 }
-.brief-head-ico { font-size: 16px; }
+.brief-head-ico { font-size: 18px; }
 .brief-head-title {
-  font-weight: 700; font-size: 13px; color: var(--text); letter-spacing: .3px;
+  font-weight: 700; font-size: 14px; color: var(--text); letter-spacing: .3px;
 }
 .brief-head-sesgo {
-  color: var(--text-2); font-size: 12px;
-  background: var(--bg); border: 1px solid var(--border); padding: 4px 10px; border-radius: 6px;
+  color: var(--text); font-size: 13px;
+  background: var(--bg); border: 1px solid var(--border); padding: 5px 12px; border-radius: 6px;
   margin-left: auto; max-width: 100%;
 }
 
@@ -1201,16 +1285,16 @@ tr:hover { background: var(--surface); }
   display: flex; flex-direction: column; gap: 4px;
 }
 .brief-card-label {
-  font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
+  font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: .6px;
   font-weight: 700;
   display: flex; align-items: center; gap: 6px;
 }
 .brief-card-value {
-  font-size: 12px; color: var(--text); line-height: 1.45;
+  font-size: 13px; color: var(--text); line-height: 1.5;
 }
 .brief-count {
-  background: var(--surface-2); color: var(--text-muted); font-size: 9px;
-  padding: 1px 6px; border-radius: 999px; margin-left: auto;
+  background: var(--surface-2); color: var(--text-2); font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 999px; margin-left: auto;
 }
 
 .brief-best { border-left: 2px solid #facc15; }
@@ -1229,17 +1313,17 @@ tr:hover { background: var(--surface); }
   max-height: 180px; overflow-y: auto;
 }
 .brief-list li {
-  font-size: 11px;
+  font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, monospace;
-  padding: 4px 8px;
+  padding: 5px 9px;
   border-radius: 4px;
   background: var(--surface);
-  color: var(--text-2);
+  color: var(--text);
 }
 .brief-list-ok li { border-left: 2px solid #4ade80; color: #86efac; }
-.brief-list-bad li { border-left: 2px solid #6b7280; color: var(--text-muted); }
+.brief-list-bad li { border-left: 2px solid #94a3b8; color: var(--text-2); }
 .brief-list-empty {
-  font-size: 11px; color: #6b7280; font-style: italic; padding: 4px 0;
+  font-size: 12px; color: var(--text-muted); font-style: italic; padding: 4px 0;
 }
 
 /* Bloque badge en ScannerCard */
@@ -1803,13 +1887,11 @@ html[data-theme="light"] .radar-align-ok {
 html[data-theme="light"] .radar-badge.radar-b1-strong { background: #16a34a; color: #fff; }
 
 /* Blue accent surfaces (active tabs, rated, neutral scanner) */
-html[data-theme="light"] .scanner-side-neutral,
-html[data-theme="light"] .calendar-today {
+html[data-theme="light"] .scanner-side-neutral {
   background: #dbeafe;
   color: #1d4ed8;
   border-color: #93c5fd;
 }
-html[data-theme="light"] .calendar-today:hover { background: #bfdbfe; }
 
 /* Red tinted accent surfaces (LOSS / SHORT / AVOID family) */
 html[data-theme="light"] .bd-l,
@@ -1845,9 +1927,17 @@ html[data-theme="light"] .news-item.news-imminent { background: #fee2e2; border-
 html[data-theme="light"] .news-country { background: #fef3c7; color: #b45309; }
 html[data-theme="light"] .news-item.news-imminent .news-country { background: #fee2e2; color: #b91c1c; }
 
+/* Light-mode surface override for accent panels that hardcode a dark gradient */
+html[data-theme="light"] .zone-intro,
+html[data-theme="light"] .brief-panel {
+  background: linear-gradient(135deg, #ffffff 0%, #f9fafc 100%);
+}
+html[data-theme="light"] .brief-list li { background: var(--surface-elev); }
+html[data-theme="light"] .brief-list-ok li { color: #047857; }
+html[data-theme="light"] .brief-best-value { color: #b45309; }
+html[data-theme="light"] .zone-intro-sub b { color: #b45309; }
+
 /* Subtle elevation shadow on light surfaces */
-html[data-theme="light"] .card,
-html[data-theme="light"] .split-card,
 html[data-theme="light"] .bd-card,
 html[data-theme="light"] .scanner-card,
 html[data-theme="light"] .modal,
@@ -1855,10 +1945,122 @@ html[data-theme="light"] .radar-card,
 html[data-theme="light"] .sessions-card,
 html[data-theme="light"] .kz-panel,
 html[data-theme="light"] .zone-intro,
+html[data-theme="light"] .brief-panel,
 html[data-theme="light"] .radar-semaforo {
   box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
 }
 html[data-theme="light"] .refresh,
 html[data-theme="light"] .theme-toggle {
   box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+}
+
+/* === Wrappers transitorios mientras page.tsx no esté descompuesto === */
+/* Padding interno del legacy main para que los componentes legacy
+   (que asumían el .container con padding 24px) respiren. Se remueve
+   en Fase 8 cuando el page.tsx final ya no use estilos legacy. */
+.legacy-main-pad {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* === Dashboard table card (mockup líneas 432-487) === */
+.table-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.table-header-row {
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.table-title-block { display: flex; flex-direction: column; gap: 2px; }
+.table-subtitle {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.table-delete-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.table-delete-btn:hover {
+  color: var(--sell);
+  border-color: var(--sell);
+  background: var(--sell-bg);
+}
+
+/* Dashboard table — rompe la cascada legacy del global `table`. */
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  table-layout: auto;
+}
+.dashboard-table thead th {
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-row);
+}
+.dashboard-table thead th.right { text-align: right; }
+.dashboard-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+.dashboard-table tbody tr:last-child td { border-bottom: none; }
+.dashboard-table tbody tr:hover { background: var(--bg-hover); }
+.dashboard-table tbody tr.row-closed { opacity: 0.78; }
+.dashboard-table tbody tr.row-closed:hover { opacity: 1; }
+.dashboard-table .right { text-align: right; }
+.dashboard-table .td-time { color: var(--text-tertiary); white-space: nowrap; }
+.dashboard-table .td-symbol { font-weight: 600; }
+
+/* Side pills dentro de la tabla del dashboard. */
+.dashboard-table .side-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.dashboard-table .side-pill.side-buy     { background: var(--buy-bg);  color: var(--buy); }
+.dashboard-table .side-pill.side-sell    { background: var(--sell-bg); color: var(--sell); }
+.dashboard-table .side-pill.side-neutral { background: var(--bg-hover); color: var(--text-tertiary); }
+
+/* Placeholder visual para sidebar / rightbar mientras Fases 6-7 los
+   construyen. Lo elimina la Fase 7 al reemplazar los slots. */
+.legacy-shell-placeholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-style: italic;
+  text-align: center;
 }

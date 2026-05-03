@@ -1,0 +1,102 @@
+/* StocksSidebarSection — variante stocks de la sidebar.
+   Reusa los tokens (.sb-section, .sb-label) que ya pinta Sidebar.css. */
+
+.stocks-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Override del padding del search para encajar con la sidebar densidad. */
+.stocks-sidebar-search {
+  margin-bottom: 10px;
+}
+.stocks-sidebar-search .ticker-search-input {
+  padding: 6px 28px 6px 10px;
+  font-size: 12px;
+  background: var(--bg-base);
+}
+.stocks-sidebar-search .ticker-search-spinner {
+  right: 8px;
+  width: 12px;
+  height: 12px;
+}
+
+.stocks-sidebar-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 12px 8px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.stocks-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.stocks-sidebar-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border-radius: 5px;
+  transition: background 100ms;
+}
+.stocks-sidebar-item:hover { background: var(--bg-hover); }
+.stocks-sidebar-item.is-active { background: var(--accent-soft); }
+.stocks-sidebar-item.is-active .stocks-sidebar-symbol { color: var(--accent); }
+
+.stocks-sidebar-item-main {
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stocks-sidebar-symbol {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.stocks-sidebar-pill {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.stocks-sidebar-pill.pill-buy   { background: var(--buy-bg);  color: var(--buy); }
+.stocks-sidebar-pill.pill-sell  { background: var(--sell-bg); color: var(--sell); }
+.stocks-sidebar-pill.pill-hold  { background: var(--warn-bg); color: var(--warn); }
+
+.stocks-sidebar-conf {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.stocks-sidebar-remove {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  padding: 4px 8px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms, color 120ms;
+}
+.stocks-sidebar-item:hover .stocks-sidebar-remove { opacity: 1; }
+.stocks-sidebar-remove:hover { color: var(--sell); }

@@ -1,0 +1,133 @@
+/* ──────────────────────────────────────────────────────────────────
+   Topbar — píxel-fiel al mockup (líneas 68-141 de dashboard_mockup.html).
+   ────────────────────────────────────────────────────────────────── */
+
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 16px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border-subtle);
+  height: var(--topbar-h);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent), #8B5CF6);
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+.brand-name { white-space: nowrap; }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg);
+  padding: 3px;
+  border-radius: 7px;
+  border: 1px solid var(--border-subtle);
+}
+.tab {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+  white-space: nowrap;
+  font-family: inherit;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  background: var(--bg-hover);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border-default);
+}
+
+.topbar-spacer { flex: 1; }
+
+/* Session pill */
+.session-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.session-pill .num { color: var(--text-2); }
+.session-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: background var(--t-base), box-shadow var(--t-base);
+}
+.session-pill.is-open .session-pill-dot {
+  background: var(--buy);
+  box-shadow: 0 0 0 3px var(--buy-bg);
+  animation: topbar-pulse 2s ease-in-out infinite;
+}
+@keyframes topbar-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--buy-bg); }
+  50%      { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* Icon buttons */
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Spinner para refresh */
+.icon-btn .spin {
+  animation: topbar-spin 800ms linear infinite;
+}
+@keyframes topbar-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Responsive: a partir de ~1024 ocultamos las labels largas de tabs */
+@media (max-width: 1023px) {
+  .topbar { gap: 12px; padding: 0 10px; }
+  .brand-name { display: none; }
+  .session-pill { display: none; }
+}

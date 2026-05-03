@@ -1,0 +1,15 @@
+/* ──────────────────────────────────────────────────────────────────
+   StocksView — container del módulo Stocks (wizard / dashboard).
+   ────────────────────────────────────────────────────────────────── */
+
+.stocks-view {
+  width: 100%;
+  min-height: 100%;
+}
+
+.stocks-loading {
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  padding: 60px 16px;
+}

@@ -1,0 +1,326 @@
+/* ──────────────────────────────────────────────────────────────────
+   ProfileWizard — onboarding de 5 pasos.
+   Reusa el lenguaje visual del shell (cards bg-elevated, border-subtle).
+   ────────────────────────────────────────────────────────────────── */
+
+.wizard {
+  max-width: 720px;
+  margin: 24px auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* === Header con progress bar === */
+.wizard-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.wizard-progress {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+}
+.wizard-progress-segment {
+  flex: 1;
+  height: 4px;
+  background: var(--border-subtle);
+  border-radius: 2px;
+  transition: background var(--t-base) var(--ease);
+}
+.wizard-progress-segment.is-done   { background: var(--accent); }
+.wizard-progress-segment.is-active { background: var(--aplus); }
+
+.wizard-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wizard-step-num {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.wizard-cancel {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 120ms;
+}
+.wizard-cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+/* === Card principal === */
+.wizard-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.wizard-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.wizard-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.wizard-content {
+  margin-top: 4px;
+}
+
+.wizard-disclaimer {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+.wizard-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+.wizard-btn {
+  padding: 9px 18px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  transition: all 120ms;
+  font-family: inherit;
+}
+.wizard-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+.wizard-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wizard-btn-next {
+  background: var(--aplus);
+  color: #022C22;
+  border-color: var(--aplus);
+}
+.wizard-btn-next:hover:not(:disabled) {
+  background: var(--aplus);
+  filter: brightness(1.08);
+}
+
+/* === Step options compartidos (Horizon / Capital / Experience) === */
+.step-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.step-option {
+  text-align: left;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 120ms;
+  font-family: inherit;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.step-option:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+.step-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.step-option.is-selected .step-option-title { color: var(--accent); }
+.step-option-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.step-option-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.step-option-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+/* === Risk step === */
+.risk-step {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.risk-display {
+  text-align: center;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.risk-value {
+  font-size: 42px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.risk-of {
+  font-size: 18px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  margin-left: 2px;
+}
+.risk-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.risk-detail {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  max-width: 460px;
+  margin: 0 auto;
+}
+.risk-slider-wrap {
+  position: relative;
+  padding: 0 6px;
+}
+.risk-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border-subtle);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.risk-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-elevated);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.risk-slider::-moz-range-thumb {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-elevated);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.risk-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+.risk-tick {
+  width: 28px;
+  height: 28px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  transition: all 120ms;
+  font-family: inherit;
+}
+.risk-tick:hover {
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+.risk-tick.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.risk-tick-num { font-weight: 600; }
+
+/* === Sectors === */
+.sectors-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sectors-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sector-chip {
+  padding: 7px 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 120ms;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sector-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.sector-chip.is-selected {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.sector-check {
+  font-size: 11px;
+  font-weight: 700;
+}
+.sectors-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}

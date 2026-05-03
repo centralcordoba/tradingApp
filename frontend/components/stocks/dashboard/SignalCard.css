@@ -1,0 +1,279 @@
+/* SignalCard — card grande con decisión + confianza + razones + breakdown. */
+
+.signal-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+}
+.signal-card.decision-buy {
+  border-color: rgba(34, 197, 94, 0.35);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.10), 0 0 22px -8px rgba(34, 197, 94, 0.30);
+}
+.signal-card.decision-sell {
+  border-color: rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.10), 0 0 22px -8px rgba(239, 68, 68, 0.30);
+}
+.signal-card.decision-hold {
+  border-color: rgba(245, 158, 11, 0.30);
+}
+
+/* Header */
+.signal-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.signal-card-id {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.signal-card-symbol {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.signal-card-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.signal-card-price-num {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.signal-card-change {
+  font-size: 12px;
+  font-weight: 600;
+}
+.ch-up   { color: var(--buy); }
+.ch-down { color: var(--sell); }
+
+.signal-card-status-pill {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.signal-card-status-pill.ms-open    { background: var(--buy-bg);  color: var(--buy); }
+.signal-card-status-pill.ms-closed  { background: var(--bg-hover); color: var(--text-tertiary); }
+.signal-card-status-pill.ms-pre,
+.signal-card-status-pill.ms-post    { background: var(--warn-bg); color: var(--warn); }
+.signal-card-status-pill.ms-loading { background: var(--bg-hover); color: var(--text-tertiary); }
+
+/* Decisión grande */
+.signal-card-decision {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+}
+.decision-label {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.decision-label.decision-buy   { color: var(--buy); }
+.decision-label.decision-sell  { color: var(--sell); }
+.decision-label.decision-hold  { color: var(--warn); }
+.decision-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.decision-meta b {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* Confianza */
+.signal-card-confidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.confidence-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+}
+.confidence-label {
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.confidence-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.confidence-bar {
+  height: 6px;
+  background: var(--border-subtle);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 240ms var(--ease);
+}
+.decision-buy-bar  { background: var(--buy); }
+.decision-sell-bar { background: var(--sell); }
+.decision-hold-bar { background: var(--warn); }
+
+/* Reasons */
+.signal-card-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.signal-card-reason {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding-left: 16px;
+  position: relative;
+  line-height: 1.45;
+}
+.signal-card-reason::before {
+  content: "•";
+  position: absolute;
+  left: 4px;
+  color: var(--text-tertiary);
+  font-weight: 700;
+}
+
+/* Expand toggle */
+.signal-card-expand {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: all 120ms;
+  font-family: inherit;
+}
+.signal-card-expand:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Footer */
+.signal-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.signal-card-fresh {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.signal-card-refresh {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 120ms;
+  font-family: inherit;
+}
+.signal-card-refresh:hover {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+  background: var(--bg-hover);
+}
+
+/* Disclaimer */
+.signal-card-disclaimer {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-base);
+  border-radius: 5px;
+  border: 1px solid var(--border-subtle);
+}
+
+/* Loading state */
+.signal-card-loading-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 0;
+}
+.signal-card-skeleton {
+  height: 32px;
+  background: linear-gradient(90deg, var(--bg-base), var(--bg-hover), var(--bg-base));
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.signal-card-skeleton-bar  { height: 6px; }
+.signal-card-skeleton-line { height: 12px; width: 60%; }
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Error state */
+.signal-card-error-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.signal-card-error-icon {
+  font-size: 28px;
+  color: var(--warn);
+}
+.signal-card-error-msg {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 320px;
+  line-height: 1.5;
+}
+.signal-card-retry {
+  margin-top: 4px;
+  padding: 7px 16px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.signal-card-retry:hover {
+  background: var(--bg-hover);
+}

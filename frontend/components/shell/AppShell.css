@@ -1,0 +1,71 @@
+/* ──────────────────────────────────────────────────────────────────
+   AppShell — grid topbar / sidebar / main / rightbar.
+   Píxel-fiel al mockup (líneas 57-66 de dashboard_mockup.html).
+   ────────────────────────────────────────────────────────────────── */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr var(--rightbar-w);
+  grid-template-rows: var(--topbar-h) 1fr;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "sidebar main rightbar";
+  height: 100vh;
+  width: 100vw;
+}
+
+.app-shell-topbar { grid-area: topbar; }
+
+.app-shell-sidebar {
+  grid-area: sidebar;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.app-shell-main {
+  grid-area: main;
+  overflow-y: auto;
+  min-width: 0;
+  /* Padding interno lo maneja el contenido (cada vista decide).
+     Sin padding aquí permite que componentes full-bleed (timelines,
+     charts) ocupen el ancho completo del main. */
+}
+
+.app-shell-rightbar {
+  grid-area: rightbar;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* < 1280: sidebar 200, rightbar 280 */
+@media (max-width: 1279px) {
+  .app-shell {
+    grid-template-columns: 200px 1fr 280px;
+  }
+}
+
+/* < 1024: ocultamos rightbar (responsive simple — drawer en Fase 8) */
+@media (max-width: 1023px) {
+  .app-shell {
+    grid-template-columns: 200px 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "sidebar main";
+  }
+  .app-shell-rightbar { display: none; }
+}
+
+/* < 768: ocultamos también sidebar */
+@media (max-width: 767px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "main";
+  }
+  .app-shell-sidebar { display: none; }
+}

@@ -1,0 +1,164 @@
+/* ──────────────────────────────────────────────────────────────────
+   SessionsTimeline + KillZonesTrack
+   Píxel-fiel al mockup (líneas 227-344 de dashboard_mockup.html).
+   ────────────────────────────────────────────────────────────────── */
+
+.timeline-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.timeline-card-loading {
+  height: 110px;
+}
+
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.timeline-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.timeline-now {
+  font-size: 11px;
+  color: var(--text-2);
+  display: flex;
+  gap: 8px;
+}
+.timeline-now .label { color: var(--text-3); }
+.timeline-now .value { color: var(--text-2); font-weight: 600; }
+.timeline-now .value.is-open { color: var(--buy); }
+
+/* === Track principal === */
+.timeline-track {
+  position: relative;
+  height: 38px;
+  background: var(--bg);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.session {
+  position: absolute;
+  top: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-right: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.session-asia { background: rgba(99, 102, 241, 0.10); color: #A5B4FC; }
+.session-ldn  { background: rgba(34, 197, 94, 0.10);  color: #86EFAC; }
+.session-ny   { background: rgba(245, 158, 11, 0.10); color: #FCD34D; }
+
+.session-overlap {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--aplus) 0%, var(--accent) 100%);
+  opacity: 0.18;
+  border-left: 1px dashed rgba(16, 185, 129, 0.4);
+  border-right: 1px dashed rgba(16, 185, 129, 0.4);
+  pointer-events: none;
+}
+
+.overlap-badge {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--aplus);
+  color: #022C22;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  z-index: 5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.overlap-badge.is-active {
+  animation: timeline-overlap-pulse 2s ease-in-out infinite;
+}
+@keyframes timeline-overlap-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+}
+
+/* === Now marker === */
+.now-marker {
+  position: absolute;
+  top: -4px; bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--buy);
+  box-shadow: 0 0 8px var(--buy);
+  z-index: 10;
+  pointer-events: none;
+  transition: left 1s linear;
+}
+.now-marker::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--buy);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+}
+
+/* === Kill zones track === */
+.killzones-track {
+  position: relative;
+  height: 14px;
+  background: var(--bg);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.kz {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-right: 1px solid rgba(0, 0, 0, 0.3);
+  cursor: help;
+  transition: opacity var(--t-fast);
+}
+.kz:hover { filter: brightness(1.2); }
+
+.kz-avoid        { background: var(--border-default); }
+.kz-caution      { background: var(--warn);   opacity: 0.55; }
+.kz-aplus        { background: var(--aplus);  opacity: 0.85; }
+.kz-advanced     { background: #F97316;       opacity: 0.55; }
+.kz-continuation { background: var(--info);   opacity: 0.55; }
+
+/* === Hour axis === */
+.timeline-axis {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  font-size: 9px;
+  color: var(--text-3);
+}
+.timeline-axis div {
+  text-align: left;
+  padding-left: 2px;
+}
+
+/* Light theme: el verde oscuro del overlap-badge sobre fondo claro
+   queda con bajo contraste. Cambio el color del texto a algo más oscuro. */
+html[data-theme="light"] .overlap-badge {
+  color: #FFFFFF;
+}

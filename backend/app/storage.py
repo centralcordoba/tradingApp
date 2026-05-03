@@ -101,6 +101,27 @@ def init_db() -> None:
                 ("taken", "TEXT"),
             ]:
                 cur.execute(f"ALTER TABLE signals ADD COLUMN IF NOT EXISTS {col} {ddl}")
+
+            # Stocks: investor profile (singleton) + watchlist
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS investor_profile (
+                    id INTEGER PRIMARY KEY,
+                    horizon TEXT NOT NULL,
+                    risk_tolerance INTEGER NOT NULL,
+                    capital_range TEXT NOT NULL,
+                    experience TEXT NOT NULL,
+                    sectors_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS stocks_watchlist (
+                    symbol TEXT PRIMARY KEY,
+                    last_decision TEXT,
+                    last_confidence DOUBLE PRECISION,
+                    added_at TEXT NOT NULL
+                )
+            """)
     else:
         with _db() as cur:
             cur.execute("""
@@ -130,6 +151,27 @@ def init_db() -> None:
             ]:
                 if col not in cols:
                     cur.execute(f"ALTER TABLE signals ADD COLUMN {ddl}")
+
+            # Stocks: investor profile (singleton) + watchlist
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS investor_profile (
+                    id INTEGER PRIMARY KEY,
+                    horizon TEXT NOT NULL,
+                    risk_tolerance INTEGER NOT NULL,
+                    capital_range TEXT NOT NULL,
+                    experience TEXT NOT NULL,
+                    sectors_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS stocks_watchlist (
+                    symbol TEXT PRIMARY KEY,
+                    last_decision TEXT,
+                    last_confidence REAL,
+                    added_at TEXT NOT NULL
+                )
+            """)
 
 
 # ---------------------------------------------------------------------------
@@ -354,3 +396,140 @@ def _row_to_dict(r) -> dict:
         "journal_closed_early": d.get("journal_closed_early"),
         "journal_emotion": d.get("journal_emotion"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Stocks: investor profile (singleton) + watchlist
+# ---------------------------------------------------------------------------
+
+def _profile_row_to_dict(r) -> dict:
+    d = dict(r)
+    sectors_raw = d.get("sectors_json") or "[]"
+    try:
+        sectors = json.loads(sectors_raw)
+    except (TypeError, ValueError):
+        sectors = []
+    return {
+        "horizon": d["horizon"],
+        "riskTolerance": int(d["risk_tolerance"]),
+        "capitalRange": d["capital_range"],
+        "experience": d["experience"],
+        "sectors": sectors if isinstance(sectors, list) else [],
+        "updated_at": d.get("updated_at"),
+    }
+
+
+def get_investor_profile() -> Optional[dict]:
+    ph = _PH
+    with _db() as cur:
+        _exec(cur, f"SELECT * FROM investor_profile WHERE id = {ph}", (1,))
+        row = _fetchone(cur)
+    return _profile_row_to_dict(row) if row else None
+
+
+def save_investor_profile(profile: dict) -> dict:
+    """Upsert del perfil del inversor (siempre id=1)."""
+    payload = (
+        profile["horizon"],
+        int(profile["riskTolerance"]),
+        profile["capitalRange"],
+        profile["experience"],
+        json.dumps(profile.get("sectors") or []),
+        datetime.utcnow().isoformat(),
+    )
+    ph = _PH
+    with _db() as cur:
+        if DATABASE_URL:
+            cur.execute(
+                f"INSERT INTO investor_profile "
+                f"(id, horizon, risk_tolerance, capital_range, experience, sectors_json, updated_at) "
+                f"VALUES (1, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}) "
+                f"ON CONFLICT (id) DO UPDATE SET "
+                f"horizon = EXCLUDED.horizon, "
+                f"risk_tolerance = EXCLUDED.risk_tolerance, "
+                f"capital_range = EXCLUDED.capital_range, "
+                f"experience = EXCLUDED.experience, "
+                f"sectors_json = EXCLUDED.sectors_json, "
+                f"updated_at = EXCLUDED.updated_at",
+                payload,
+            )
+        else:
+            cur.execute(
+                f"INSERT OR REPLACE INTO investor_profile "
+                f"(id, horizon, risk_tolerance, capital_range, experience, sectors_json, updated_at) "
+                f"VALUES (1, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})",
+                payload,
+            )
+    return get_investor_profile() or {}
+
+
+def clear_investor_profile() -> None:
+    ph = _PH
+    with _db() as cur:
+        cur.execute(f"DELETE FROM investor_profile WHERE id = {ph}", (1,))
+
+
+def _watchlist_row_to_dict(r) -> dict:
+    d = dict(r)
+    return {
+        "symbol": d["symbol"],
+        "lastDecision": d.get("last_decision"),
+        "lastConfidence": d.get("last_confidence"),
+        "addedAt": d["added_at"],
+    }
+
+
+def get_stocks_watchlist() -> List[dict]:
+    with _db() as cur:
+        _exec(cur, "SELECT * FROM stocks_watchlist ORDER BY added_at ASC", ())
+        rows = _fetchall(cur)
+    return [_watchlist_row_to_dict(r) for r in rows]
+
+
+def add_to_stocks_watchlist(symbol: str) -> List[dict]:
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        return get_stocks_watchlist()
+    ph = _PH
+    now = datetime.utcnow().isoformat()
+    with _db() as cur:
+        if DATABASE_URL:
+            cur.execute(
+                f"INSERT INTO stocks_watchlist (symbol, last_decision, last_confidence, added_at) "
+                f"VALUES ({ph}, NULL, NULL, {ph}) "
+                f"ON CONFLICT (symbol) DO NOTHING",
+                (sym, now),
+            )
+        else:
+            cur.execute(
+                f"INSERT OR IGNORE INTO stocks_watchlist (symbol, last_decision, last_confidence, added_at) "
+                f"VALUES ({ph}, NULL, NULL, {ph})",
+                (sym, now),
+            )
+    return get_stocks_watchlist()
+
+
+def remove_from_stocks_watchlist(symbol: str) -> List[dict]:
+    sym = (symbol or "").upper().strip()
+    ph = _PH
+    with _db() as cur:
+        cur.execute(f"DELETE FROM stocks_watchlist WHERE symbol = {ph}", (sym,))
+    return get_stocks_watchlist()
+
+
+def update_stocks_watchlist_item(
+    symbol: str,
+    last_decision: Optional[str] = None,
+    last_confidence: Optional[float] = None,
+) -> List[dict]:
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        return get_stocks_watchlist()
+    ph = _PH
+    with _db() as cur:
+        cur.execute(
+            f"UPDATE stocks_watchlist SET last_decision = {ph}, last_confidence = {ph} "
+            f"WHERE symbol = {ph}",
+            (last_decision, last_confidence, sym),
+        )
+    return get_stocks_watchlist()

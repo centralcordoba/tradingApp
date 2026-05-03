@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Trading Assistant — Rediseño</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-base: #0A0E14;
+    --bg-elevated: #131822;
+    --bg-hover: #1A2030;
+    --bg-row: #0F141C;
+    --border-subtle: #1F2937;
+    --border-default: #2A3441;
+    --border-strong: #3A4554;
+
+    --text-primary: #E8EAED;
+    --text-secondary: #9CA3AF;
+    --text-tertiary: #6B7280;
+
+    --buy: #22C55E;
+    --buy-soft: rgba(34, 197, 94, 0.12);
+    --sell: #EF4444;
+    --sell-soft: rgba(239, 68, 68, 0.12);
+    --warning: #F59E0B;
+    --warning-soft: rgba(245, 158, 11, 0.12);
+    --info: #3B82F6;
+    --info-soft: rgba(59, 130, 246, 0.12);
+    --aplus: #10B981;
+    --accent: #6366F1;
+    --accent-soft: rgba(99, 102, 241, 0.15);
+
+    --font-ui: 'Inter', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+    --topbar-h: 52px;
+    --sidebar-w: 232px;
+    --rightbar-w: 320px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font-ui);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* ============ APP SHELL ============ */
+  .app {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr var(--rightbar-w);
+    grid-template-rows: var(--topbar-h) 1fr;
+    grid-template-areas:
+      "topbar topbar topbar"
+      "sidebar main rightbar";
+    height: 100vh;
+  }
+
+  /* ============ TOPBAR ============ */
+  .topbar {
+    grid-area: topbar;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 0 16px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 14px; letter-spacing: -0.01em;
+  }
+  .brand-mark {
+    width: 22px; height: 22px; border-radius: 5px;
+    background: linear-gradient(135deg, var(--accent), #8B5CF6);
+    display: grid; place-items: center;
+    color: white; font-size: 11px; font-weight: 700;
+  }
+  .tabs {
+    display: flex; gap: 2px;
+    background: var(--bg-base);
+    padding: 3px;
+    border-radius: 7px;
+    border: 1px solid var(--border-subtle);
+  }
+  .tab {
+    padding: 5px 12px;
+    font-size: 12px; font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none; border-radius: 5px;
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 1px var(--border-default);
+  }
+  .topbar-spacer { flex: 1; }
+  .session-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    font-size: 11px;
+  }
+  .session-pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--buy);
+    box-shadow: 0 0 0 3px var(--buy-soft);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--buy-soft); }
+    50% { box-shadow: 0 0 0 6px transparent; }
+  }
+  .icon-btn {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .icon-btn svg { width: 14px; height: 14px; }
+
+  /* ============ SIDEBAR ============ */
+  .sidebar {
+    grid-area: sidebar;
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border-subtle);
+    overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .sb-section { padding: 14px 12px 8px; }
+  .sb-label {
+    text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+    margin-bottom: 8px;
+    padding: 0 4px;
+  }
+  .sb-search {
+    width: 100%;
+    padding: 6px 10px 6px 28px;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: inherit;
+    margin-bottom: 8px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>");
+    background-repeat: no-repeat;
+    background-position: 9px center;
+  }
+  .sb-search:focus { outline: none; border-color: var(--accent); }
+  .pair-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 100ms;
+  }
+  .pair-row:hover { background: var(--bg-hover); }
+  .pair-row.active { background: var(--accent-soft); }
+  .pair-row.active .pair-name { color: var(--accent); }
+  .pair-name { font-weight: 500; font-size: 12px; }
+  .pair-price { font-size: 11px; color: var(--text-secondary); }
+  .pair-change { font-size: 10px; font-weight: 600; }
+  .pair-change.up { color: var(--buy); }
+  .pair-change.down { color: var(--sell); }
+  .star {
+    color: var(--text-tertiary);
+    font-size: 10px;
+  }
+  .star.filled { color: var(--warning); }
+
+  .sb-events { padding: 0 12px 14px; }
+  .event-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 5px;
+    align-items: center;
+    font-size: 11px;
+  }
+  .event-time { color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; }
+  .event-flag { font-size: 12px; }
+  .event-name { color: var(--text-secondary); }
+  .impact-dot { width: 5px; height: 5px; border-radius: 50%; }
+  .impact-high { background: var(--sell); }
+  .impact-med { background: var(--warning); }
+  .impact-low { background: var(--text-tertiary); }
+
+  /* ============ MAIN ============ */
+  .main {
+    grid-area: main;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Sessions Timeline */
+  .timeline-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .timeline-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .timeline-title {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+  }
+  .timeline-now {
+    font-size: 11px; color: var(--text-secondary);
+    display: flex; gap: 8px;
+  }
+  .timeline-now .label { color: var(--text-tertiary); }
+  .timeline-now .value { color: var(--buy); font-weight: 600; }
+
+  .timeline-track {
+    position: relative;
+    height: 38px;
+    background: var(--bg-base);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .session {
+    position: absolute;
+    top: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-right: 1px solid var(--border-subtle);
+  }
+  .session-asia    { background: rgba(99,102,241,0.10); color: #A5B4FC; left: 0%;     width: 37.5%; }
+  .session-london  { background: rgba(34,197,94,0.10);  color: #86EFAC; left: 33.3%;  width: 37.5%; }
+  .session-ny      { background: rgba(245,158,11,0.10); color: #FCD34D; left: 54.2%;  width: 37.5%; }
+
+  .session-overlap {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--aplus) 0%, var(--accent) 100%);
+    opacity: 0.18;
+    left: 54.2%; width: 16.6%;
+    border-left: 1px dashed rgba(16,185,129,0.4);
+    border-right: 1px dashed rgba(16,185,129,0.4);
+  }
+  .overlap-badge {
+    position: absolute;
+    top: 50%;
+    left: calc(54.2% + 8.3%);
+    transform: translate(-50%, -50%);
+    background: var(--aplus);
+    color: #022C22;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+    z-index: 5;
+  }
+  .now-marker {
+    position: absolute;
+    top: -4px; bottom: -4px;
+    left: 67.5%;
+    width: 2px;
+    background: var(--buy);
+    box-shadow: 0 0 8px var(--buy);
+    z-index: 10;
+  }
+  .now-marker::before {
+    content: '';
+    position: absolute;
+    top: -3px; left: -3px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--buy);
+    box-shadow: 0 0 0 3px rgba(34,197,94,0.25);
+  }
+
+  /* Kill zones row */
+  .killzones-track {
+    position: relative;
+    height: 14px;
+    background: var(--bg-base);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .kz {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-right: 1px solid rgba(0,0,0,0.3);
+  }
+  .kz-avoid     { background: #2A3441; }
+  .kz-caution   { background: var(--warning); opacity: 0.55; }
+  .kz-aplus     { background: var(--aplus); opacity: 0.85; }
+  .kz-advanced  { background: #F97316; opacity: 0.55; }
+  .kz-cont      { background: var(--info); opacity: 0.55; }
+
+  .timeline-axis {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    font-size: 9px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+  }
+  .timeline-axis div { text-align: left; padding-left: 2px; }
+
+  /* KPI Hero */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .kpi {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .kpi-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    color: var(--text-tertiary);
+  }
+  .kpi-value {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .kpi-value.pnl-positive { color: var(--buy); }
+  .kpi-value.pnl-zero { color: var(--text-secondary); }
+  .kpi-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+  .kpi-sub .mono { color: var(--text-secondary); }
+  .kpi-bar {
+    height: 3px;
+    background: var(--border-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .kpi-bar-fill {
+    height: 100%;
+    background: var(--buy);
+    border-radius: 2px;
+  }
+
+  /* Equity curve */
+  .chart-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .chart-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .chart-title {
+    font-size: 13px; font-weight: 600;
+  }
+  .chart-toggle {
+    display: flex; gap: 0;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    padding: 2px;
+  }
+  .chart-toggle button {
+    padding: 3px 8px;
+    background: transparent; border: none;
+    color: var(--text-tertiary);
+    font-size: 10px; font-weight: 500;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .chart-toggle button.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .chart-svg {
+    width: 100%;
+    height: 140px;
+    display: block;
+  }
+
+  /* Trades table */
+  .table-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .table-header-row {
+    padding: 11px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .trades-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+  }
+  .trades-table thead th {
+    text-align: left;
+    padding: 8px 14px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-row);
+  }
+  .trades-table thead th.right { text-align: right; }
+  .trades-table tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .trades-table tbody tr:last-child td { border-bottom: none; }
+  .trades-table tbody tr:hover { background: var(--bg-hover); }
+  .trades-table .right { text-align: right; font-family: var(--font-mono); }
+  .side-pill {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .side-buy { background: var(--buy-soft); color: var(--buy); }
+  .side-sell { background: var(--sell-soft); color: var(--sell); }
+  .pl-up { color: var(--buy); font-weight: 600; }
+  .pl-down { color: var(--sell); font-weight: 600; }
+  .status-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .status-active { background: var(--buy); box-shadow: 0 0 0 2px var(--buy-soft); }
+  .status-closed { background: var(--text-tertiary); }
+
+  /* ============ RIGHT BAR ============ */
+  .rightbar {
+    grid-area: rightbar;
+    background: var(--bg-elevated);
+    border-left: 1px solid var(--border-subtle);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 12px;
+  }
+
+  .next-setup {
+    background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(99,102,241,0.06));
+    border: 1px solid rgba(16,185,129,0.25);
+    border-radius: 8px;
+    padding: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .next-setup::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 80px; height: 80px;
+    background: radial-gradient(circle, rgba(16,185,129,0.15), transparent 70%);
+    pointer-events: none;
+  }
+  .next-setup-label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--aplus);
+    margin-bottom: 8px;
+  }
+  .next-setup-label .star { color: var(--aplus); }
+  .next-setup-time {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .next-setup-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+  }
+  .next-setup-pairs {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    margin-bottom: 10px;
+  }
+  .pair-chip {
+    padding: 3px 8px;
+    background: var(--bg-base);
+    border: 1px solid var(--border-default);
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .pair-chip:hover { border-color: var(--aplus); }
+  .next-setup-cta {
+    width: 100%;
+    padding: 7px;
+    background: var(--aplus);
+    color: #022C22;
+    border: none;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+
+  .panel {
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-title {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+  }
+  .panel-counter {
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+  .signal-row {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 8px;
+  }
+  .signal-row:last-child { border-bottom: none; }
+  .signal-pair-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+  }
+  .signal-entry {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+  }
+  .signal-pl {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: right;
+  }
+  .signal-spark { grid-column: 2; height: 16px; width: 70px; }
+  .signal-meta {
+    grid-column: 1 / -1;
+    font-size: 10px;
+    color: var(--text-tertiary);
+  }
+
+  .pulse-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border-subtle);
+  }
+  .pulse-cell {
+    background: var(--bg-base);
+    padding: 9px 11px;
+  }
+  .pulse-symbol {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 2px;
+  }
+  .pulse-value {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .pulse-change {
+    font-size: 10px;
+    font-family: var(--font-mono);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- ============ TOPBAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">AI</div>
+      <span>Trading Assistant</span>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab active">Dashboard</button>
+      <button class="tab">Análisis de zonas</button>
+      <button class="tab">Radar de setups</button>
+    </nav>
+
+    <div class="topbar-spacer"></div>
+
+    <div class="session-pill">
+      <span class="dot"></span>
+      <span>NY Session · </span>
+      <span class="mono">cierra en 43m</span>
+    </div>
+
+    <button class="icon-btn" title="Refrescar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
+    </button>
+    <button class="icon-btn" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="sb-section">
+      <div class="sb-label">Pares</div>
+      <input class="sb-search" placeholder="Buscar par…" />
+      <div class="pair-row active">
+        <div>
+          <div class="pair-name mono">EURUSD</div>
+          <div class="pair-price mono">1.08432</div>
+        </div>
+        <div class="pair-change up mono">+0.24%</div>
+        <span class="star filled">★</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">XAUUSD</div>
+          <div class="pair-price mono">2031.45</div>
+        </div>
+        <div class="pair-change down mono">-0.18%</div>
+        <span class="star filled">★</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">GBPUSD</div>
+          <div class="pair-price mono">1.26340</div>
+        </div>
+        <div class="pair-change up mono">+0.41%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">USDJPY</div>
+          <div class="pair-price mono">149.82</div>
+        </div>
+        <div class="pair-change down mono">-0.09%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">USDCHF</div>
+          <div class="pair-price mono">0.8821</div>
+        </div>
+        <div class="pair-change up mono">+0.07%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">AUDUSD</div>
+          <div class="pair-price mono">0.6612</div>
+        </div>
+        <div class="pair-change down mono">-0.31%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">NZDUSD</div>
+          <div class="pair-price mono">0.6104</div>
+        </div>
+        <div class="pair-change up mono">+0.12%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">USDCAD</div>
+          <div class="pair-price mono">1.3540</div>
+        </div>
+        <div class="pair-change up mono">+0.05%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">EURJPY</div>
+          <div class="pair-price mono">162.42</div>
+        </div>
+        <div class="pair-change up mono">+0.18%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">GBPJPY</div>
+          <div class="pair-price mono">189.21</div>
+        </div>
+        <div class="pair-change down mono">-0.22%</div>
+        <span class="star">☆</span>
+      </div>
+      <div class="pair-row">
+        <div>
+          <div class="pair-name mono">EURGBP</div>
+          <div class="pair-price mono">0.8585</div>
+        </div>
+        <div class="pair-change up mono">+0.02%</div>
+        <span class="star">☆</span>
+      </div>
+    </div>
+
+    <div class="sb-section" style="border-top: 1px solid var(--border-subtle);">
+      <div class="sb-label">Calendario económico</div>
+    </div>
+    <div class="sb-events">
+      <div class="event-item">
+        <span class="event-time">15:30</span>
+        <span><span class="event-flag">🇺🇸</span> CPI YoY</span>
+        <span class="impact-dot impact-high"></span>
+      </div>
+      <div class="event-item">
+        <span class="event-time">16:00</span>
+        <span><span class="event-flag">🇺🇸</span> Fed minutes</span>
+        <span class="impact-dot impact-high"></span>
+      </div>
+      <div class="event-item">
+        <span class="event-time">18:30</span>
+        <span><span class="event-flag">🇪🇺</span> ECB Lagarde</span>
+        <span class="impact-dot impact-med"></span>
+      </div>
+      <div class="event-item">
+        <span class="event-time">21:00</span>
+        <span><span class="event-flag">🇯🇵</span> BoJ Statement</span>
+        <span class="impact-dot impact-low"></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <!-- Sessions + Kill Zones combinados -->
+    <section class="timeline-card">
+      <div class="timeline-header">
+        <span class="timeline-title">Sesiones · 24h · Hora Madrid</span>
+        <div class="timeline-now">
+          <span class="label">AHORA</span>
+          <span class="value mono">16:16:27</span>
+        </div>
+      </div>
+
+      <div class="timeline-track">
+        <div class="session session-asia">ASIA</div>
+        <div class="session session-london">LONDRES</div>
+        <div class="session session-ny">NEW YORK</div>
+        <div class="session-overlap"></div>
+        <span class="overlap-badge">★ A+ OVERLAP</span>
+        <div class="now-marker"></div>
+      </div>
+
+      <div class="killzones-track" title="Kill zones alineadas con las sesiones">
+        <div class="kz kz-avoid"     style="left:0%;     width:8.3%;"  title="00-02 · Sin actividad"></div>
+        <div class="kz kz-avoid"     style="left:8.3%;   width:12.5%;" title="02-05 Asia · No operar"></div>
+        <div class="kz kz-avoid"     style="left:20.8%;  width:16.7%;" title="05-09 Pre-London · Identificar liquidez"></div>
+        <div class="kz kz-aplus"     style="left:37.5%;  width:6.25%;" title="09-10:30 London Open · Setup principal"></div>
+        <div class="kz kz-cont"      style="left:43.75%; width:6.25%;" title="10:30-12 London Continuation"></div>
+        <div class="kz kz-advanced"  style="left:50%;    width:8.3%;"  title="12-14 Pre-NY · Pullbacks"></div>
+        <div class="kz kz-aplus"     style="left:58.3%;  width:12.5%;" title="14-17 OVERLAP LDN-NY · A+ setups"></div>
+        <div class="kz kz-caution"   style="left:70.8%;  width:8.3%;"  title="17-19 NY Mid · Selectivo"></div>
+        <div class="kz kz-avoid"     style="left:79.1%;  width:12.5%;" title="19-22 NY Close · Evitar"></div>
+        <div class="kz kz-avoid"     style="left:91.6%;  width:8.4%;"  title="22-24 Cierre"></div>
+      </div>
+
+      <div class="timeline-axis">
+        <div>00</div><div>03</div><div>06</div><div>09</div>
+        <div>12</div><div>15</div><div>18</div><div>21</div>
+      </div>
+    </section>
+
+    <!-- KPI Hero -->
+    <section class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-label">Profit & Loss</div>
+        <div class="kpi-value pnl-zero">$0.00</div>
+        <div class="kpi-sub">Hoy · <span class="mono">0 trades cerrados</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Win Rate</div>
+        <div class="kpi-value mono" style="color: var(--text-secondary);">0%</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" style="width: 0%;"></div></div>
+        <div class="kpi-sub"><span class="mono">0 / 0 / 0</span> W/L/BE</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Execution Rate</div>
+        <div class="kpi-value mono" style="color: var(--text-secondary);">0%</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" style="width: 0%; background: var(--info);"></div></div>
+        <div class="kpi-sub"><span class="mono">0 / 0</span> ejecutadas / evaluadas</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Open Positions</div>
+        <div class="kpi-value mono" style="color: var(--accent);">1</div>
+        <div class="kpi-sub">Total: <span class="mono">1</span> · Cerradas: <span class="mono">0</span></div>
+      </div>
+    </section>
+
+    <!-- Equity curve -->
+    <section class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">Equity Curve</div>
+        <div class="chart-toggle">
+          <button>1D</button>
+          <button class="active">7D</button>
+          <button>30D</button>
+          <button>ALL</button>
+        </div>
+      </div>
+      <svg class="chart-svg" viewBox="0 0 800 140" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="equityGradient" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#22C55E" stop-opacity="0.25"/>
+            <stop offset="100%" stop-color="#22C55E" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <!-- grid sutil -->
+        <line x1="0" y1="35"  x2="800" y2="35"  stroke="#1F2937" stroke-dasharray="2,4"/>
+        <line x1="0" y1="70"  x2="800" y2="70"  stroke="#1F2937" stroke-dasharray="2,4"/>
+        <line x1="0" y1="105" x2="800" y2="105" stroke="#1F2937" stroke-dasharray="2,4"/>
+        <!-- area fill -->
+        <path d="M0,90 L80,82 L160,75 L240,68 L320,72 L400,55 L480,48 L560,52 L640,38 L720,30 L800,25 L800,140 L0,140 Z"
+              fill="url(#equityGradient)"/>
+        <!-- linea principal -->
+        <path d="M0,90 L80,82 L160,75 L240,68 L320,72 L400,55 L480,48 L560,52 L640,38 L720,30 L800,25"
+              fill="none" stroke="#22C55E" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+    </section>
+
+    <!-- Trades table -->
+    <section class="table-card">
+      <div class="table-header-row">
+        <div class="chart-title">Operaciones</div>
+        <div class="chart-toggle">
+          <button class="active">Todas</button>
+          <button>Activas</button>
+          <button>Cerradas</button>
+        </div>
+      </div>
+      <table class="trades-table">
+        <thead>
+          <tr>
+            <th>Hora</th>
+            <th>Par</th>
+            <th>Side</th>
+            <th class="right">Entry</th>
+            <th class="right">SL</th>
+            <th class="right">TP</th>
+            <th class="right">P/L</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono" style="color: var(--text-tertiary);">14:32:18</td>
+            <td class="mono"><strong>EURUSD</strong></td>
+            <td><span class="side-pill side-buy">BUY</span></td>
+            <td class="right">1.08210</td>
+            <td class="right" style="color: var(--text-tertiary);">1.08050</td>
+            <td class="right" style="color: var(--text-tertiary);">1.08540</td>
+            <td class="right pl-up">+22.2 pips</td>
+            <td><span class="status-dot status-active"></span>Activa</td>
+          </tr>
+          <tr style="opacity: 0.5;">
+            <td class="mono" style="color: var(--text-tertiary);">—</td>
+            <td colspan="7" style="color: var(--text-tertiary); text-align: center;">
+              Esperando próximo setup A+ · Overlap LDN-NY en <span class="mono" style="color: var(--text-secondary);">23m</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <!-- ============ RIGHT BAR ============ -->
+  <aside class="rightbar">
+    <!-- Next A+ Setup -->
+    <div class="next-setup">
+      <div class="next-setup-label"><span class="star">★</span> PRÓXIMO A+ SETUP</div>
+      <div class="next-setup-time mono">00:23:14</div>
+      <div class="next-setup-name">Overlap LDN-NY · Mejor ventana del día</div>
+      <div class="next-setup-pairs">
+        <span class="pair-chip">EURUSD</span>
+        <span class="pair-chip">GBPUSD</span>
+        <span class="pair-chip">XAUUSD</span>
+        <span class="pair-chip">USDJPY</span>
+      </div>
+      <button class="next-setup-cta">Abrir radar →</button>
+    </div>
+
+    <!-- Active signals -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Señales activas</span>
+        <span class="panel-counter">1 / 5</span>
+      </div>
+      <div class="signal-row">
+        <div class="signal-pair-line">
+          <span class="mono">EURUSD</span>
+          <span class="side-pill side-buy">BUY</span>
+        </div>
+        <div class="signal-pl pl-up">+22.2</div>
+        <div class="signal-entry">Entry <span class="mono">1.08210</span></div>
+        <svg class="signal-spark" viewBox="0 0 70 16" preserveAspectRatio="none">
+          <path d="M0,12 L10,11 L20,9 L30,10 L40,7 L50,5 L60,4 L70,3"
+                fill="none" stroke="#22C55E" stroke-width="1.2"/>
+        </svg>
+        <div class="signal-meta">London Continuation · hace 1h 44m</div>
+      </div>
+      <div class="signal-row" style="opacity:0.5;">
+        <div class="signal-pair-line">
+          <span class="mono" style="color: var(--text-tertiary);">XAUUSD</span>
+          <span class="side-pill" style="background: var(--bg-hover); color: var(--text-tertiary);">PENDIENTE</span>
+        </div>
+        <div class="signal-pl" style="color: var(--text-tertiary);">—</div>
+        <div class="signal-meta">Esperando confirmación · Pre-NY</div>
+      </div>
+    </div>
+
+    <!-- Market pulse -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Market Pulse</span>
+        <span class="panel-counter">live</span>
+      </div>
+      <div class="pulse-grid">
+        <div class="pulse-cell">
+          <div class="pulse-symbol">DXY</div>
+          <div class="pulse-value">103.45</div>
+          <div class="pulse-change pl-down">-0.12%</div>
+        </div>
+        <div class="pulse-cell">
+          <div class="pulse-symbol">VIX</div>
+          <div class="pulse-value">14.82</div>
+          <div class="pulse-change pl-up">+1.8%</div>
+        </div>
+        <div class="pulse-cell">
+          <div class="pulse-symbol">SPX</div>
+          <div class="pulse-value">5821.4</div>
+          <div class="pulse-change pl-up">+0.34%</div>
+        </div>
+        <div class="pulse-cell">
+          <div class="pulse-symbol">US10Y</div>
+          <div class="pulse-value">4.281</div>
+          <div class="pulse-change pl-down">-0.04</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Disclaimer -->
+    <div style="font-size: 10px; color: var(--text-tertiary); padding: 6px 4px; line-height: 1.5;">
+      Análisis técnico automatizado con fines educativos. No es asesoría financiera. Operar conlleva riesgo.
+    </div>
+  </aside>
+</div>
+
+</body>
+</html>

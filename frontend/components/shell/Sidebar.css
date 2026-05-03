@@ -1,0 +1,155 @@
+/* ──────────────────────────────────────────────────────────────────
+   Sidebar — pares + calendario económico mini.
+   Píxel-fiel al mockup (líneas 142-216 de dashboard_mockup.html).
+   ────────────────────────────────────────────────────────────────── */
+
+.sidebar-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sb-section {
+  padding: 14px 12px 8px;
+}
+.sb-section.sb-divider {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sb-label {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.sb-search {
+  width: 100%;
+  padding: 6px 10px 6px 28px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  margin-bottom: 8px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>");
+  background-repeat: no-repeat;
+  background-position: 9px center;
+}
+.sb-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pair-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.pair-row:hover { background: var(--bg-hover); }
+.pair-row.active { background: var(--accent-soft); }
+.pair-row.active .pair-name { color: var(--accent); }
+
+.pair-row-main {
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.pair-row-main:focus-visible { outline: none; }
+
+.pair-name {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.pair-sub {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.pair-row.pair-all {
+  background: transparent;
+  width: 100%;
+  border: none;
+  margin-bottom: 6px;
+}
+.pair-row.pair-all:hover { background: var(--bg-hover); }
+.pair-row.pair-all.active { background: var(--accent-soft); }
+.pair-row.pair-all.active .pair-name { color: var(--accent); }
+
+.star {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  padding: 4px 8px;
+  line-height: 1;
+}
+.star:hover { color: var(--text-secondary); }
+.star.filled { color: var(--warning); }
+
+.pair-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 8px;
+  text-align: center;
+}
+
+/* Calendario económico mini-list */
+.sb-events {
+  padding: 0 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.event-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 5px;
+  align-items: center;
+  font-size: 11px;
+}
+.event-item:hover { background: var(--bg-hover); }
+.event-time { color: var(--text-tertiary); font-size: 10px; }
+.event-flag { font-size: 12px; }
+.event-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.impact-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.impact-high { background: var(--sell); }
+.impact-med  { background: var(--warning); }
+.impact-low  { background: var(--text-tertiary); }
+
+.sb-events-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 8px;
+  text-align: center;
+}
