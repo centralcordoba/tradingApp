@@ -221,6 +221,60 @@ export type RadarSetup = {
     low: number;
     close: number;
   }>;
+  smc?: SmcAnalysis | null;
+  geometria?: GeometryAnalysis | null;
+};
+
+export type GeometryAnalysis = {
+  canal: {
+    detectado: boolean;
+    tipo: "ALCISTA" | "BAJISTA" | "LATERAL" | "NINGUNO";
+    estado:
+      | "DENTRO"
+      | "RUPTURA_ALCISTA"
+      | "RUPTURA_BAJISTA"
+      | "RETESTEO_SUPERIOR"
+      | "RETESTEO_INFERIOR"
+      | "NINGUNO";
+    linea_superior: number | null;
+    linea_inferior: number | null;
+    confianza: "ALTA" | "MEDIA" | "BAJA";
+    r_squared_sup: number;
+    r_squared_inf: number;
+  };
+  triangulo: {
+    detectado: boolean;
+    tipo: "SIMETRICO" | "ASCENDENTE" | "DESCENDENTE" | "NINGUNO";
+    estado: "FORMANDO" | "EN_VERTICE" | "RUPTURA_ALCISTA" | "RUPTURA_BAJISTA" | "NINGUNO";
+    vertice_estimado: number | null;
+    confianza: "ALTA" | "MEDIA" | "BAJA";
+  };
+  ruptura: {
+    confirmada: boolean;
+    direccion: "BULLISH" | "BEARISH" | "NINGUNA";
+    figura: "TRIANGULO" | "CANAL" | "NINGUNA";
+  };
+};
+
+export type SmcAnalysis = {
+  sesgo: "LONG_ONLY" | "SHORT_ONLY" | "NO_TRADE";
+  estructura: {
+    ultimo_movimiento: "HH" | "HL" | "LH" | "LL";
+    descripcion: string;
+  };
+  nivel_activo: {
+    precio: number;
+    tipo: "SOPORTE" | "RESISTENCIA";
+    frescura: "FRESCO" | "TESTEADO" | "AGOTADO";
+    fuerza: "FUERTE" | "NORMAL" | "DEBIL";
+    proximidad_pips: number;
+    operable: boolean;
+  };
+  alerta: {
+    activa: boolean;
+    motivo: string;
+  };
+  resumen: string;
 };
 
 export type RadarResponse = {

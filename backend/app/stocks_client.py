@@ -16,6 +16,27 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
+from .constants import (
+    CACHE_TTL_INTRADAY,
+    CACHE_TTL_DAILY,
+    CACHE_TTL_QUOTE,
+    CACHE_TTL_SEARCH,
+    HTTP_TIMEOUT_DEFAULT,
+    SMA_PERIOD_20,
+    SMA_PERIOD_50,
+    SMA_PERIOD_200,
+    EMA_PERIOD_20,
+    EMA_PERIOD_50,
+    RSI_PERIOD,
+    MACD_FAST,
+    MACD_SLOW,
+    MACD_SIGNAL,
+    MACD_HIST_LOOKBACK,
+    BBANDS_PERIOD,
+    BBANDS_MULT,
+    ADX_PERIOD,
+)
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -27,14 +48,14 @@ TD_BASE = "https://api.twelvedata.com"
 # frecuencia de polling del frontend; daily = 1 h porque la vela cierra
 # una vez por día.
 CACHE_TTL = {
-    "15min": 300,
-    "1h": 300,
-    "4h": 300,
-    "1day": 3600,
+    "15min": CACHE_TTL_INTRADAY,
+    "1h": CACHE_TTL_INTRADAY,
+    "4h": CACHE_TTL_INTRADAY,
+    "1day": CACHE_TTL_DAILY,
 }
-DEFAULT_TTL = 300
-QUOTE_TTL = 300       # 5 min
-SEARCH_TTL = 86400    # 24 h (catálogo de símbolos cambia rara vez)
+DEFAULT_TTL = CACHE_TTL_INTRADAY
+QUOTE_TTL = CACHE_TTL_QUOTE
+SEARCH_TTL = CACHE_TTL_SEARCH
 
 VALID_INTERVALS = ("15min", "1h", "4h", "1day")
 
@@ -81,7 +102,7 @@ class StocksUpstreamError(Exception):
         self.status = status
 
 
-def _http_get(path: str, params: dict, timeout: int = 15) -> dict:
+def _http_get(path: str, params: dict, timeout: int = HTTP_TIMEOUT_DEFAULT) -> dict:
     if not TD_API_KEY:
         raise StocksUpstreamError(500, "TWELVEDATA_API_KEY no configurada")
     full_params = {**params, "apikey": TD_API_KEY}
@@ -249,7 +270,7 @@ def _ema_last(values: list[float], period: int) -> Optional[float]:
     return s[-1] if s else None
 
 
-def _rsi_last(values: list[float], period: int = 14) -> Optional[float]:
+def _rsi_last(values: list[float], period: int = RSI_PERIOD) -> Optional[float]:
     if len(values) < period + 1:
         return None
     gains = losses = 0.0
@@ -275,10 +296,10 @@ def _rsi_last(values: list[float], period: int = 14) -> Optional[float]:
 
 def _macd_hist(
     values: list[float],
-    fast: int = 12,
-    slow: int = 26,
-    signal: int = 9,
-    n_last: int = 5,
+    fast: int = MACD_FAST,
+    slow: int = MACD_SLOW,
+    signal: int = MACD_SIGNAL,
+    n_last: int = MACD_HIST_LOOKBACK,
 ) -> list[float]:
     """Histograma MACD = MACD - señal. Devuelve los últimos `n_last` puntos."""
     if len(values) < slow + signal:
@@ -304,8 +325,8 @@ def _macd_hist(
 
 def _bbands(
     values: list[float],
-    period: int = 20,
-    mult: float = 2.0,
+    period: int = BBANDS_PERIOD,
+    mult: float = BBANDS_MULT,
 ) -> tuple[Optional[float], Optional[float]]:
     if len(values) < period:
         return None, None
@@ -320,7 +341,7 @@ def _adx(
     highs: list[float],
     lows: list[float],
     closes: list[float],
-    period: int = 14,
+    period: int = ADX_PERIOD,
 ) -> tuple[Optional[float], Optional[float], Optional[float]]:
     """Devuelve (adx, +DI, -DI). None si no hay datos suficientes."""
     n = len(closes)
@@ -417,12 +438,12 @@ def indicator_bundle(symbol: str, interval: str) -> dict:
         "interval": interval,
         "generatedAt": last_ts or datetime.now(timezone.utc).isoformat(),
         "price": price,
-        "ma20": _sma(closes, 20),
-        "ma50": _sma(closes, 50),
-        "ma200": _sma(closes, 200) if len(closes) >= 200 else None,
-        "ema20": _ema_last(closes, 20),
-        "ema50": _ema_last(closes, 50),
-        "rsi14": _rsi_last(closes, 14),
+        "ma20": _sma(closes, SMA_PERIOD_20),
+        "ma50": _sma(closes, SMA_PERIOD_50),
+        "ma200": _sma(closes, SMA_PERIOD_200) if len(closes) >= SMA_PERIOD_200 else None,
+        "ema20": _ema_last(closes, EMA_PERIOD_20),
+        "ema50": _ema_last(closes, EMA_PERIOD_50),
+        "rsi14": _rsi_last(closes, RSI_PERIOD),
         "macdHist": macd_hist,
         "bbandsUpper": upper,
         "bbandsLower": lower,

@@ -471,6 +471,60 @@ type RadarSetup = {
     low: number;
     close: number;
   }>;
+  smc?: SmcAnalysis | null;
+  geometria?: GeometryAnalysis | null;
+};
+
+type GeometryAnalysis = {
+  canal: {
+    detectado: boolean;
+    tipo: "ALCISTA" | "BAJISTA" | "LATERAL" | "NINGUNO";
+    estado:
+      | "DENTRO"
+      | "RUPTURA_ALCISTA"
+      | "RUPTURA_BAJISTA"
+      | "RETESTEO_SUPERIOR"
+      | "RETESTEO_INFERIOR"
+      | "NINGUNO";
+    linea_superior: number | null;
+    linea_inferior: number | null;
+    confianza: "ALTA" | "MEDIA" | "BAJA";
+    r_squared_sup: number;
+    r_squared_inf: number;
+  };
+  triangulo: {
+    detectado: boolean;
+    tipo: "SIMETRICO" | "ASCENDENTE" | "DESCENDENTE" | "NINGUNO";
+    estado: "FORMANDO" | "EN_VERTICE" | "RUPTURA_ALCISTA" | "RUPTURA_BAJISTA" | "NINGUNO";
+    vertice_estimado: number | null;
+    confianza: "ALTA" | "MEDIA" | "BAJA";
+  };
+  ruptura: {
+    confirmada: boolean;
+    direccion: "BULLISH" | "BEARISH" | "NINGUNA";
+    figura: "TRIANGULO" | "CANAL" | "NINGUNA";
+  };
+};
+
+type SmcAnalysis = {
+  sesgo: "LONG_ONLY" | "SHORT_ONLY" | "NO_TRADE";
+  estructura: {
+    ultimo_movimiento: "HH" | "HL" | "LH" | "LL";
+    descripcion: string;
+  };
+  nivel_activo: {
+    precio: number;
+    tipo: "SOPORTE" | "RESISTENCIA";
+    frescura: "FRESCO" | "TESTEADO" | "AGOTADO";
+    fuerza: "FUERTE" | "NORMAL" | "DEBIL";
+    proximidad_pips: number;
+    operable: boolean;
+  };
+  alerta: {
+    activa: boolean;
+    motivo: string;
+  };
+  resumen: string;
 };
 
 type RadarResponse = {
@@ -1125,8 +1179,145 @@ function RadarCard({ setup }: { setup: RadarSetup }) {
         </div>
       )}
 
+      {setup.geometria && <RadarGeometry g={setup.geometria} />}
+      {setup.smc && <RadarSmc smc={setup.smc} />}
       {setup.alignment && <RadarAlignment a={setup.alignment} />}
     </article>
+  );
+}
+
+const GEOM_BREAK_DIR_CLS: Record<GeometryAnalysis["ruptura"]["direccion"], string> = {
+  BULLISH: "geom-break-bull",
+  BEARISH: "geom-break-bear",
+  NINGUNA: "",
+};
+
+function geomChannelEstadoLabel(estado: GeometryAnalysis["canal"]["estado"]): string {
+  switch (estado) {
+    case "RUPTURA_ALCISTA":   return "ruptura alcista";
+    case "RUPTURA_BAJISTA":   return "ruptura bajista";
+    case "RETESTEO_SUPERIOR": return "retesteando techo";
+    case "RETESTEO_INFERIOR": return "retesteando piso";
+    case "DENTRO":            return "dentro del canal";
+    default:                  return "";
+  }
+}
+
+function geomTriangleEstadoLabel(estado: GeometryAnalysis["triangulo"]["estado"]): string {
+  switch (estado) {
+    case "RUPTURA_ALCISTA": return "ruptura alcista";
+    case "RUPTURA_BAJISTA": return "ruptura bajista";
+    case "EN_VERTICE":      return "ruptura inminente";
+    case "FORMANDO":        return "formando";
+    default:                return "";
+  }
+}
+
+function RadarGeometry({ g }: { g: GeometryAnalysis }) {
+  const hasCanal = g.canal.detectado;
+  const hasTri = g.triangulo.detectado;
+
+  if (!hasCanal && !hasTri && !g.ruptura.confirmada) return null;
+
+  return (
+    <div className="radar-geom">
+      <div className="radar-geom-head">
+        <span className="radar-geom-tag">GEO</span>
+        {g.ruptura.confirmada && (
+          <span className={`radar-geom-break ${GEOM_BREAK_DIR_CLS[g.ruptura.direccion]}`}>
+            ⚡ {g.ruptura.figura.toLowerCase()} · ruptura {g.ruptura.direccion === "BULLISH" ? "alcista" : "bajista"}
+          </span>
+        )}
+      </div>
+
+      {hasCanal && (
+        <div className="radar-geom-row">
+          <span className={`radar-geom-pill geom-${g.canal.tipo.toLowerCase()}`}>
+            canal {g.canal.tipo.toLowerCase()}
+          </span>
+          <span className="radar-geom-state">{geomChannelEstadoLabel(g.canal.estado)}</span>
+          {g.canal.linea_superior != null && g.canal.linea_inferior != null && (
+            <span className="radar-geom-range">
+              {g.canal.linea_inferior} – {g.canal.linea_superior}
+            </span>
+          )}
+          <span className={`radar-geom-conf geom-conf-${g.canal.confianza.toLowerCase()}`}>
+            R² {((g.canal.r_squared_sup + g.canal.r_squared_inf) / 2).toFixed(2)} · {g.canal.confianza.toLowerCase()}
+          </span>
+        </div>
+      )}
+
+      {hasTri && (
+        <div className="radar-geom-row">
+          <span className="radar-geom-pill geom-triangle">
+            triángulo {g.triangulo.tipo.toLowerCase()}
+          </span>
+          <span className="radar-geom-state">{geomTriangleEstadoLabel(g.triangulo.estado)}</span>
+          {g.triangulo.vertice_estimado != null && (
+            <span className="radar-geom-range">vértice ≈ {g.triangulo.vertice_estimado}</span>
+          )}
+          <span className={`radar-geom-conf geom-conf-${g.triangulo.confianza.toLowerCase()}`}>
+            {g.triangulo.confianza.toLowerCase()}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SMC_SESGO_LABEL: Record<SmcAnalysis["sesgo"], string> = {
+  LONG_ONLY: "LONG ONLY",
+  SHORT_ONLY: "SHORT ONLY",
+  NO_TRADE: "NO TRADE",
+};
+
+const SMC_FRESCURA_CLS: Record<SmcAnalysis["nivel_activo"]["frescura"], string> = {
+  FRESCO: "smc-fresco",
+  TESTEADO: "smc-testeado",
+  AGOTADO: "smc-agotado",
+};
+
+function RadarSmc({ smc }: { smc: SmcAnalysis }) {
+  const sesgoCls =
+    smc.sesgo === "LONG_ONLY" ? "smc-long" :
+    smc.sesgo === "SHORT_ONLY" ? "smc-short" :
+    "smc-no-trade";
+
+  const nivel = smc.nivel_activo;
+  const frescuraCls = SMC_FRESCURA_CLS[nivel.frescura];
+
+  return (
+    <div className="radar-smc">
+      <div className="radar-smc-head">
+        <span className="radar-smc-tag">SMC · IA</span>
+        <span className={`radar-smc-sesgo ${sesgoCls}`}>{SMC_SESGO_LABEL[smc.sesgo]}</span>
+        <span className="radar-smc-mov">{smc.estructura.ultimo_movimiento}</span>
+        {smc.alerta.activa && (
+          <span className="radar-smc-alert">⚡ {smc.alerta.motivo || "alerta activa"}</span>
+        )}
+      </div>
+
+      <div className="radar-smc-resumen">{smc.resumen}</div>
+
+      <div className="radar-smc-meta">
+        <span className={`radar-smc-pill ${frescuraCls}`}>
+          {nivel.tipo} {nivel.frescura}
+        </span>
+        <span className="radar-smc-pill smc-pill-fuerza">
+          fuerza {nivel.fuerza.toLowerCase()}
+        </span>
+        <span className="radar-smc-pill">
+          @ {nivel.precio} · {nivel.proximidad_pips.toFixed(1)} pips
+        </span>
+        {!nivel.operable && (
+          <span className="radar-smc-pill smc-pill-skip">no operable</span>
+        )}
+      </div>
+
+      {smc.estructura.descripcion && (
+        <div className="radar-smc-desc">{smc.estructura.descripcion}</div>
+      )}
+    </div>
   );
 }
 

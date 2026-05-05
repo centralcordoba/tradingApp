@@ -49,7 +49,7 @@ Frontend Next.js (local) ←─polling── Render
 tradingApp/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py             # FastAPI: rutas + CORS abierto
+│   │   ├── main.py             # FastAPI: rutas (forex + stocks) + CORS abierto
 │   │   ├── schemas.py          # TVSignal, AnalyzeResponse, EntryPlan (Pydantic)
 │   │   ├── decision_engine.py  # Vetos duros + scoring → decisión
 │   │   ├── entry_planner.py    # Genera plan operativo (PULLBACK/RETEST/MOMENTUM/SWEEP)
@@ -58,7 +58,8 @@ tradingApp/
 │   │   ├── news_client.py      # ForexFactory fetch + cache + warnings por ventana
 │   │   ├── scanner.py          # Scanner en vivo (Twelve Data OHLC 15m, 3 bloques) + cache OHLC
 │   │   ├── radar.py            # Radar de setups (pin bar/envolv + divergencia + SL cap) + cross-check con scanner
-│   │   └── storage.py          # Dual-mode: PostgreSQL (Supabase) / SQLite
+│   │   ├── stocks_client.py    # Twelve Data stocks (search/quote/time_series) + indicadores Python (SMA/EMA/RSI/MACD/BBANDS/ADX)
+│   │   └── storage.py          # Dual-mode PG/SQLite. Tablas: signals + investor_profile + stocks_watchlist
 │   ├── tests/
 │   │   └── test_radar.py       # 49 tests unitarios del radar (pivots, rechazo, SL, RRR, alignment/MTF LOCK, market_closed)
 │   ├── requirements.txt
@@ -68,15 +69,56 @@ tradingApp/
 │   └── signals.db              # solo en dev local
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx            # Dashboard + scanner + radar + sessions + kill zones + news + journal
+│   │   ├── page.tsx            # Home: shell (AppShell) + view router + load() unificado
 │   │   ├── radarChart.ts       # drawRadarChart(canvas, setup) — minigráfico Canvas 2D (7 capas)
-│   │   ├── layout.tsx
-│   │   └── globals.css
+│   │   ├── layout.tsx          # next/font: Space Grotesk + Space Mono → CSS vars
+│   │   └── globals.css         # Tokens (colores, type scale +30%), legacy CSS, dashboard table
+│   ├── components/
+│   │   ├── shell/              # AppShell, Topbar, Sidebar (forex|stocks), RightBar (forex|stocks)
+│   │   ├── dashboard/          # SessionsTimeline, KillZonesTrack, KpiHero, EquityCurve
+│   │   ├── icons/              # SVG inline (refresh, settings, sun, moon)
+│   │   └── stocks/
+│   │       ├── StocksView.tsx              # Container: wizard | dashboard según perfil
+│   │       ├── StocksSidebarSection.tsx    # Search + watchlist en sidebar
+│   │       ├── StocksActiveSignalsPanel.tsx # Top 5 BUY/SELL en rightbar
+│   │       ├── MarketHoursCard.tsx         # NYSE pre/regular/post + countdown ET
+│   │       ├── ProfileBadge.tsx            # Pill clickeable con resumen del perfil
+│   │       ├── onboarding/
+│   │       │   ├── ProfileWizard.tsx       # 5 steps + progress bar + disclaimer
+│   │       │   └── steps/                  # Horizon, Risk, Capital, Experience, Sectors
+│   │       └── dashboard/
+│   │           ├── StocksDashboard.tsx     # Orquesta search + signal + breakdown
+│   │           ├── TickerSearch.tsx        # Debounce 300ms + autocomplete + keyboard nav
+│   │           ├── SignalCard.tsx          # Decisión 57px + barra confianza + reasons
+│   │           └── IndicatorBreakdown.tsx  # Tabla votos/pesos por indicador
+│   ├── hooks/
+│   │   ├── useTick.ts                      # Re-render por intervalo (timeline, MarketHours)
+│   │   ├── useFavoritePairs.ts             # Favoritos forex (sidebar)
+│   │   └── stocks/
+│   │       ├── useInvestorProfile.ts       # Hidrata cache → backend; saveProfile/clearProfile
+│   │       ├── useStockSignal.ts           # Race-safe fetch + refetch ignorando cache
+│   │       └── useStocksWatchlist.ts       # Items + add/remove/update + sync entre instancias
+│   ├── lib/
+│   │   ├── api.ts              # API base URL
+│   │   ├── types.ts            # Signal, Stats, RadarSetup, View ('dashboard'|'zones'|'radar'|'stocks')
+│   │   ├── sessions.ts         # SESSIONS UTC + Madrid offset DST-safe + overlap window
+│   │   ├── killZones.ts        # KILL_ZONES Madrid + getKillZonesMadrid passthrough
+│   │   ├── format.ts, dates.ts, zones.ts, symbols.ts, blockLegend.ts, config.ts
+│   │   ├── radar/              # labels, blocks, aplus
+│   │   └── stocks/
+│   │       ├── types.ts                    # InvestorProfile, Vote, Signal, IndicatorBundle, etc.
+│   │       ├── signalEngine.ts             # Funciones puras de voto + WEIGHTS por horizonte + calculateSignal
+│   │       ├── signalEngine.test.ts        # 5 tests runnable (BUY/SELL/HOLD/missing/voteFns)
+│   │       ├── twelvedata.ts               # Frontend client → /stocks/* (cache 5min/1h, retry 1/2/4s)
+│   │       ├── profileStorage.ts           # Backend Supabase + cache localStorage + custom event
+│   │       ├── watchlistStorage.ts         # idem
+│   │       └── marketHours.ts              # NYSE DST-safe (pre/regular/post/closed)
 │   ├── .env.local              # NEXT_PUBLIC_API_URL → Render
 │   └── .env.local.example
 ├── scriptsTradingView/
 │   ├── SMS_XAUUSD_v8_9_1.pine
 │   └── SMS_EURUSD_v8_10_1.pine
+├── dashboard_mockup.html       # Mockup HTML del rediseño AppShell (referencia visual)
 ├── README.md
 └── CLAUDE.md
 ```
@@ -240,12 +282,22 @@ Valores categóricos esperados:
 | GET | `/scanner/pairs?pairs=XAUUSD,EURUSD` | Scanner en vivo (consume Twelve Data). Devuelve `market_closed` para pausar polling |
 | GET | `/scanner/debug` | Diagnóstico de API key + `last_error` del scanner |
 | GET | `/api/radar?pairs=XAUUSD,EURUSD` | Radar de setups con active/expired separados, candles, alignment, market_closed |
+| GET | `/stocks/search?q=` | TD symbol_search (gratis). Devuelve `{matches: [...]}`. Cache 24h |
+| GET | `/stocks/quote?symbol=MSFT` | Quote en tiempo real (1 crédito TD). Cache 5min |
+| GET | `/stocks/indicators?symbol=&interval=` | IndicatorBundle listo para signalEngine (2 créditos TD). Intervalos: 15min/1h/4h/1day |
+| GET / POST / DELETE | `/stocks/profile` | Singleton id=1. POST validado contra whitelists |
+| GET | `/stocks/watchlist` | `{items: [...]}` ordenado por addedAt |
+| POST | `/stocks/watchlist` | Body `{symbol}`. Idempotente |
+| DELETE | `/stocks/watchlist/{symbol}` | |
+| PATCH | `/stocks/watchlist/{symbol}` | Body `{lastDecision?, lastConfidence?}` para cachear última eval |
 
 `?ai=1` activa el refinamiento OpenRouter (si está configurado). El motor heurístico siempre corre primero; si la IA falla, cae a heurística.
 
-**Solo `/scanner/pairs` y `/api/radar` consumen créditos de Twelve Data**. El resto de endpoints son gratis.
+**Endpoints que consumen créditos Twelve Data**: `/scanner/pairs`, `/api/radar`, `/stocks/quote`, `/stocks/indicators`. El resto son gratis (incluyendo `/stocks/search`, que TD ofrece sin contar contra cuota).
 
-## Tabla `signals` (idéntica en SQLite y PostgreSQL)
+## Tablas DB (idénticas en SQLite y PostgreSQL)
+
+### Tabla `signals`
 
 ```
 id                        SERIAL/INTEGER PK
@@ -271,6 +323,31 @@ journal_emotion           TEXT            -- confianza | miedo | fomo | venganza
 - SQLite hace `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` condicional
 
 Al añadir columnas nuevas en el futuro, agregarlas a la lista en ambos branches de `init_db()`.
+
+### Tablas del módulo Stocks
+
+```
+investor_profile (
+    id INTEGER PRIMARY KEY,           -- siempre 1 (singleton single-user)
+    horizon TEXT NOT NULL,            -- day_trader|swing|long_term
+    risk_tolerance INTEGER NOT NULL,  -- 1-5
+    capital_range TEXT NOT NULL,      -- <1k|1k-10k|10k-50k|50k+
+    experience TEXT NOT NULL,         -- novice|intermediate|advanced
+    sectors_json TEXT NOT NULL,       -- JSON array de sectores GICS
+    updated_at TEXT NOT NULL
+)
+
+stocks_watchlist (
+    symbol TEXT PRIMARY KEY,          -- UPPERCASE
+    last_decision TEXT,               -- BUY|SELL|HOLD|NULL
+    last_confidence REAL/DOUBLE,      -- 0-1
+    added_at TEXT NOT NULL
+)
+```
+
+Auto-creadas vía `CREATE TABLE IF NOT EXISTS` en `init_db()`. Para añadir columnas, agregar a ambos branches (PG y SQLite) igual que con `signals`.
+
+Funciones CRUD en `storage.py`: `get_investor_profile`, `save_investor_profile` (upsert con `ON CONFLICT DO UPDATE` / `INSERT OR REPLACE`), `clear_investor_profile`, `get_stocks_watchlist`, `add_to_stocks_watchlist` (idempotente), `remove_from_stocks_watchlist`, `update_stocks_watchlist_item`.
 
 ## Variables de entorno
 
@@ -451,6 +528,202 @@ Canvas 2D puro, **sin librerías**. Función pura `drawRadarChart(canvas, setup)
 
 `WATCHLIST = ["XAUUSD", "EURUSD"]` en frontend. **No hay filtro** — el toggle "Solo mis pares" se eliminó por completo. La constante solo pinta el badge `● Operativo` en las cards de tus pares para identificarlas visualmente. El radar por backend escanea los 11 pares por defecto para tener contexto de MTF LOCK aunque no operes esos pares.
 
+## Frontend rediseñado — AppShell de 3 columnas
+
+El `page.tsx` legacy (un solo componente con todo inline) se descompuso en un shell + componentes. El layout se inspira en un mockup en `dashboard_mockup.html` (terminal-style 3-col).
+
+### Shell (`components/shell/`)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Topbar  AI Trading Assistant  [Dashboard|Zonas|Radar|Stocks] [Refresh|Theme|Settings]
+├──────────┬─────────────────────────────────────┬────────────┤
+│ Sidebar  │ Main                                │ RightBar   │
+│ 232px    │ flexible                            │ 320px      │
+└──────────┴─────────────────────────────────────┴────────────┘
+```
+
+- **`AppShell`**: grid CSS `grid-template-areas`. Activa `body[data-shell="active"]` con `overflow:hidden; height:100vh` para que cada columna haga scroll independiente. Responsive: <1024 oculta rightbar, <768 oculta sidebar.
+- **`Topbar`**: brand + tabs + spacer + session pill + iconos (refresh, theme, settings). Shortcuts D/Z/R/S para cambiar tab (ignora si foco en input). Session pill muestra sesión activa (LDN/NYC/ASIA) o próxima con countdown — usa `useTick(60_000)`.
+- **`Sidebar` (context-aware)**: prop `context: 'forex' | 'stocks'`.
+  - **forex**: search de pares + lista (con favoritos persistidos en localStorage vía `useFavoritePairs`) + calendario económico mini-list.
+  - **stocks**: `StocksSidebarSection` (search ticker → fetch backend + watchlist con pills BUY/SELL/HOLD).
+- **`RightBar` (context-aware)**: prop `context: 'forex' | 'stocks'`.
+  - **forex**: Next A+ Setup (countdown a overlap LDN-NY) + Active Signals (open positions filtradas) + Próxima ventana (overlap info en hora Madrid) + disclaimer.
+  - **stocks**: `MarketHoursCard` (NYSE pre/regular/post/closed + countdown ET) + `StocksActiveSignalsPanel` (top 5 BUY/SELL de la watchlist con conf ≥ 40%) + disclaimer.
+
+### Dashboard view (`components/dashboard/`)
+
+- **`SessionsTimeline`**: timeline 24h en hora Madrid. Convierte SESSIONS UTC → Madrid via `madridOffsetHours()` + `utcToMadrid()` (DST-safe vía `Intl.DateTimeFormat`). Renderiza bandas de sesión + overlap A+ + now-marker + axis. Helper `projectToMadrid(openUTC, closeUTC, offset)` para sesiones que cruzan medianoche en Madrid (por si pasa con DST extremo).
+- **`KillZonesTrack`**: barra fina 14px alineada con el timeline. Consume `getKillZonesMadrid()` (passthrough de KILL_ZONES, ya están en hora Madrid).
+- **`KpiHero`**: 4 cards KPI con valores grandes en mono (PnL, Win Rate con barra, Execution Rate con barra info, Open Positions). Reemplazó el `.stats` legacy.
+- **`EquityCurve`**: SVG puro (sin librerías). Construye serie desde `/signals?limit=500` filtrando `result+pnl`, suma cumulativo, dibuja path + área con gradient. Toggle 1D/7D/30D/ALL. Empty state con línea punteada horizontal y texto centrado (no caja gigante vacía).
+
+### Bugs/limpieza aplicados (no repetir)
+
+- **Madrid timezone consistency**: SessionsTimeline antes mostraba "Hora UTC", RightBar decía "12:00–16:00 UTC", calendario decía Madrid. Unificado todo a hora Madrid (las helpers `madridHourOf`/`madridOffsetHours`/`utcToMadrid` viven en `lib/sessions.ts`).
+- **Topbar pill "abre en"**: bug numérico — `next.minutesUntil` venía como float (e.g. `48.95`). Fix: `Math.floor(next.minutesUntil)` antes de calcular hh/mm.
+- **openSignals dedicado**: el RightBar de forex antes filtraba `items.filter(result==null)` que estaba paginado a 10 → contador inconsistente con `stats.open`. Fix: `Home.load()` hace fetch separado a `/signals?limit=50` y guarda en `openSignals` state. RightBar recibe `openCount={stats?.open}` (verdad) + lista `openSignals` (UI).
+- **EmptyState webhook URL exposed**: la tabla legacy decía "Configura el webhook a https://tradingapp-2glz.onrender.com/webhook/tradingview" → expuesta. Mensaje neutro: "Sin operaciones todavía. Las señales aparecerán acá cuando se ejecuten".
+- **Stats-split y Calendario duplicados removidos** del main: el calendario vive en sidebar, las split-cards "Ejecutadas/Calificadas" se duplicaban con KpiHero.
+- **`activeStockSymbol` lifted a `Home`**: la sidebar (stocks context) y el StocksDashboard comparten state con persistencia en localStorage (`tradingapp:stocks_last_ticker`).
+
+## Identidad visual — Bloomberg Terminal moderno
+
+Decisión deliberada de no usar el preset "AI-built dashboard" (Inter + slate + indigo). Direcciónal "Bloomberg moderno":
+
+### Tipografía (`next/font/google` en `layout.tsx`)
+
+- **Sans UI**: `Space Grotesk` (weights 400/500/600/700) → CSS var `--font-sans` → consumido por `--font-ui`.
+- **Mono / números**: `Space Mono` (weights 400/700) → CSS var `--font-mono-prim` → consumido por `--font-mono`. Tabular-nums en `.num` y `.mono`.
+
+### Type scale (+30% sobre la primera iteración del rediseño)
+
+Body 18px (era 13 originalmente), labels 16, KPIs 42, hero 57. Tokens en `globals.css`:
+
+```css
+--fs-label: 16px;   --fs-body: 18px;   --fs-sub: 21px;
+--fs-section: 26px; --fs-kpi: 42px;    --fs-hero: 57px;
+```
+
+Componentes con hero numbers hardcoded también bumpeados (decisión SignalCard 57.2px, KPI value 39px, symbol 33.8px, decimales por el `*1.3` directo — los browsers renderizan sub-pixel sin problema).
+
+### Paleta (acento ámbar = terminal financiero clásico)
+
+Cambios sobre el indigo default:
+
+| Token | Antes | Ahora |
+|---|---|---|
+| `--accent` | `#6366F1` indigo | **`#F59E0B` ámbar** |
+| `--warn`   | `#F59E0B` ámbar  | `#FB923C` naranja (movido para no chocar con accent) |
+| `--info`   | `#3B82F6` azul   | `#38BDF8` cyan |
+| `--bg`     | `#0A0E14` slate frío | `#0B0D12` slate ligeramente cálido |
+
+Light theme: ámbar oscuro `#B45309` (amber-700) para contraste sobre fondo claro.
+
+Brand mark gradient: `var(--accent) → #EF4444` (ámbar → rojo, "sunset trader") en lugar del clásico indigo→violet.
+
+### Por qué importa
+
+El stack visual previo (Inter + JetBrains Mono + slate + indigo) es indistinguible de Linear, Cursor, Vercel y cualquier dashboard SaaS post-2018. Space Grotesk + Space Mono + acento ámbar da una identidad reconocible y, además, el ámbar evoca el terminal Bloomberg que es referencia cultural en trading.
+
+## Módulo Stocks (pestaña "Stocks")
+
+Cuarta pestaña independiente para análisis de **acciones US (NYSE/NASDAQ)** con perfil de inversor personalizado. Single-user MVP, persistencia en Supabase + cache localStorage.
+
+### Flujo del usuario
+
+```
+Click tab Stocks
+       ↓
+¿Tiene perfil? ── NO ──→ ProfileWizard (5 steps) ─→ guarda perfil ─→ Dashboard
+       │
+       SÍ
+       ↓
+StocksDashboard
+   ├── ProfileBadge (clickeable → reabre wizard precargado)
+   ├── TickerSearch (debounce 300ms → /stocks/search)
+   ├── SignalCard (decisión BUY/SELL/HOLD + confianza + 3 razones)
+   └── IndicatorBreakdown (expandible: tabla votos/pesos)
+```
+
+### Backend (`stocks_client.py` + endpoints en `main.py`)
+
+Cliente Twelve Data que **comparte API key con el scanner forex** (mismo `TWELVEDATA_API_KEY`, mismo presupuesto free tier 800 créditos/día).
+
+**Indicadores en Python puro** (no en endpoints individuales de TD): `_sma`, `_ema_series`, `_rsi_last`, `_macd_hist`, `_bbands`, `_adx`. Calcular acá ahorra créditos: 1 fetch a `/time_series` (1 crédito) + 1 a `/quote` (1 crédito) = 2 créditos por bundle, vs ~7 si pidiéramos cada indicador a TD.
+
+Cache propio (separado del de scanner): `_cache: dict[str, tuple[float, dict]]` con TTL por intervalo (5min intraday / 1h diario) + 24h para `symbol_search`. `clear_cache(prefix)` para invalidar.
+
+`StocksUpstreamError` tipada (status 404/429/400/500-599) → `_raise_upstream()` la mapea a `HTTPException` adecuada en los endpoints.
+
+Endpoints expuestos:
+
+| Método | Ruta | Créditos TD | Notas |
+|---|---|---|---|
+| `GET`    | `/stocks/search?q=` | 0 | TD `symbol_search` es gratis. Cache 24h. |
+| `GET`    | `/stocks/quote?symbol=` | 1 | Cache 5min. |
+| `GET`    | `/stocks/indicators?symbol=&interval=` | 2 | Devuelve `IndicatorBundle` listo para signalEngine. Intervalos: 15min/1h/4h/1day. |
+| `GET`    | `/stocks/profile` | 0 | Singleton (id=1). `null` si no existe. |
+| `POST`   | `/stocks/profile` | 0 | Body validado (whitelists + 1≤risk≤5). |
+| `DELETE` | `/stocks/profile` | 0 | |
+| `GET`    | `/stocks/watchlist` | 0 | `{items: [...]}` ordenado por addedAt. |
+| `POST`   | `/stocks/watchlist` | 0 | Body `{symbol}`. Idempotente (ON CONFLICT DO NOTHING). |
+| `DELETE` | `/stocks/watchlist/{symbol}` | 0 | |
+| `PATCH`  | `/stocks/watchlist/{symbol}` | 0 | Body `{lastDecision?, lastConfidence?}` para cachear última eval. |
+
+### Frontend signal engine (`lib/stocks/signalEngine.ts`)
+
+Funciones puras testeables. 6 votos por bundle:
+
+```
+voteMaShort(price, ma20)    -1/0/+1   margen 0.5%
+voteMaLong(price, ma200)    -1/0/+1   margen 1%
+voteRsi(rsi14)              -1/0/+1   <30 +1, >70 -1
+voteMacd(hist[])            -1/0/+1   cruce o magnitud >0.1
+voteBbands(price, up, lo)   -1/0/+1   touch 5% del rango
+voteAdx(adx, +DI, -DI)      -1/0/+1   ADX≥25 + diff DI≥2
+```
+
+Pesos por horizonte (suman 1.0):
+
+```python
+day_trader: { ma_short: .10, ma_long: .05, rsi: .30, macd: .30, bbands: .15, adx: .10 }
+swing:      { ma_short: .20, ma_long: .15, rsi: .20, macd: .20, bbands: .15, adx: .10 }
+long_term:  { ma_short: .05, ma_long: .35, rsi: .10, macd: .15, bbands: .10, adx: .25 }
+```
+
+`score = Σ(vote × weight)`. `score > 0.4 → BUY`, `< -0.4 → SELL`, else `HOLD`. Confianza = `min(|score|, 1)` para BUY/SELL, `1 - |score|` para HOLD. `topReasons` = top 3 votos por `|vote × weight|` con string humano + peso.
+
+Intervalo recomendado por horizonte: day=15min, swing=4h, long_term=1day.
+
+### Storage hooks (Fase 9: backend Supabase + cache localStorage)
+
+`profileStorage.ts` y `watchlistStorage.ts` son las dos únicas superficies que hablan con `${API}/stocks/profile` y `${API}/stocks/watchlist`. Patrón:
+
+- **Cache-first**: `getCachedX()` lee localStorage instantáneamente (primer paint).
+- **Background fetch**: `fetchXFromBackend()` async, sincroniza cache si responde, **fallback a cache si backend falla** (offline-tolerant).
+- **Mutaciones optimistas**: `saveX()/addX()/removeX()` escriben cache primero (UI snappy) + async backend; el response autoritativo del server reemplaza la optimistic. Si backend falla, log a console y mantenemos optimistic.
+
+Sync entre instancias del hook (sidebar y dashboard usan dos instancias separadas):
+- Cross-tab: `StorageEvent` estándar.
+- **Same-tab**: `window.dispatchEvent(new Event(PROFILE_CHANGE_EVENT))` y `WATCHLIST_CHANGE_EVENT`. `StorageEvent` solo dispara en otros tabs — sin custom event, agregar un ticker desde sidebar no se reflejaba en el dashboard.
+
+`activeStockSymbol` (qué ticker está viendo el usuario) NO va al backend — vive en `Home` con persistencia en localStorage (`tradingapp:stocks_last_ticker`). Es UI state, no datos del usuario.
+
+### Tablas DB añadidas (auto-migran en `init_db()`)
+
+```sql
+investor_profile (
+    id INTEGER PRIMARY KEY,           -- siempre 1 (singleton single-user)
+    horizon TEXT NOT NULL,            -- day_trader|swing|long_term
+    risk_tolerance INTEGER NOT NULL,  -- 1-5
+    capital_range TEXT NOT NULL,      -- <1k|1k-10k|10k-50k|50k+
+    experience TEXT NOT NULL,         -- novice|intermediate|advanced
+    sectors_json TEXT NOT NULL,       -- JSON array de GICS sectors
+    updated_at TEXT NOT NULL
+)
+
+stocks_watchlist (
+    symbol TEXT PRIMARY KEY,          -- UPPERCASE
+    last_decision TEXT,               -- BUY|SELL|HOLD|NULL (cache de última eval)
+    last_confidence DOUBLE PRECISION, -- 0-1
+    added_at TEXT NOT NULL
+)
+```
+
+Upsert de profile via `INSERT ... ON CONFLICT (id) DO UPDATE` (PG) / `INSERT OR REPLACE` (SQLite). Add a watchlist idempotente via `ON CONFLICT (symbol) DO NOTHING` / `INSERT OR IGNORE`.
+
+### Detalles operativos del módulo Stocks
+
+- **Cuota TD compartida**: con TTL 5min/1h y `symbol_search` siendo gratis, una sesión típica de ~10 tickers consultados consume ~70 créditos/día. Margen sobrado dentro del cap 800.
+- **`marketStatus` con override stale**: si la última vela del bundle tiene >24h, frontend fuerza `marketStatus="closed"` (función `isStaleData()` en `twelvedata.ts`). Mismo patrón que el `market_closed` del radar.
+- **NYSE holidays NO modelados** en `marketHours.ts`. Si TD devuelve `marketStatus="closed"` en un holiday, el SignalCard lo refleja correctamente, pero el reloj/countdown de la `MarketHoursCard` no detecta holidays — tratará Christmas como día hábil. Acceptable para MVP.
+- **`MarketPulse` (DXY/VIX/SPX/US10Y) NO se construyó** — el rightbar de stocks tiene MarketHours + ActiveSignalsPanel + disclaimer. Si querés agregarlo, son ~3 endpoints TD compartidos.
+- **Errores tipados**: `StocksApiError.code` es `NOT_FOUND | RATE_LIMIT | NETWORK | INVALID | UPSTREAM`. SignalCard traduce a mensajes humanos contextuales. Retry con backoff exponencial (1s/2s/4s) en 429 (rate limit).
+- **Race condition en mutaciones rápidas**: si user agrega 2-3 tickers seguidos antes de que respondan los backends, puede haber un parpadeo (~50-100ms) — el backend response del primero "sobrescribe" momentáneamente, se autocorrige cuando llega el siguiente. Tolerable para MVP.
+- **`clearWatchlist()` solo limpia cache local** — backend no tiene endpoint clear-all. Para purgar hay que borrar uno por uno desde la UI.
+
 ## Polling y consumo de créditos Twelve Data
 
 - **Frontend**: scanner y radar poleen cada 5 min. TTL backend 15 min → 2 de cada 3 polls son cache hit (0 créditos).
@@ -469,7 +742,9 @@ Verificar en Render Dashboard → Logs qué IPs pegan a `/scanner/pairs` y `/api
 - **Estilo de código**: directo, sin comentarios obvios, sin abstracciones especulativas. Ya hay una decisión validada de evitar over-engineering.
 - **Stack del usuario**: Windows 11, PowerShell. **Cuidado con `curl`** en PowerShell — es alias de `Invoke-WebRequest`. Usar `curl.exe` o `Invoke-RestMethod` con `@{}` y `ConvertTo-Json`.
 - **`localhost` vs `127.0.0.1`**: en su Windows, `localhost` resolvía a IPv6 y uvicorn solo escucha IPv4 por defecto → usar `127.0.0.1` o arrancar uvicorn con `--host 0.0.0.0`.
-- **Horario del usuario**: opera en hora Madrid. Todas las horas visibles en UI (calendario económico) se muestran en `Europe/Madrid`.
+- **Horario del usuario**: opera en hora Madrid. Todas las horas visibles en UI (calendario económico, sesiones, kill zones, NYSE en stocks) se muestran en `Europe/Madrid` o ET según el contexto del mercado.
+- **Dirección visual**: NO usar el preset "AI-built dashboard" (Inter + slate + indigo). Identidad propia: Space Grotesk + Space Mono + accent ámbar `#F59E0B` (terminal financiero clásico). Body 18px, hero numbers 40-57px. Cualquier nuevo componente debe respetar este lenguaje.
+- **Single-user**: cero auth. `investor_profile` es singleton id=1. Si en el futuro se agrega multi-usuario, hay que migrar a `user_id` y filtrar en endpoints.
 
 ## Cómo se levanta
 
@@ -517,18 +792,37 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 - **Market closed pause**: ✓ backend detecta vela cacheada >30min (fin de semana o feed caído), frontend pausa `setInterval` → cero tráfico upstream en finde. Banner distintivo 🌙 en radar, indicador sutil en scanner.
 - **49 tests unitarios del radar**: ✓ `backend/tests/test_radar.py` cubre pivots, rejection en 3 velas, divergencia, SL cap, RRR, alignment/MTF LOCK, compression, stale data, normalización ISO. Ejecutable con `.venv/Scripts/python tests/test_radar.py`.
 - **Decisión operativa confirmada**: watchlist del radar = XAUUSD + EURUSD. Los demás pares se escanean por contexto para el cross-check de sesgo (MTF LOCK), no para operar.
+- **Rediseño AppShell de 3 columnas**: ✓ migración completa de `page.tsx` legacy a `AppShell` + `Topbar` + `Sidebar` (forex|stocks) + `RightBar` (forex|stocks). Mockup HTML en `dashboard_mockup.html` como referencia. Componentes en `components/{shell,dashboard,stocks,icons}/`.
+- **Sidebar y RightBar context-aware**: ✓ prop `context: 'forex' | 'stocks'` desde `Home` según `view`. Cada uno tiene rama interna distinta. La sidebar sustituye Pares por Tickers; el rightbar sustituye Next A+ Setup por MarketHoursCard NYSE.
+- **`activeStockSymbol` lifted a Home**: ✓ persistencia en localStorage (`tradingapp:stocks_last_ticker`). Sidebar y Dashboard son consumidores controlados — única fuente de verdad.
+- **KpiHero + EquityCurve**: ✓ reemplazaron las stats legacy. KpiHero con valores en mono grandes (PnL/WR/ExecRate/Open Positions). EquityCurve construye serie cumulativa desde `/signals?limit=500`, SVG puro con range toggle.
+- **SessionsTimeline en hora Madrid**: ✓ helpers `madridOffsetHours/utcToMadrid` proyectan SESSIONS UTC + OVERLAPS + KILL_ZONES a coordenadas Madrid. DST-safe vía `Intl.DateTimeFormat`. Topbar pill, RightBar Próxima ventana y MarketHoursCard también muestran tiempos consistentes (Madrid o ET según contexto).
+- **Identidad visual diferenciada (Bloomberg moderno)**: ✓ Space Grotesk + Space Mono via `next/font/google` reemplazan Inter + JetBrains Mono. Accent ámbar `#F59E0B` reemplaza indigo. Brand mark gradient ámbar→rojo. Type scale +30% global (body 18px, KPIs 42px, decisión SignalCard 57px). 260 declaraciones `font-size:` bumpeadas + tokens `--fs-*` actualizados. Justificación: el preset Inter + slate + indigo es indistinguible de cualquier dashboard SaaS post-2018.
+- **Módulo Stocks completo (Fases 1-9)**: ✓ Cuarta pestaña con perfil de inversor (5-step wizard: horizonte/riesgo/capital/experiencia/sectores), TickerSearch contra TD `symbol_search`, SignalCard con decisión BUY/SELL/HOLD + confianza + 3 razones + breakdown expandible, watchlist en sidebar con pills BUY/SELL/HOLD cacheadas, NYSE MarketHoursCard en rightbar (DST-safe), `/stocks/*` endpoints en FastAPI con persistencia Supabase + cache localStorage, optimistic mutations + offline-tolerant fallback. Engine puro testeable (`signalEngine.test.ts` con 5 tests).
+- **Stocks: backend + frontend integrados (Fase 9)**: ✓ `profileStorage.ts` y `watchlistStorage.ts` hablan con `${API}/stocks/*` con cache localStorage. Custom events (`PROFILE_CHANGE_EVENT`, `WATCHLIST_CHANGE_EVENT`) para sync entre instancias del mismo tab (sidebar y dashboard usan instancias separadas del hook). Cross-tab sync via `StorageEvent` estándar. Optimistic UX: cache primero, backend después; si backend falla mantenemos optimistic + log a console.
 
 ## Próximos pasos posibles (mencionados, no hechos)
 
+### Forex
 - Notificaciones a Telegram cuando llega ENTER.
 - Calculadora de tamaño de posición integrada (capital + % riesgo → lotes).
 - R:R floor como veto duro en el motor del Pine (rechazar si `(tp-entry)/(entry-sl) < 1.5`). Nota: el radar ya filtra visualmente con `rrr_below_min`; lo pendiente es integrarlo como veto en `decision_engine.py` para las señales del Pine.
 - Kill zone como veto duro en el backend (fuera de London/NY → WAIT automático). Nota: el panel visual ya existe, falta integrar como veto en `decision_engine.py`.
 - Daily loss limit + cooldown post-trade (circuit breaker anti-revenge-trading).
-- Equity curve y heatmap hora-del-día vs PnL en frontend.
+- Heatmap hora-del-día vs PnL en frontend (la equity curve ya existe).
 - Backtest del motor sobre el historial acumulado en Supabase.
 - Stats/breakdowns basados en journal (ver qué emociones pierden, si respetar el plan correlaciona con WR).
+
+### Stocks
+- **MarketPulse** en rightbar (DXY/VIX/SPX/US10Y) — ~3 endpoints TD compartidos con TTL 5min.
+- **NYSE holidays** en `marketHours.ts` — lista hardcoded (Christmas, Thanksgiving, etc.) para que el reloj/countdown no diga "abierto" en holiday laborable.
+- **`DELETE /stocks/watchlist`** clear-all en backend (hoy hay que borrar uno por uno).
+- **Loading/error states UI** para mutaciones que fallen en backend (toast o banner).
+- **Stocks signals tracking** análogo a forex: registrar evaluaciones BUY/SELL ejecutadas + journal post-mortem específico de stocks (entry+exit price, holding period, reason).
+
+### Operativo
 - Migrar frontend a Vercel para que todo sea público (hoy sigue siendo local).
+- Auth multi-user → migrar `investor_profile` de singleton a `user_id` por usuario.
 
 ## Gotchas conocidos
 
@@ -542,3 +836,8 @@ Frontend: http://localhost:3000 · Docs API: http://127.0.0.1:8000/docs
 - **`zoneinfo` en Windows**: requiere paquete `tzdata` (está en `requirements.txt`). Linux/Render trae la base IANA del sistema.
 - **`/webhook/tradingview` no aparece en `/docs`** con schema de body: usa `Request` crudo (para aceptar también texto legacy). Para probar desde `/docs`, usar `/analyze`.
 - **`.env.local` del frontend apunta a Render**: si el backend local tiene código nuevo, el frontend no lo verá hasta hacer push a Render o cambiar temporalmente `NEXT_PUBLIC_API_URL` a `http://127.0.0.1:8000`.
+- **Stocks endpoints en backend dev local sin TWELVEDATA_API_KEY**: si arrancás uvicorn local sin la key configurada, `/stocks/quote` y `/stocks/indicators` devuelven 502 con mensaje claro. La key está en Render. Para validar TD localmente, copiá la key de Render Dashboard → backend/.env como `TWELVEDATA_API_KEY=...`.
+- **Stocks profile y watchlist en cache local cuando backend está caído**: `profileStorage.ts` y `watchlistStorage.ts` hacen fallback a localStorage si el fetch falla. La app sigue funcionando en "modo local" hasta que el backend vuelve. Watch en `console.warn` para ver caídas.
+- **Race condition en mutaciones rápidas de stocks**: agregar 2-3 tickers seguidos antes de que respondan los backends puede causar parpadeo (~50-100ms). Es self-correcting. Si pega molesto, sumar sequence numbers o queue de operaciones.
+- **NYSE holidays en `marketHours.ts`**: NO modelados. Christmas en día hábil aparece como "abierto" en la card. TD igual devuelve `closed` en el bundle real. Si querés precisión total, agregar lista hardcoded de holidays del año.
+- **Custom events para sync entre instancias del mismo tab**: `StorageEvent` solo dispara en otros tabs. Si un hook se consume en sidebar y dashboard simultáneamente (mismo tab), agregar al patrón de `useStocksWatchlist`/`useInvestorProfile`: dispatchear custom event tras cada mutación + listener en cada hook.

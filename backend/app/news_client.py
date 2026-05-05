@@ -16,8 +16,15 @@ import urllib.error
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from .constants import (
+    CACHE_TTL_NEWS_CALENDAR,
+    HTTP_TIMEOUT_NEWS,
+    NEWS_WINDOW_BEFORE_MIN_DEFAULT,
+    NEWS_WINDOW_AFTER_MIN_DEFAULT,
+)
+
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-CACHE_TTL_SECONDS = 3600
+CACHE_TTL_SECONDS = CACHE_TTL_NEWS_CALENDAR
 
 _cache: dict = {"fetched_at": None, "data": None}
 
@@ -28,16 +35,16 @@ def is_enabled() -> bool:
 
 def _window_before() -> int:
     try:
-        return int(os.getenv("NEWS_WINDOW_BEFORE_MIN", "30"))
+        return int(os.getenv("NEWS_WINDOW_BEFORE_MIN", str(NEWS_WINDOW_BEFORE_MIN_DEFAULT)))
     except ValueError:
-        return 30
+        return NEWS_WINDOW_BEFORE_MIN_DEFAULT
 
 
 def _window_after() -> int:
     try:
-        return int(os.getenv("NEWS_WINDOW_AFTER_MIN", "5"))
+        return int(os.getenv("NEWS_WINDOW_AFTER_MIN", str(NEWS_WINDOW_AFTER_MIN_DEFAULT)))
     except ValueError:
-        return 5
+        return NEWS_WINDOW_AFTER_MIN_DEFAULT
 
 
 def symbol_to_currencies(symbol: str) -> list[str]:
@@ -63,7 +70,7 @@ def _fetch() -> list[dict]:
         FF_URL,
         headers={"User-Agent": "Mozilla/5.0 (AI Trading Assistant)"},
     )
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_NEWS) as r:
         return json.loads(r.read().decode("utf-8"))
 
 

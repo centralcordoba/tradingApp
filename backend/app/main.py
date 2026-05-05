@@ -13,6 +13,22 @@ from .decision_engine import analyze
 from .tv_parser import parse_payload
 from . import storage, ai_client, news_client, scanner, radar, stocks_client
 from .stocks_client import StocksUpstreamError
+from .constants import (
+    HTTP_STATUS_BAD_REQUEST,
+    HTTP_STATUS_NOT_FOUND,
+    HTTP_STATUS_RATE_LIMIT,
+    HTTP_STATUS_BAD_GATEWAY,
+    VALID_STOCK_INTERVALS,
+    VALID_HORIZONS,
+    VALID_CAPITAL,
+    VALID_EXPERIENCE,
+    VALID_DECISIONS,
+    RISK_TOLERANCE_MIN,
+    RISK_TOLERANCE_MAX,
+    CONFIDENCE_MIN,
+    CONFIDENCE_MAX,
+    STOCK_SYMBOL_MAX_LENGTH,
+)
 
 USE_AI_DEFAULT = os.getenv("USE_AI", "0") == "1"
 
@@ -47,16 +63,22 @@ def _decide(sig: TVSignal, use_ai: bool) -> tuple[AnalyzeResponse, AnalyzeRespon
     return heuristic, None
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
-def analyze_endpoint(sig: TVSignal, ai: int | None = None):
-    use_ai = USE_AI_DEFAULT if ai is None else bool(ai)
-    final, heuristic = _decide(sig, use_ai)
+def _record_decision(final: AnalyzeResponse, heuristic: AnalyzeResponse | None, sig: TVSignal) -> dict:
+    """Prepara el registro de decisión con source e heuristic si aplica."""
     record = final.model_dump()
     if heuristic is not None:
         record["heuristic"] = heuristic.model_dump()
         record["source"] = "ai"
     else:
         record["source"] = "heuristic"
+    return record
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze_endpoint(sig: TVSignal, ai: int | None = None):
+    use_ai = USE_AI_DEFAULT if ai is None else bool(ai)
+    final, heuristic = _decide(sig, use_ai)
+    record = _record_decision(final, heuristic, sig)
     sid = storage.save_signal(sig.model_dump(), record)
     final.signal_id = sid
     return final
@@ -73,12 +95,7 @@ async def tv_webhook(request: Request, ai: int | None = None):
 
     use_ai = USE_AI_DEFAULT if ai is None else bool(ai)
     final, heuristic = _decide(sig, use_ai)
-    record = final.model_dump()
-    if heuristic is not None:
-        record["heuristic"] = heuristic.model_dump()
-        record["source"] = "ai"
-    else:
-        record["source"] = "heuristic"
+    record = _record_decision(final, heuristic, sig)
     sid = storage.save_signal(sig.model_dump(), record)
     final.signal_id = sid
     return {"ok": True, "decision": final.decision, "id": sid, "result": record}

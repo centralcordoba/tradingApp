@@ -12,6 +12,7 @@ import urllib.error
 from typing import Optional
 
 from .schemas import TVSignal, AnalyzeResponse
+from .constants import HTTP_TIMEOUT_AI, AI_TEMPERATURE
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
@@ -59,7 +60,7 @@ def refine(sig: TVSignal, heuristic: AnalyzeResponse) -> Optional[AnalyzeRespons
 
     body = {
         "model": DEFAULT_MODEL,
-        "temperature": 0.2,
+        "temperature": AI_TEMPERATURE,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -86,7 +87,7 @@ def refine(sig: TVSignal, heuristic: AnalyzeResponse) -> Optional[AnalyzeRespons
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_AI) as r:
             data = json.loads(r.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
         print(f"[ai_client] OpenRouter error: {e}")

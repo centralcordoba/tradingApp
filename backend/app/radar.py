@@ -24,51 +24,53 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from . import scanner
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from . import scanner, radar_smc
+from .geometry_detector import _detect_geometry
+from .constants import (
+    CACHE_TTL_RADAR,
+    RADAR_INTERVAL,
+    RADAR_OUTPUTSIZE,
+    RADAR_MIN_CANDLES,
+    RADAR_KEY_LEVELS_LOOKBACK,
+    RADAR_KEY_LEVELS_TOLERANCE_PCT,
+    RADAR_REJECTION_WICK_RATIO,
+    RADAR_REJECTION_WICK_PCT,
+    RADAR_DIVERGENCE_LOOKBACK,
+    RADAR_RANGE_SUPPORT_ZONE,
+    RADAR_RANGE_RESISTANCE_ZONE,
+    RADAR_RANGE_EXTREME_LOW,
+    RADAR_RANGE_EXTREME_HIGH,
+    RADAR_CANDLE_INTERVAL_MIN,
+    RADAR_MARKET_STALE_THRESHOLD_MIN,
+    RADAR_MIN_RRR,
+    RADAR_SMC_PAIRS,
+    RADAR_SMC_M30_CANDLES,
+    RADAR_SMC_MAX_PARALLEL,
+    PIP_SIZES,
+    SL_MAX_PIPS,
+    MIN_RANGE_PCT,
+    RSI_PERIOD,
+    ATR_PERIOD,
+)
 
 logger = logging.getLogger(__name__)
 
 # Cache del endpoint /api/radar (mismo TTL que el escáner subyacente).
-_RADAR_CACHE_TTL = 900  # 15 min
+_RADAR_CACHE_TTL = CACHE_TTL_RADAR
 _radar_cache: dict[str, tuple[float, dict]] = {}
 
-# ---------------------------------------------------------------------------
-# Configuración de instrumentos operativos
-# ---------------------------------------------------------------------------
+# Alias usado por main.py y por el chequeo de mercado cerrado en este módulo.
+MARKET_STALE_THRESHOLD_MIN = RADAR_MARKET_STALE_THRESHOLD_MIN
 
-# Tamaño de pip por símbolo (en unidades de precio).
-PIP_SIZE: dict[str, float] = {
-    "XAUUSD": 0.01,
-    "XAGUSD": 0.001,
-    "USDJPY": 0.01, "EURJPY": 0.01, "GBPJPY": 0.01, "CHFJPY": 0.01,
-    "AUDJPY": 0.01, "NZDJPY": 0.01, "CADJPY": 0.01,
-    "default": 0.0001,
-}
-
-# SL máximo en pips por instrumento — cap operativo del sistema.
-# Basado en los límites de riesgo en $ del usuario con su lot size habitual.
-SL_MAX_PIPS: dict[str, float] = {
-    "XAUUSD": 40,   # 40 pips × $0.25 (0.25 lotes) = $10
-    "EURUSD": 25,   # 25 pips × $1.00 (1 lote)    = $25
-    "default": 20,  # conservador para no-operativos
-}
-
-# Rango mínimo entre soporte y resistencia (% del precio). Por debajo, el par
-# está en consolidación comprimida y no es operable — se omite silenciosamente.
-MIN_RANGE_PCT: dict[str, float] = {
-    "XAUUSD": 0.15,
-    "EURUSD": 0.10,
-    "default": 0.12,
-}
-
-# Minutos sin nueva vela cerrada antes de considerar el feed detenido (mercado
-# cerrado por fin de semana, caída del proveedor, etc). 2 × intervalo M15.
-CANDLE_INTERVAL_MIN = 15
-MARKET_STALE_THRESHOLD_MIN = 30
+# Pares por defecto del radar — los del scanner menos XAUUSD (no operado por
+# ahora). El scanner sigue usando su propia lista para el sesgo macro / MTF.
+DEFAULT_PAIRS = [p for p in scanner.DEFAULT_PAIRS if p.upper() != "XAUUSD"]
 
 
 def _pip_size(symbol: str) -> float:
-    return PIP_SIZE.get(symbol.upper(), PIP_SIZE["default"])
+    return PIP_SIZES.get(symbol.upper(), PIP_SIZES["default"])
 
 
 def _sl_cap_pips(symbol: str) -> float:
@@ -132,9 +134,43 @@ def _minutes_since_candle_close(
     dt = _parse_candle_ts(raw_ts)
     if dt is None:
         return None
-    close_dt = dt + timedelta(minutes=CANDLE_INTERVAL_MIN)
+    close_dt = dt + timedelta(minutes=RADAR_CANDLE_INTERVAL_MIN)
     ref = now or datetime.now(timezone.utc)
     return (ref - close_dt).total_seconds() / 60.0
+
+
+def _aggregate_to_m30(ohlc: dict, n: int = 40) -> list[dict]:
+    """Agrega velas M15 a M30 (2:1) y devuelve las últimas `n` velas M30.
+
+    open=primer M15, close=segundo M15, high=max, low=min, ts=primer M15.
+    Si el total de M15 es impar, descarta la última (vela en formación).
+    Devuelve lista vacía si no hay datos suficientes.
+    """
+    ts_list = ohlc.get("ts", [])
+    opens = ohlc.get("open", [])
+    highs = ohlc.get("high", [])
+    lows = ohlc.get("low", [])
+    closes = ohlc.get("close", [])
+
+    total = len(closes)
+    if total < 4 or len(opens) != total or len(highs) != total or len(lows) != total:
+        return []
+
+    # Truncar a número par para que cada par de M15 forme un M30 completo.
+    if total % 2 == 1:
+        total -= 1
+
+    m30: list[dict] = []
+    for i in range(0, total, 2):
+        m30.append({
+            "ts": _normalize_ts(ts_list[i]) if i < len(ts_list) else None,
+            "open": opens[i],
+            "high": max(highs[i], highs[i + 1]),
+            "low": min(lows[i], lows[i + 1]),
+            "close": closes[i + 1],
+        })
+
+    return m30[-n:] if len(m30) > n else m30
 
 
 def _build_candles(ohlc: dict, n: int = 20) -> list[dict]:
@@ -164,7 +200,7 @@ def _build_candles(ohlc: dict, n: int = 20) -> list[dict]:
 # Helpers indicadores (reutilizan o extienden scanner)
 # ---------------------------------------------------------------------------
 
-def _rsi_series(closes: list[float], period: int = 14) -> list[Optional[float]]:
+def _rsi_series(closes: list[float], period: int = RSI_PERIOD) -> list[Optional[float]]:
     """RSI alineado con `closes`. Devuelve None para las posiciones de warm-up."""
     n = len(closes)
     out: list[Optional[float]] = [None] * n
@@ -200,7 +236,7 @@ def _rsi_series(closes: list[float], period: int = 14) -> list[Optional[float]]:
     return out
 
 
-def _range_position(closes: list[float], lookback: int = 50) -> float:
+def _range_position(closes: list[float], lookback: int = 50) -> float:  # 50 velas estándar
     window = closes[-lookback:]
     hi = max(window)
     lo = min(window)
@@ -217,8 +253,8 @@ def _find_key_levels(
     highs: list[float],
     lows: list[float],
     closes: list[float],
-    lookback: int = 100,
-    tolerance_pct: float = 0.002,
+    lookback: int = RADAR_KEY_LEVELS_LOOKBACK,
+    tolerance_pct: float = RADAR_KEY_LEVELS_TOLERANCE_PCT,
 ) -> dict:
     """Pivots fractales (2 velas a cada lado) + clustering por proximidad."""
     price = closes[-1]
@@ -324,7 +360,7 @@ def _detect_rejection_candle(
     upper_wick = h - max(o, c)
     lower_wick = min(o, c) - l
 
-    if lower_wick >= 2 * body and (c - l) / rng >= 0.6:
+    if lower_wick >= RADAR_REJECTION_WICK_RATIO * body and (c - l) / rng >= RADAR_REJECTION_WICK_PCT:
         return {
             "rejection": True,
             "type": "pin_bar_bull",
@@ -332,7 +368,7 @@ def _detect_rejection_candle(
             "direction": "LONG",
         }
 
-    if upper_wick >= 2 * body and (h - c) / rng >= 0.6:
+    if upper_wick >= RADAR_REJECTION_WICK_RATIO * body and (h - c) / rng >= RADAR_REJECTION_WICK_PCT:
         return {
             "rejection": True,
             "type": "pin_bar_bear",
@@ -372,7 +408,7 @@ def _detect_recent_rejection(
     lows: list[float],
     closes: list[float],
     ts: list,
-    max_age: int = 3,
+    max_age: int = 3,  # Máximo 3 velas atrás
 ) -> dict:
     """Escanea las últimas `max_age` velas y devuelve el rechazo más reciente.
 
@@ -411,7 +447,7 @@ def _detect_recent_rejection(
 def _detect_rsi_divergence(
     closes: list[float],
     rsi: list[Optional[float]],
-    lookback: int = 10,
+    lookback: int = RADAR_DIVERGENCE_LOOKBACK,
 ) -> dict:
     empty = {"divergence": False, "type": None, "direction": None}
 
@@ -486,7 +522,7 @@ def _classify_reversal_setup(
     if (
         near_support
         and has_rejection and rejection_dir == "LONG"
-        and range_pos < 0.35
+        and range_pos < RADAR_RANGE_SUPPORT_ZONE
         and has_divergence and divergence_dir == "LONG"
     ):
         return {"bloque": 1, "side": "LONG", "strength": "STRONG", "quality": quality}
@@ -494,7 +530,7 @@ def _classify_reversal_setup(
     if (
         near_resistance
         and has_rejection and rejection_dir == "SHORT"
-        and range_pos > 0.65
+        and range_pos > RADAR_RANGE_RESISTANCE_ZONE
         and has_divergence and divergence_dir == "SHORT"
     ):
         return {"bloque": 3, "side": "SHORT", "strength": "STRONG", "quality": quality}
@@ -502,28 +538,28 @@ def _classify_reversal_setup(
     if (
         near_support
         and has_rejection and rejection_dir == "LONG"
-        and range_pos < 0.35
+        and range_pos < RADAR_RANGE_SUPPORT_ZONE
     ):
         return {"bloque": 1, "side": "LONG", "strength": "NORMAL", "quality": quality}
 
     if (
         near_resistance
         and has_rejection and rejection_dir == "SHORT"
-        and range_pos > 0.65
+        and range_pos > RADAR_RANGE_RESISTANCE_ZONE
     ):
         return {"bloque": 3, "side": "SHORT", "strength": "NORMAL", "quality": quality}
 
     if (
         near_resistance
         and has_rejection and rejection_dir == "LONG"
-        and range_pos > 0.65
+        and range_pos > RADAR_RANGE_RESISTANCE_ZONE
     ):
         return {"bloque": 4, "side": "TRAP_SHORT", "strength": "WARN", "quality": quality}
 
     if (
         near_support
         and has_rejection and rejection_dir == "SHORT"
-        and range_pos < 0.35
+        and range_pos < RADAR_RANGE_SUPPORT_ZONE
     ):
         return {"bloque": 2, "side": "TRAP_LONG", "strength": "WARN", "quality": quality}
 
@@ -533,11 +569,6 @@ def _classify_reversal_setup(
 # ---------------------------------------------------------------------------
 # SL estimado
 # ---------------------------------------------------------------------------
-
-# RRR mínimo para que el setup se considere operable. Por debajo, el frontend
-# dimea la card y tacha los valores — es una regla de higiene de scalper.
-MIN_RRR = 2.0
-
 
 def _estimate_sl(
     symbol: str,
@@ -591,8 +622,8 @@ def _estimate_sl(
         "tp_price": round(tp_price, 5) if tp_price is not None else None,
         "reward_pips": round(reward_price / pip, 1) if reward_price and reward_price > 0 else None,
         "rrr": round(rrr, 2) if rrr is not None else None,
-        "rrr_below_min": (rrr is not None and rrr < MIN_RRR),
-        "rrr_min": MIN_RRR,
+        "rrr_below_min": (rrr is not None and rrr < RADAR_MIN_RRR),
+        "rrr_min": RADAR_MIN_RRR,
     }
 
 
@@ -615,11 +646,11 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
         closes = ohlc["close"]
         ts = ohlc["ts"]
 
-        if len(closes) < 20:
+        if len(closes) < RADAR_MIN_CANDLES:
             return None
 
-        rsi = _rsi_series(closes, 14)
-        atr = scanner._atr(highs, lows, closes, 14)
+        rsi = _rsi_series(closes, RSI_PERIOD)
+        atr = scanner._atr(highs, lows, closes, ATR_PERIOD)
         range_pos = _range_position(closes, 50)
 
         key_levels = _find_key_levels(highs, lows, closes)
@@ -643,7 +674,7 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
         # fuerza el rechazo como expirado — no queremos mostrar "vela recién
         # cerrada" con datos del viernes el lunes por la mañana.
         data_age = _minutes_since_candle_close(ts[-1] if ts else None)
-        is_stale = data_age is not None and data_age > MARKET_STALE_THRESHOLD_MIN
+        is_stale = data_age is not None and data_age > RADAR_MARKET_STALE_THRESHOLD_MIN
         if is_stale and rejection.get("rejection") and not rejection.get("expired"):
             logger.debug(
                 "[RADAR] %s STALE_DATA age=%.0fmin — forzando rejection.expired",
@@ -677,6 +708,17 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
         else:
             logger.warning("[RADAR] %s candles insuficientes — devolviendo []", symbol)
 
+        # Geometría (canales / triángulos) sobre M30 — determinístico, sin IA.
+        geometria: Optional[dict] = None
+        try:
+            m30_for_geom = _aggregate_to_m30(ohlc, n=80)
+            if m30_for_geom and len(m30_for_geom) >= 20:
+                geometria = _detect_geometry(
+                    m30_for_geom, price, _pip_size(symbol), lookback=60
+                )
+        except Exception as e:
+            logger.debug("[RADAR] %s geometría falló: %s", symbol, e)
+
         logger.debug(
             "[RADAR] %s B%d %s Q%d age=%s",
             symbol,
@@ -709,6 +751,7 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
             "sl": sl,
             "alignment": None,  # se completa en _cross_check_alignment
             "candles": candles,
+            "geometria": geometria,
         }
     except Exception as e:
         logger.warning("[RADAR] fallo analizando %s: %s", symbol, e)
@@ -834,10 +877,62 @@ def _probe_market_age_minutes(symbols: list[str]) -> Optional[float]:
     return min(ages) if ages else None
 
 
+def _enrich_with_smc(active_setups: list[dict]) -> None:
+    """Para cada setup activo cuyo símbolo está en RADAR_SMC_PAIRS, agrega M30
+    desde el cache OHLC compartido y llama a OpenRouter en paralelo. Adjunta
+    el resultado a `setup['smc']` (None si no aplica o si falla).
+
+    Mutación in-place — no devuelve nada. Si OpenRouter no está configurado o
+    el símbolo no es operable por el usuario, deja `smc=None` (frontend lo
+    ignora).
+    """
+    for s in active_setups:
+        s.setdefault("smc", None)
+
+    if not radar_smc.is_enabled():
+        return
+
+    targets: list[tuple[dict, list[dict]]] = []
+    for s in active_setups:
+        sym = s.get("symbol", "").upper()
+        if sym not in RADAR_SMC_PAIRS:
+            continue
+        # Reutiliza el cache de OHLC del scanner — sin créditos extra.
+        raw = scanner._fetch_chart(sym)
+        if raw is None:
+            continue
+        ohlc = scanner._parse_ohlc(raw)
+        if ohlc is None:
+            continue
+        m30 = _aggregate_to_m30(ohlc, n=RADAR_SMC_M30_CANDLES)
+        if not m30:
+            continue
+        targets.append((s, m30))
+
+    if not targets:
+        return
+
+    workers = min(len(targets), RADAR_SMC_MAX_PARALLEL)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(radar_smc.analyze_setup_smc, s["symbol"], m30): s
+            for s, m30 in targets
+        }
+        for fut in as_completed(futures):
+            setup = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as e:
+                logger.warning("[RADAR] SMC %s falló: %s", setup.get("symbol"), e)
+                continue
+            if result is not None:
+                setup["smc"] = result
+
+
 def get_radar_response(symbols: Optional[list[str]] = None) -> dict:
-    """Respuesta cacheada del radar (TTL 5 min). Incluye cross-check con el
+    """Respuesta cacheada del radar (TTL 15 min). Incluye cross-check con el
     escáner para reclasificar conflictos de sesgo macro."""
-    selected = symbols or scanner.DEFAULT_PAIRS
+    selected = symbols or DEFAULT_PAIRS
     cache_key = ",".join(sorted(s.strip().upper() for s in selected if s.strip()))
 
     now = time.time()
@@ -871,6 +966,10 @@ def get_radar_response(symbols: Optional[list[str]] = None) -> dict:
             expired_setups.append(stripped)
         else:
             active_setups.append(s)
+
+    # Enriquecimiento SMC vía IA — solo pares operables del usuario, en paralelo.
+    # Si OpenRouter no está configurado o falla, los setups quedan con smc=None.
+    _enrich_with_smc(active_setups)
 
     # `total_setups` cuenta sólo activos y descarta too_wide — coherente con el
     # frontend que los pinta atenuados y no los considera operables.

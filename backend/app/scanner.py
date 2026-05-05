@@ -17,6 +17,28 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
+from .constants import (
+    CACHE_TTL_OHLC_SCANNER,
+    HTTP_TIMEOUT_DEFAULT,
+    SCANNER_INTERVAL,
+    SCANNER_OUTPUTSIZE,
+    SCANNER_MIN_CANDLES,
+    SCANNER_CONFLUENCE_THRESHOLD_TREND,
+    SCANNER_CONFLUENCE_THRESHOLD_NEUTRAL,
+    SCANNER_RANGE_DISCOUNT,
+    SCANNER_RANGE_PREMIUM,
+    SCANNER_RSI_OVERBOUGHT_EXTREME,
+    SCANNER_RSI_OVERSOLD_EXTREME,
+    SCANNER_MOMENTUM_THRESHOLD,
+    EMA_PERIOD_9,
+    EMA_PERIOD_21,
+    EMA_PERIOD_50,
+    EMA_PERIOD_200,
+    RSI_PERIOD,
+    ATR_PERIOD,
+    TWELVEDATA_CONCURRENT_WORKERS,
+)
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -44,7 +66,7 @@ def _td_symbol(pair: str) -> str:
 
 # TTL alto para proteger el presupuesto del plan free (800 créditos/día).
 # 15 min implica 2-3 ciclos de poll del frontend (5 min) sirviendo desde cache.
-CACHE_TTL_SECONDS = 900  # 15 min
+CACHE_TTL_SECONDS = CACHE_TTL_OHLC_SCANNER
 _cache: dict[str, tuple[float, dict]] = {}          # scored cards (scan_pairs)
 _ohlc_cache: dict[str, tuple[float, dict]] = {}     # raw OHLC (compartido con radar)
 _last_error: str = ""
@@ -54,7 +76,7 @@ _last_error: str = ""
 # Fetch
 # ---------------------------------------------------------------------------
 
-def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> Optional[dict]:
+def _fetch_chart(pair: str, interval: str = SCANNER_INTERVAL, outputsize: int = SCANNER_OUTPUTSIZE) -> Optional[dict]:
     """Descarga OHLC de Twelve Data. None si falla. Cachea el crudo 5 min
     para que scanner y radar compartan la misma respuesta sin duplicar fetches."""
     global _last_error
@@ -81,7 +103,7 @@ def _fetch_chart(pair: str, interval: str = "15min", outputsize: int = 200) -> O
         "User-Agent": "Mozilla/5.0 (AI Trading Assistant Scanner)",
     })
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_DEFAULT) as r:
             data = json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = ""
@@ -133,7 +155,7 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
         out_h.append(h)
         out_l.append(l)
 
-    if len(out_c) < 60:
+    if len(out_c) < SCANNER_MIN_CANDLES:
         return None
 
     return {"ts": out_ts, "open": out_o, "close": out_c, "high": out_h, "low": out_l}
@@ -154,7 +176,7 @@ def _ema(values: list[float], period: int) -> list[float]:
     return out
 
 
-def _rsi(values: list[float], period: int = 14) -> Optional[float]:
+def _rsi(values: list[float], period: int = RSI_PERIOD) -> Optional[float]:
     if len(values) < period + 1:
         return None
     gains, losses = 0.0, 0.0
@@ -178,7 +200,7 @@ def _rsi(values: list[float], period: int = 14) -> Optional[float]:
     return 100 - (100 / (1 + rs))
 
 
-def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> Optional[float]:
+def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = ATR_PERIOD) -> Optional[float]:
     if len(closes) < period + 1:
         return None
     trs = []
@@ -205,18 +227,18 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
     highs = ohlc["high"]
     lows = ohlc["low"]
 
-    ema9 = _ema(closes, 9)
-    ema21 = _ema(closes, 21)
-    ema50 = _ema(closes, 50)
-    ema200 = _ema(closes, 200) if len(closes) >= 200 else []
+    ema9 = _ema(closes, EMA_PERIOD_9)
+    ema21 = _ema(closes, EMA_PERIOD_21)
+    ema50 = _ema(closes, EMA_PERIOD_50)
+    ema200 = _ema(closes, EMA_PERIOD_200) if len(closes) >= EMA_PERIOD_200 else []
 
     last_close = closes[-1]
     prev_close = closes[-2] if len(closes) > 1 else last_close
     day_open = closes[-96] if len(closes) >= 96 else closes[0]
     change_pct = ((last_close - day_open) / day_open) * 100 if day_open else 0.0
 
-    rsi = _rsi(closes, 14)
-    atr = _atr(highs, lows, closes, 14)
+    rsi = _rsi(closes, RSI_PERIOD)
+    atr = _atr(highs, lows, closes, ATR_PERIOD)
 
     # Posición en rango últimas 50 velas
     lookback = closes[-50:]
@@ -226,6 +248,7 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
 
     # Impulso 5 velas
     mom_ret = (last_close - closes[-6]) / closes[-6] if len(closes) >= 6 and closes[-6] else 0.0
+    mom_ret_threshold = SCANNER_MOMENTUM_THRESHOLD
 
     factors = []
 
@@ -271,25 +294,25 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
 
     # 5. RSI momentum
     if rsi is not None:
-        if 50 <= rsi < 70:
+        if 50 <= rsi < RSI_PERIOD:
             val = 1
             desc = f"RSI {rsi:.0f} — momentum alcista sano"
         elif 30 < rsi < 50:
             val = -1
             desc = f"RSI {rsi:.0f} — momentum bajista sano"
-        elif rsi >= 70:
+        elif rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME:
             val = 0
             desc = f"RSI {rsi:.0f} — sobrecompra (agotamiento)"
         else:
             val = 0
             desc = f"RSI {rsi:.0f} — sobreventa (agotamiento)"
-        factors.append({"key": "rsi", "label": "RSI 14", "desc": desc, "value": val})
+        factors.append({"key": "rsi", "label": f"RSI {RSI_PERIOD}", "desc": desc, "value": val})
 
     # 6. Posición en rango (50 velas)
-    if range_pos < 0.3:
+    if range_pos < SCANNER_RANGE_DISCOUNT:
         val = 1
         desc = "Zona de descuento (parte baja del rango)"
-    elif range_pos > 0.7:
+    elif range_pos > SCANNER_RANGE_PREMIUM:
         val = -1
         desc = "Zona premium (parte alta del rango)"
     else:
@@ -298,10 +321,10 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
     factors.append({"key": "range_pos", "label": "Posición en rango", "desc": desc, "value": val})
 
     # 7. Impulso 5 velas
-    if mom_ret > 0.001:
+    if mom_ret > mom_ret_threshold:
         val = 1
         desc = f"Impulso reciente +{mom_ret*100:.2f}%"
-    elif mom_ret < -0.001:
+    elif mom_ret < -mom_ret_threshold:
         val = -1
         desc = f"Impulso reciente {mom_ret*100:.2f}%"
     else:
@@ -373,30 +396,30 @@ def _classify_bloque(
     Bloque 3 — Reversión en extremo: rango extremo (<15% o >85%) + RSI en zona de exhaustion (<32 o >68).
     Bloque 2 — Sin edge: resto (lateral, EMAs mixtas, bias bajo).
     """
-    at_extreme = range_pos <= 0.15 or range_pos >= 0.85
-    rsi_exhausted = rsi is not None and (rsi <= 32 or rsi >= 68)
+    at_extreme = range_pos <= SCANNER_RANGE_EXTREME_LOW or range_pos >= SCANNER_RANGE_EXTREME_HIGH
+    rsi_exhausted = rsi is not None and (rsi <= SCANNER_RSI_OVERSOLD_EXTREME or rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME)
 
     # Bloque 3 — reversión: precio en extremo + RSI agotado (señal de reversión)
     # El sentido de la reversión viene dado por qué extremo: low+oversold = LONG, high+overbought = SHORT
     if at_extreme and rsi_exhausted:
-        if range_pos <= 0.15 and rsi is not None and rsi <= 32:
+        if range_pos <= SCANNER_RANGE_EXTREME_LOW and rsi is not None and rsi <= SCANNER_RSI_OVERSOLD_EXTREME:
             return "3", "Reversión potencial LONG — rango bajo + RSI sobrevendido"
-        if range_pos >= 0.85 and rsi is not None and rsi >= 68:
+        if range_pos >= SCANNER_RANGE_EXTREME_HIGH and rsi is not None and rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME:
             return "3", "Reversión potencial SHORT — rango alto + RSI sobrecomprado"
 
     # Bloque 1 — tendencia limpia: bias alto, EMAs alineadas, RSI sano
-    if confluence >= 4 and ema_aligned:
+    if confluence >= SCANNER_CONFLUENCE_THRESHOLD_TREND and ema_aligned:
         # excluir si precio está pegado al extremo contrario al bias (riesgo de agotamiento)
         exhausted_against = (
-            (bias > 0 and range_pos >= 0.9 and rsi is not None and rsi >= 72) or
-            (bias < 0 and range_pos <= 0.1 and rsi is not None and rsi <= 28)
+            (bias > 0 and range_pos >= 0.9 and rsi is not None and rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME) or
+            (bias < 0 and range_pos <= 0.1 and rsi is not None and rsi <= SCANNER_RSI_OVERSOLD_EXTREME)
         )
         if not exhausted_against:
             direction = "alcista" if bias > 0 else "bajista"
             return "1", f"Tendencia {direction} limpia — EMAs alineadas, confluencia {confluence}/7"
 
     # Bloque 2 — excluido: razón más específica posible
-    if confluence < 3:
+    if confluence < SCANNER_CONFLUENCE_THRESHOLD_NEUTRAL:
         return "2", "Sin dirección clara — bias bajo"
     if not ema_aligned:
         return "2", "EMAs mixtas — estructura no definida"
@@ -554,8 +577,8 @@ def scan_pairs(pairs: Optional[list[str]] = None) -> list[dict]:
             to_fetch.append(p)
 
     if to_fetch:
-        # Free tier: 8 req/min. Concurrencia 4 para dejar holgura.
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        # Free tier: 8 req/min. Concurrencia configurable para dejar holgura.
+        with ThreadPoolExecutor(max_workers=TWELVEDATA_CONCURRENT_WORKERS) as ex:
             future_map = {ex.submit(_analyze_pair, p): p for p in to_fetch}
             for fut in as_completed(future_map):
                 p = future_map[fut]

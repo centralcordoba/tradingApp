@@ -1530,6 +1530,102 @@ tr:hover { background: var(--surface); }
 .radar-align-warn { background: #3b2e0d; color: #facc15; }
 .radar-align-neutral { background: var(--surface); color: var(--text-muted); }
 
+/* Geometría · canales y triángulos (determinístico, M30) */
+.radar-geom {
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 13px;
+}
+.radar-geom-head {
+  display: flex; align-items: center; gap: 8px;
+}
+.radar-geom-tag {
+  color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px;
+  text-transform: uppercase; font-size: 11px;
+  padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px;
+}
+.radar-geom-break {
+  font-weight: 700; font-size: 13px;
+  padding: 2px 8px; border-radius: 4px;
+}
+.radar-geom-break.geom-break-bull { background: #052e16; color: #4ade80; }
+.radar-geom-break.geom-break-bear { background: #2d0d0d; color: #f87171; }
+.radar-geom-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+}
+.radar-geom-pill {
+  padding: 1px 7px; border-radius: 4px; font-weight: 600;
+  background: var(--bg); color: var(--text-2);
+}
+.radar-geom-pill.geom-alcista { background: #052e16; color: #4ade80; }
+.radar-geom-pill.geom-bajista { background: #2d0d0d; color: #f87171; }
+.radar-geom-pill.geom-lateral { background: var(--bg); color: var(--text-muted); }
+.radar-geom-pill.geom-triangle { background: #1e293b; color: #93c5fd; }
+.radar-geom-state { color: var(--text); }
+.radar-geom-range { color: var(--text-muted); font-size: 12px; }
+.radar-geom-conf { margin-left: auto; font-size: 12px; }
+.radar-geom-conf.geom-conf-alta { color: #4ade80; }
+.radar-geom-conf.geom-conf-media { color: #fbbf24; }
+.radar-geom-conf.geom-conf-baja { color: var(--text-muted); }
+
+/* SMC · enriquecimiento por IA */
+.radar-smc {
+  padding: 10px 12px;
+  background: #0d1422;
+  border: 1px solid #1e3a5f;
+  border-radius: 7px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.radar-smc-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 13px;
+}
+.radar-smc-tag {
+  color: var(--accent); font-weight: 700; letter-spacing: 0.5px;
+  text-transform: uppercase; font-size: 11px;
+  padding: 2px 6px; border: 1px solid var(--accent); border-radius: 4px;
+}
+.radar-smc-sesgo {
+  font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 4px;
+  letter-spacing: 0.4px;
+}
+.radar-smc-sesgo.smc-long { background: #052e16; color: #4ade80; }
+.radar-smc-sesgo.smc-short { background: #2d0d0d; color: #f87171; }
+.radar-smc-sesgo.smc-no-trade { background: var(--surface); color: var(--text-muted); }
+.radar-smc-mov {
+  font-family: var(--font-mono); font-weight: 700; color: var(--text-2);
+  padding: 2px 6px; background: var(--surface); border-radius: 4px;
+}
+.radar-smc-alert {
+  margin-left: auto;
+  color: #fbbf24; font-size: 13px; font-weight: 600;
+}
+.radar-smc-resumen {
+  font-size: 15.6px; line-height: 1.45; color: var(--text);
+  font-weight: 500;
+}
+.radar-smc-meta {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  font-size: 13px;
+}
+.radar-smc-pill {
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--surface); color: var(--text-2);
+  font-family: var(--font-mono);
+}
+.radar-smc-pill.smc-fresco { background: #052e16; color: #4ade80; }
+.radar-smc-pill.smc-testeado { background: #3b2e0d; color: #fbbf24; }
+.radar-smc-pill.smc-agotado { background: #2d1307; color: #fb923c; text-decoration: line-through; }
+.radar-smc-pill.smc-pill-skip { background: #2d0d0d; color: #f87171; }
+.radar-smc-desc {
+  font-size: 13.5px; color: var(--text-muted); line-height: 1.4;
+  font-style: italic;
+}
+
 /* RRR / TP fila — mismo layout que SL */
 .radar-rrr {
   display: grid; grid-template-columns: 80px 1fr auto; gap: 8px; align-items: baseline;
