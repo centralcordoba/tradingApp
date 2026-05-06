@@ -76,6 +76,8 @@ SCANNER_CONFLUENCE_THRESHOLD_NEUTRAL = 3
 # Umbrales de rango para clasificación
 SCANNER_RANGE_DISCOUNT = 0.30   # 30% — zona de descuento (parte baja)
 SCANNER_RANGE_PREMIUM = 0.70    # 70% — zona premium (parte alta)
+SCANNER_RANGE_EXTREME_LOW = 0.15   # 15% — extremo bajo (reversión potencial LONG)
+SCANNER_RANGE_EXTREME_HIGH = 0.85  # 85% — extremo alto (reversión potencial SHORT)
 
 # Umbrales de RSI para agotamiento
 SCANNER_RSI_OVERBOUGHT_EXTREME = 72

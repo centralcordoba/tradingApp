@@ -105,6 +105,13 @@ export function RightBar({
 
   const limited = openSignals.slice(0, 5);
 
+  const nyTime = now
+    ? now.toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour12: false })
+    : "--:--:--";
+  const londonTime = now
+    ? now.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false })
+    : "--:--:--";
+
   return (
     <div className="rightbar-root">
       <div className={`next-setup ${aplus.active ? "is-active" : ""}`}>
@@ -198,6 +205,20 @@ export function RightBar({
             </span>
           </div>
         </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">New York</span>
+        </div>
+        <div className="city-clock num">{nyTime}</div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">Londres</span>
+        </div>
+        <div className="city-clock num">{londonTime}</div>
       </div>
 
       <div className="rb-disclaimer">

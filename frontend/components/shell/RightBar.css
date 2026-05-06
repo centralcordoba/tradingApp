@@ -193,6 +193,17 @@
   font-weight: 600;
 }
 
+/* === City clock === */
+.city-clock {
+  padding: 14px 12px;
+  text-align: center;
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
 /* === Disclaimer === */
 .rb-disclaimer {
   font-size: 13px;

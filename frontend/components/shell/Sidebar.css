@@ -126,13 +126,18 @@
   padding: 7px 8px;
   border-radius: 5px;
   align-items: center;
-  font-size: 14.3px;
+  font-size: 15.6px;
 }
 .event-item:hover { background: var(--bg-hover); }
-.event-time { color: var(--text-tertiary); font-size: 13px; }
+.event-time {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
 .event-flag { font-size: 15.6px; }
 .event-name {
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
