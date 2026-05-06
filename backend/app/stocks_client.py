@@ -129,11 +129,25 @@ def _http_get(path: str, params: dict, timeout: int = HTTP_TIMEOUT_DEFAULT) -> d
 
     if isinstance(data, dict) and data.get("status") == "error":
         msg = data.get("message", "error desconocido")
-        # Heurística: TD devuelve mensajes como "**symbol** not found ..."
-        # cuando el ticker no existe.
-        if "not found" in msg.lower() or "could not be located" in msg.lower():
+        msg_lower = msg.lower()
+        # Heurística: TD devuelve mensajes con varias formas cuando el ticker
+        # no existe, no está soportado por el plan free, o no hay data.
+        # Todas estas las mapeamos a 404 — el frontend las muestra como
+        # "Ticker no encontrado".
+        not_found_patterns = (
+            "not found",
+            "could not be located",
+            "not available",
+            "not supported",
+            "no data",
+            "no historical data",
+            "invalid symbol",
+            "not subscribed",
+            "is not a valid symbol",
+        )
+        if any(p in msg_lower for p in not_found_patterns):
             raise StocksUpstreamError(404, msg)
-        if "rate limit" in msg.lower() or data.get("code") == 429:
+        if "rate limit" in msg_lower or data.get("code") == 429:
             raise StocksUpstreamError(429, msg)
         raise StocksUpstreamError(502, msg)
 

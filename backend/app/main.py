@@ -132,8 +132,8 @@ def scanner_debug():
 def scan_pairs(pairs: str = ""):
     """Escanea pares en vivo (Twelve Data) y devuelve rankeados por confluencia.
 
-    `pairs` opcional: lista separada por comas (ej: "XAUUSD,EURUSD"). Si vacío,
-    usa la lista por defecto (metales + majors + cruces).
+    `pairs` opcional: lista separada por comas (ej: "EURUSD,GBPUSD"). Si vacío,
+    usa la lista por defecto (majors + cruces).
     """
     selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
     results = scanner.scan_pairs(selected)
@@ -218,7 +218,7 @@ def get_stats():
 
 
 @app.get("/news")
-def get_news(symbol: str = "XAUUSD", hours: int = 24):
+def get_news(symbol: str = "EURUSD", hours: int = 24):
     """Próximas noticias high-impact que afectan al símbolo en las próximas N horas."""
     now = datetime.now(timezone.utc)
     horizon = now.timestamp() + hours * 3600

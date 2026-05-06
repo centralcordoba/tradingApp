@@ -61,11 +61,18 @@ function relativeTime(iso: string): string {
 }
 
 function errorMessage(code: string, message: string): string {
-  if (code === "NOT_FOUND") return `Ticker no encontrado: ${message}`;
+  if (code === "NOT_FOUND") {
+    return `Ticker no disponible en Twelve Data (free tier cubre US equities + majors). Detalle: ${message}`;
+  }
   if (code === "RATE_LIMIT") {
     return "Twelve Data limita 8 consultas por minuto en el plan free. Esperá ~30 segundos y reintentá. Si pasa seguido, puede ser que el cap diario (800 créditos) se haya alcanzado.";
   }
   if (code === "NETWORK") return "Error de red — revisá tu conexión";
+  if (code === "UPSTREAM") {
+    // El message ya incluye el detail de Twelve Data si vino. Si no, fallback.
+    if (message.toLowerCase().includes("twelve data")) return message;
+    return `Twelve Data no pudo procesar la consulta. ${message}`;
+  }
   return message;
 }
 

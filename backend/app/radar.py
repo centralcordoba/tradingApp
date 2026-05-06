@@ -64,9 +64,8 @@ _radar_cache: dict[str, tuple[float, dict]] = {}
 # Alias usado por main.py y por el chequeo de mercado cerrado en este módulo.
 MARKET_STALE_THRESHOLD_MIN = RADAR_MARKET_STALE_THRESHOLD_MIN
 
-# Pares por defecto del radar — los del scanner menos XAUUSD (no operado por
-# ahora). El scanner sigue usando su propia lista para el sesgo macro / MTF.
-DEFAULT_PAIRS = [p for p in scanner.DEFAULT_PAIRS if p.upper() != "XAUUSD"]
+# Pares por defecto del radar — comparte la lista del scanner (sin XAUUSD).
+DEFAULT_PAIRS = list(scanner.DEFAULT_PAIRS)
 
 
 def _pip_size(symbol: str) -> float:

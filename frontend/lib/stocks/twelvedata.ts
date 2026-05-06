@@ -106,16 +106,29 @@ async function parseOrThrow<T>(r: Response, ctx: string): Promise<T> {
   if (r.ok) {
     return (await r.json()) as T;
   }
+  // FastAPI mete el mensaje real en `detail`. Lo extraemos para no tragarnos
+  // el contexto de Twelve Data ("not subscribed", "no data found", etc.).
+  let detail = "";
+  try {
+    const body = await r.json();
+    if (body && typeof body.detail === "string") detail = body.detail;
+  } catch {
+    // body no es JSON — ignoramos
+  }
+
   if (r.status === 404) {
-    throw new StocksApiError(404, "NOT_FOUND", `${ctx}: símbolo no encontrado`);
+    const suffix = detail ? ` (${detail})` : "";
+    throw new StocksApiError(404, "NOT_FOUND", `${ctx}: símbolo no encontrado${suffix}`);
   }
   if (r.status === 429) {
-    throw new StocksApiError(429, "RATE_LIMIT", `${ctx}: rate limit superado`);
+    throw new StocksApiError(429, "RATE_LIMIT", detail || `${ctx}: rate limit superado`);
   }
   if (r.status >= 500) {
-    throw new StocksApiError(r.status, "UPSTREAM", `${ctx}: error del proveedor (${r.status})`);
+    const suffix = detail ? `: ${detail}` : ` (${r.status})`;
+    throw new StocksApiError(r.status, "UPSTREAM", `${ctx}${suffix}`);
   }
-  throw new StocksApiError(r.status, "INVALID", `${ctx}: respuesta inválida (${r.status})`);
+  const suffix = detail ? `: ${detail}` : ` (${r.status})`;
+  throw new StocksApiError(r.status, "INVALID", `${ctx}${suffix}`);
 }
 
 /**

@@ -10,9 +10,9 @@ ZoneType = Literal["COMPRA YA", "COMPRA", "VENDE", "VENDE YA"]
 
 
 class TVSignal(BaseModel):
-    """Payload emitido por el script Pine SMS_XAUUSD_v8.9.1 (formato JSON)."""
+    """Payload emitido por el script Pine SMS_EURUSD_v8.10.1 (formato JSON)."""
     signal: SignalType
-    symbol: str = "XAUUSD"
+    symbol: str = "EURUSD"
     timeframe: str = "5"
     price: float
     sl: float

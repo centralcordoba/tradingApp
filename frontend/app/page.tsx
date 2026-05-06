@@ -409,7 +409,7 @@ function zonaTooltip(zona: string, side: string): string {
 type View = "dashboard" | "zones" | "radar" | "stocks";
 
 // Pares operativos del usuario — usados por el radar para filtrar ruido.
-const WATCHLIST = ["XAUUSD", "EURUSD"];
+const WATCHLIST = ["EURUSD"];
 
 type RadarSetup = {
   symbol: string;
@@ -540,18 +540,20 @@ type RadarResponse = {
 };
 
 const PRESET_SYMBOLS = [
-  "XAUUSD",
-  "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-  "AUDUSD", "NZDUSD", "USDCAD",
-  "EURJPY", "GBPJPY", "EURGBP",
+  "EURUSD", "GBPUSD", "USDCAD", "USDCHF", "AUDUSD", "USDJPY",
 ];
 
+const ALLOWED_SYMBOLS = new Set(PRESET_SYMBOLS);
+
 function mergeSymbols(apiSymbols: string[]): string[] {
+  // Solo dejamos los 6 majors operables. Señales históricas en pares fuera de
+  // la lista (XAUUSD, EURJPY, etc.) siguen existiendo en la DB y se ven con
+  // filtro "Todos", pero no aparecen como tab/sidebar.
   const seen = new Set<string>();
   const out: string[] = [];
   for (const s of [...apiSymbols, ...PRESET_SYMBOLS]) {
     const k = s.toUpperCase();
-    if (!seen.has(k)) { seen.add(k); out.push(k); }
+    if (ALLOWED_SYMBOLS.has(k) && !seen.has(k)) { seen.add(k); out.push(k); }
   }
   return out;
 }
@@ -589,7 +591,6 @@ type DailyBrief = {
   pares_excluidos: string[];
   mejor_setup: string;
   correlacion_dominante: string;
-  xauusd_resumen: string;
 };
 
 function Sparkline({ data, side, width = 120, height = 36 }: {
@@ -1543,11 +1544,6 @@ function DailyBriefPanel({ brief }: { brief: DailyBrief }) {
         <div className="brief-card brief-best">
           <div className="brief-card-label"><span>🏆</span> Mejor setup</div>
           <div className="brief-card-value brief-best-value">{brief.mejor_setup}</div>
-        </div>
-
-        <div className="brief-card brief-gold">
-          <div className="brief-card-label"><span>🥇</span> XAUUSD</div>
-          <div className="brief-card-value">{brief.xauusd_resumen}</div>
         </div>
 
         <div className="brief-card brief-operables">

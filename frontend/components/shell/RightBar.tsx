@@ -32,7 +32,7 @@ type Props = {
   onStocksSelect?: (symbol: string) => void;
 };
 
-const APLUS_PAIRS = ["EURUSD", "GBPUSD", "XAUUSD", "USDJPY"];
+const APLUS_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"];
 
 function relativeTime(iso: string, now: Date): string {
   const t = new Date(iso).getTime();

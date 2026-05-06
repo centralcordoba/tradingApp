@@ -1,5 +1,5 @@
 /** Pares operativos del usuario — usados por el radar para filtrar ruido. */
-export const WATCHLIST = ["XAUUSD", "EURUSD"];
+export const WATCHLIST = ["EURUSD"];
 
 /** Polling intervals (ms) */
 export const POLL_SIGNALS_MS = 5000;

@@ -156,7 +156,6 @@ export type DailyBrief = {
   pares_excluidos: string[];
   mejor_setup: string;
   correlacion_dominante: string;
-  xauusd_resumen: string;
 };
 
 // ─── Radar ──────────────────────────────────────────────────────

@@ -44,22 +44,16 @@ from .constants import (
 # ---------------------------------------------------------------------------
 
 DEFAULT_PAIRS = [
-    "XAUUSD",  # plata (XAGUSD) requiere plan Grow en Twelve Data, no incluida
-    "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-    "AUDUSD", "NZDUSD", "USDCAD",
-    "EURJPY", "GBPJPY", "EURGBP",
+    "USDJPY", "USDCAD", "AUDUSD",
+    "EURUSD", "USDCHF", "GBPUSD",
 ]
 
 TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
 TWELVEDATA_BASE = "https://api.twelvedata.com/time_series"
 
-# Twelve Data usa slash: "EUR/USD", "XAU/USD"
+# Twelve Data usa slash: "EUR/USD"
 def _td_symbol(pair: str) -> str:
     p = pair.upper().replace("/", "").replace("-", "")
-    if p.startswith("XAU"):
-        return "XAU/USD"
-    if p.startswith("XAG"):
-        return "XAG/USD"
     if len(p) == 6:
         return f"{p[:3]}/{p[3:]}"
     return p
@@ -452,23 +446,20 @@ def _macro_theme(by_pair: dict[str, dict]) -> str:
     usd_score = 0
     for p, d in by_pair.items():
         b = d.get("bias", 0)
-        if p in ("EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"):
+        if p in ("EURUSD", "GBPUSD", "AUDUSD"):
             usd_score -= b          # SHORT de XXXUSD = USD fuerte
         elif p in ("USDCAD", "USDCHF", "USDJPY"):
             usd_score += b          # LONG de USDXXX = USD fuerte
-        elif p == "XAUUSD":
-            usd_score -= b          # oro SHORT = USD fuerte
 
-    gold = by_pair.get("XAUUSD", {}).get("bias", 0)
     usdjpy = by_pair.get("USDJPY", {}).get("bias", 0)
+    usdchf = by_pair.get("USDCHF", {}).get("bias", 0)
     aud = by_pair.get("AUDUSD", {}).get("bias", 0)
-    nzd = by_pair.get("NZDUSD", {}).get("bias", 0)
 
-    # Safe-haven: oro arriba + yen fuerte (USDJPY bajista)
-    if gold >= 3 and usdjpy <= -3:
-        return "Risk-off / refugio — oro y yen bid, evita riesgo cíclico"
-    # Risk-on: AUD/NZD fuertes + oro débil
-    if (aud + nzd) >= 4 and gold <= -2:
+    # Safe-haven proxy: yen y franco fuertes (USDJPY/USDCHF bajistas)
+    if usdjpy <= -3 and usdchf <= -3:
+        return "Risk-off / refugio — yen y franco bid, evita riesgo cíclico"
+    # Risk-on: AUD fuerte + yen débil
+    if aud >= 3 and usdjpy >= 2:
         return "Risk-on — divisas cíclicas al alza, debilidad de refugios"
     if usd_score >= 10:
         return "Dólar fuerte transversalmente — vendedor de todo lo demás"
@@ -513,19 +504,8 @@ def _mejor_setup(operables: list[dict]) -> str:
     side = top["side"] if top["side"] != "NEUTRAL" else ("LONG" if top["bias"] > 0 else "SHORT")
     bloq = top["bloque"]
     razon = top["bloque_reason"]
-    # Compact: "XAUUSD SHORT [B1] bias -6, macro bajista, conf 6/7"
+    # Compact: "EURUSD LONG [B1] bias 5, macro alcista, conf 5/7"
     return f"{pair} {side} [B{bloq}] — {razon.split(' — ')[-1] if ' — ' in razon else razon}"[:140]
-
-
-def _xauusd_resumen(by_pair: dict[str, dict]) -> str:
-    """Línea dedicada al oro."""
-    g = by_pair.get("XAUUSD")
-    if not g:
-        return "XAUUSD no disponible"
-    return (
-        f"Bloque {g['bloque']} · {g['side']} · confluencia {g['confluence']}/{g['max']} · "
-        f"RSI {g['rsi']:.0f} · rango {int(g['range_pos']*100)}% · {g['bloque_reason']}"
-    )
 
 
 def build_daily_brief(items: list[dict]) -> dict:
@@ -550,7 +530,6 @@ def build_daily_brief(items: list[dict]) -> dict:
         ],
         "mejor_setup": _mejor_setup(operables),
         "correlacion_dominante": _macro_theme(by_pair),
-        "xauusd_resumen": _xauusd_resumen(by_pair),
     }
 
 

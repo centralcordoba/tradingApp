@@ -1,8 +1,6 @@
 export const PRESET_SYMBOLS = [
-  "XAUUSD",
-  "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-  "AUDUSD", "NZDUSD", "USDCAD",
-  "EURJPY", "GBPJPY", "EURGBP",
+  "USDJPY", "USDCAD", "AUDUSD",
+  "EURUSD", "USDCHF", "GBPUSD",
 ];
 
 /** Une la lista de símbolos del API con el preset, sin duplicados, preservando orden API > preset. */
