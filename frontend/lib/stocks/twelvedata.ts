@@ -18,7 +18,7 @@ import type {
 export class StocksApiError extends Error {
   constructor(
     public status: number,
-    public code: "NOT_FOUND" | "RATE_LIMIT" | "NETWORK" | "INVALID" | "UPSTREAM",
+    public code: "NOT_FOUND" | "RATE_LIMIT" | "PLAN_GATED" | "NETWORK" | "INVALID" | "UPSTREAM",
     message: string,
   ) {
     super(message);
@@ -119,6 +119,9 @@ async function parseOrThrow<T>(r: Response, ctx: string): Promise<T> {
   if (r.status === 404) {
     const suffix = detail ? ` (${detail})` : "";
     throw new StocksApiError(404, "NOT_FOUND", `${ctx}: símbolo no encontrado${suffix}`);
+  }
+  if (r.status === 402) {
+    throw new StocksApiError(402, "PLAN_GATED", detail || `${ctx}: símbolo requiere plan pago`);
   }
   if (r.status === 429) {
     throw new StocksApiError(429, "RATE_LIMIT", detail || `${ctx}: rate limit superado`);

@@ -345,6 +345,8 @@ def _raise_upstream(e: StocksUpstreamError) -> None:
         raise HTTPException(status_code=404, detail=str(e))
     if e.status == 429:
         raise HTTPException(status_code=429, detail=str(e))
+    if e.status == 402:
+        raise HTTPException(status_code=402, detail=str(e))
     if e.status == 400:
         raise HTTPException(status_code=400, detail=str(e))
     if 500 <= e.status < 600:

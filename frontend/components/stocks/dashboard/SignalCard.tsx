@@ -64,6 +64,9 @@ function errorMessage(code: string, message: string): string {
   if (code === "NOT_FOUND") {
     return `Ticker no disponible en Twelve Data (free tier cubre US equities + majors). Detalle: ${message}`;
   }
+  if (code === "PLAN_GATED") {
+    return "Este símbolo requiere plan pago de Twelve Data (Pro o Venture). El plan free cubre US equities mainstream + majors forex. Probá con tickers como AAPL, MSFT, NVDA, SPY, TSLA o QQQ.";
+  }
   if (code === "RATE_LIMIT") {
     return "Twelve Data limita 8 consultas por minuto en el plan free. Esperá ~30 segundos y reintentá. Si pasa seguido, puede ser que el cap diario (800 créditos) se haya alcanzado.";
   }

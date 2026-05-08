@@ -130,6 +130,18 @@ def _http_get(path: str, params: dict, timeout: int = HTTP_TIMEOUT_DEFAULT) -> d
     if isinstance(data, dict) and data.get("status") == "error":
         msg = data.get("message", "error desconocido")
         msg_lower = msg.lower()
+        # Símbolo restringido a plan pago de TD (Pro/Venture/Ultra).
+        # Status 402 (Payment Required) — el frontend lo distingue de un 404
+        # para mostrar mensaje accionable ("probá otro ticker").
+        plan_gated_patterns = (
+            "available starting with",
+            "or venture plan",
+            "or pro plan",
+            "consider upgrading",
+            "upgrade your plan",
+        )
+        if any(p in msg_lower for p in plan_gated_patterns):
+            raise StocksUpstreamError(402, msg)
         # Heurística: TD devuelve mensajes con varias formas cuando el ticker
         # no existe, no está soportado por el plan free, o no hay data.
         # Todas estas las mapeamos a 404 — el frontend las muestra como

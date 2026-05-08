@@ -9,8 +9,14 @@ import { SessionsTimeline } from "@/components/dashboard/SessionsTimeline";
 import { KpiHero } from "@/components/dashboard/KpiHero";
 import { EquityCurve } from "@/components/dashboard/EquityCurve";
 import { StocksView } from "@/components/stocks/StocksView";
+import { useTick } from "@/hooks/useTick";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const NEWS_ALERT_THRESHOLD_MIN = 20;
+const NEWS_ALERT_LINGER_MIN = 5;
+const NEWS_ALERTED_KEY = "tradingapp:news_alerted";
+const newsKey = (w: NewsWarning) => `${w.date_utc}|${w.title}|${w.country}`;
 
 type Signal = {
   id: number;
@@ -1655,6 +1661,41 @@ export default function Home() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
   const [activeStockSymbol, setActiveStockSymbol] = useState<string | null>(null);
+  const [newsAlertEvent, setNewsAlertEvent] = useState<NewsWarning | null>(null);
+  const newsAlertedKeysRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(NEWS_ALERTED_KEY) || "[]";
+      const arr: string[] = JSON.parse(stored);
+      newsAlertedKeysRef.current = new Set(arr);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    if (!newsWarnings.length || newsAlertEvent) return;
+    const candidate = newsWarnings.find(w =>
+      w.minutes_until <= NEWS_ALERT_THRESHOLD_MIN &&
+      w.minutes_until >= -NEWS_ALERT_LINGER_MIN &&
+      !newsAlertedKeysRef.current.has(newsKey(w))
+    );
+    if (!candidate) return;
+    const k = newsKey(candidate);
+    newsAlertedKeysRef.current.add(k);
+    try {
+      sessionStorage.setItem(NEWS_ALERTED_KEY, JSON.stringify([...newsAlertedKeysRef.current]));
+    } catch { /* ignore */ }
+    setNewsAlertEvent(candidate);
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        const mins = Math.max(0, candidate.minutes_until);
+        new Notification(`Noticia ${candidate.country} en ${mins} min`, {
+          body: candidate.title,
+          tag: k,
+        });
+      } catch { /* ignore */ }
+    }
+  }, [newsWarnings, newsAlertEvent]);
 
   useEffect(() => {
     const saved = (typeof window !== "undefined" && localStorage.getItem("theme")) as "dark" | "light" | null;
@@ -1815,6 +1856,14 @@ export default function Home() {
       }
       main={
         <div className="legacy-main-pad">
+      {view !== "stocks" && (
+        <NewsAlertBar
+          warnings={newsWarnings}
+          thresholdMin={NEWS_ALERT_THRESHOLD_MIN}
+          lingerMin={NEWS_ALERT_LINGER_MIN}
+        />
+      )}
+
       {view !== "stocks" && <SessionsTimeline />}
 
       {view !== "stocks" && newsWarnings.length > 0 && (
@@ -2085,6 +2134,13 @@ export default function Home() {
           onClose={() => setConfirmDialog(null)}
         />
       )}
+
+      {newsAlertEvent && (
+        <NewsAlertModal
+          event={newsAlertEvent}
+          onClose={() => setNewsAlertEvent(null)}
+        />
+      )}
         </div>
       }
     />
@@ -2175,6 +2231,123 @@ function NewsBannerItem({ warning }: { warning: NewsWarning }) {
       <span className="news-country">{country}</span>
       <span className="news-title">{title}</span>
       <span className="news-time">{hhmm} · {timing}</span>
+    </div>
+  );
+}
+
+function NewsAlertBar({
+  warnings, thresholdMin, lingerMin,
+}: {
+  warnings: NewsWarning[];
+  thresholdMin: number;
+  lingerMin: number;
+}) {
+  const tick = useTick(30_000);
+  if (!warnings.length) return null;
+  const now = (tick ?? new Date()).getTime();
+
+  const live = warnings
+    .map(w => ({
+      ...w,
+      _liveMin: Math.round((new Date(w.date_utc).getTime() - now) / 60_000),
+    }))
+    .filter(w => w._liveMin <= thresholdMin && w._liveMin >= -lingerMin)
+    .sort((a, b) => a._liveMin - b._liveMin);
+
+  if (live.length === 0) return null;
+  const closest = live[0];
+  const m = closest._liveMin;
+  const isLive = m <= 0;
+  const isImminent = m > 0 && m <= 5;
+  const status = isLive
+    ? `EN CURSO · hace ${Math.abs(m)} min`
+    : isImminent
+    ? `INMINENTE · ${m} min`
+    : `EN ${m} MIN`;
+  const extra = live.length > 1 ? ` · +${live.length - 1} más` : "";
+  const hhmm = new Date(closest.date_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div
+      className={`news-alert-bar ${isLive ? "is-live" : isImminent ? "is-imminent" : ""}`}
+      role="alert"
+      aria-live="assertive"
+    >
+      <span className="news-alert-pulse" aria-hidden="true" />
+      <span className="news-alert-icon" aria-hidden="true">⚠</span>
+      <span className="news-alert-tag">ALERTA NOTICIA</span>
+      <span className="news-alert-country">{closest.country}</span>
+      <span className="news-alert-title">{closest.title}</span>
+      <span className="news-alert-time">{hhmm}</span>
+      <span className="news-alert-status">{status}{extra}</span>
+    </div>
+  );
+}
+
+function NewsAlertModal({
+  event, onClose,
+}: {
+  event: NewsWarning;
+  onClose: () => void;
+}) {
+  const tick = useTick(1000);
+  const now = (tick ?? new Date()).getTime();
+  const target = new Date(event.date_utc).getTime();
+  const diffSec = Math.round((target - now) / 1000);
+  const inProgress = diffSec <= 0;
+  const remainingSec = Math.max(0, diffSec);
+  const mm = String(Math.floor(remainingSec / 60)).padStart(2, "0");
+  const ss = String(remainingSec % 60).padStart(2, "0");
+  const passedMin = inProgress ? Math.max(0, Math.round(-diffSec / 60)) : 0;
+  const hhmm = new Date(event.date_utc).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal modal-news-alert"
+        onClick={(e) => e.stopPropagation()}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="news-alert-title"
+      >
+        <div className="news-alert-modal-icon" aria-hidden="true">⚠</div>
+        <div className="news-alert-modal-tag">ALERTA NOTICIA HIGH-IMPACT</div>
+        <h3 id="news-alert-title" className="news-alert-modal-title">{event.title}</h3>
+        <div className="news-alert-modal-meta">
+          <span className="news-alert-modal-country">{event.country}</span>
+          <span className="news-alert-modal-time">{hhmm}</span>
+        </div>
+        <div className="news-alert-modal-countdown">
+          {inProgress ? (
+            <>
+              <div className="num">EN CURSO</div>
+              <div className="news-alert-modal-sub">hace {passedMin} min</div>
+            </>
+          ) : (
+            <>
+              <div className="num">{mm}:{ss}</div>
+              <div className="news-alert-modal-sub">para el evento</div>
+            </>
+          )}
+        </div>
+        <div className="news-alert-modal-foot">
+          <button
+            className="modal-btn modal-btn-danger"
+            onClick={onClose}
+            autoFocus
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
