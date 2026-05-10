@@ -9,6 +9,7 @@ import { SessionsTimeline } from "@/components/dashboard/SessionsTimeline";
 import { KpiHero } from "@/components/dashboard/KpiHero";
 import { EquityCurve } from "@/components/dashboard/EquityCurve";
 import { StocksView } from "@/components/stocks/StocksView";
+import { CorrelationsView } from "@/components/correlations/CorrelationsView";
 import { useTick } from "@/hooks/useTick";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -412,7 +413,7 @@ function zonaTooltip(zona: string, side: string): string {
   }
 }
 
-type View = "dashboard" | "zones" | "radar" | "stocks";
+type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations";
 
 // Pares operativos del usuario — usados por el radar para filtrar ruido.
 const WATCHLIST = ["EURUSD"];
@@ -1856,7 +1857,7 @@ export default function Home() {
       }
       main={
         <div className="legacy-main-pad">
-      {view !== "stocks" && (
+      {view !== "stocks" && view !== "correlations" && (
         <NewsAlertBar
           warnings={newsWarnings}
           thresholdMin={NEWS_ALERT_THRESHOLD_MIN}
@@ -1864,9 +1865,9 @@ export default function Home() {
         />
       )}
 
-      {view !== "stocks" && <SessionsTimeline />}
+      {view !== "stocks" && view !== "correlations" && <SessionsTimeline />}
 
-      {view !== "stocks" && newsWarnings.length > 0 && (
+      {view !== "stocks" && view !== "correlations" && newsWarnings.length > 0 && (
         <div className="news-banner">
           {newsWarnings.map((w, i) => (
             <NewsBannerItem key={`${w.date_utc}-${i}`} warning={w} />
@@ -1883,6 +1884,8 @@ export default function Home() {
           activeSymbol={activeStockSymbol}
           onSymbolChange={setActiveStockSymbol}
         />
+      ) : view === "correlations" ? (
+        <CorrelationsView />
       ) : (
       <>
       {stats && (

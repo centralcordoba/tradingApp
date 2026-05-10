@@ -5,7 +5,7 @@
    eliminan.
    ────────────────────────────────────────────────────────────────── */
 
-export type View = "dashboard" | "zones" | "radar" | "stocks";
+export type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations";
 
 // ─── Signals & journal ──────────────────────────────────────────
 

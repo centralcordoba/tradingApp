@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner, radar, stocks_client
+from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations
+from .correlations import CorrelationsAIDisabled
 from .stocks_client import StocksUpstreamError
 from .constants import (
     HTTP_STATUS_BAD_REQUEST,
@@ -163,6 +164,37 @@ def radar_setups(pairs: str = ""):
     """
     selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
     return radar.get_radar_response(selected)
+
+
+@app.get("/correlations")
+def correlations_matrix():
+    """Matriz estática de correlaciones entre los 6 pares operables.
+
+    No consume Twelve Data. Datos memorizados en `correlations.py`.
+    """
+    return correlations.build_matrix()
+
+
+@app.post("/correlations/query")
+def correlations_query(payload: dict):
+    """Consulta en lenguaje natural sobre correlaciones.
+
+    Body: {"question": "..."}. Usa OpenRouter con el system prompt del
+    Correlation Checker. Si OPENROUTER_API_KEY no está configurada → 503.
+    """
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Falta 'question'")
+    try:
+        answer = correlations.query(question)
+    except CorrelationsAIDisabled:
+        raise HTTPException(
+            status_code=503,
+            detail="OpenRouter no configurado: falta OPENROUTER_API_KEY",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OpenRouter falló: {e}")
+    return {"answer": answer}
 
 
 @app.post("/signals/{signal_id}/result")
