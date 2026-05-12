@@ -10,6 +10,7 @@ import { KpiHero } from "@/components/dashboard/KpiHero";
 import { EquityCurve } from "@/components/dashboard/EquityCurve";
 import { StocksView } from "@/components/stocks/StocksView";
 import { CorrelationsView } from "@/components/correlations/CorrelationsView";
+import { PlaybookView } from "@/components/playbook/PlaybookView";
 import { useTick } from "@/hooks/useTick";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -18,6 +19,9 @@ const NEWS_ALERT_THRESHOLD_MIN = 20;
 const NEWS_ALERT_LINGER_MIN = 5;
 const NEWS_ALERTED_KEY = "tradingapp:news_alerted";
 const newsKey = (w: NewsWarning) => `${w.date_utc}|${w.title}|${w.country}`;
+
+const NY_PREOPEN_ALERT_MIN = 15;
+const NY_PREOPEN_MODAL_KEY = "tradingapp:ny_preopen_modal_shown";
 
 type Signal = {
   id: number;
@@ -333,19 +337,30 @@ function SessionsPanel() {
           const open = isSessionOpen(now, s);
           const progress = sessionProgress(now, s);
           const time = formatTime(now, s.timezone);
+          const madridEquivalent = formatTime(now, "Europe/Madrid");
           const countdown = sessionCountdown(now, s);
+          const isNY = s.abbr === "NYC";
+          const preopenMin = !open && countdown.minutes <= NY_PREOPEN_ALERT_MIN ? Math.max(0, Math.ceil(countdown.minutes)) : null;
+          const nyWarn = isNY && preopenMin !== null && preopenMin > 0;
           return (
-            <div key={s.abbr} className={`session-card ${open ? "session-open" : "session-closed"}`}>
+            <div
+              key={s.abbr}
+              className={`session-card ${open ? "session-open" : "session-closed"} ${nyWarn ? "session-warn" : ""}`}
+            >
               <div className="session-header">
-                <span className={`session-dot ${open ? "dot-open" : "dot-closed"}`} />
+                <span className={`session-dot ${open ? "dot-open" : nyWarn ? "dot-warn" : "dot-closed"}`} />
                 <span className="session-name">{s.name}</span>
-                <span className={`session-status ${open ? "status-open" : "status-closed"}`}>
-                  {open ? "ABIERTO" : "CERRADO"}
+                <span className={`session-status ${open ? "status-open" : nyWarn ? "status-warn" : "status-closed"}`}>
+                  {open ? "ABIERTO" : nyWarn ? `EN ${preopenMin}m` : "CERRADO"}
                 </span>
               </div>
               <div className="session-time">{time}</div>
-              <div className={`session-countdown ${open ? "countdown-close" : "countdown-open"}`}>
-                {countdown.label}
+              <div className="session-madrid-row" title="Hora equivalente en Madrid">
+                <span className="session-madrid-tag">MAD</span>
+                <span className="session-madrid-time num">{madridEquivalent}</span>
+              </div>
+              <div className={`session-countdown ${open ? "countdown-close" : nyWarn ? "countdown-warn" : "countdown-open"}`}>
+                {nyWarn ? `Empieza en ${preopenMin}m` : countdown.label}
               </div>
               <div className="session-bar-track">
                 <div
@@ -413,7 +428,7 @@ function zonaTooltip(zona: string, side: string): string {
   }
 }
 
-type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations";
+type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook";
 
 // Pares operativos del usuario — usados por el radar para filtrar ruido.
 const WATCHLIST = ["EURUSD"];
@@ -1664,6 +1679,8 @@ export default function Home() {
   const [activeStockSymbol, setActiveStockSymbol] = useState<string | null>(null);
   const [newsAlertEvent, setNewsAlertEvent] = useState<NewsWarning | null>(null);
   const newsAlertedKeysRef = useRef<Set<string>>(new Set());
+  const [nyPreopenModalOpen, setNyPreopenModalOpen] = useState(false);
+  const nyTick = useClockTick(1000);
 
   useEffect(() => {
     try {
@@ -1697,6 +1714,31 @@ export default function Home() {
       } catch { /* ignore */ }
     }
   }, [newsWarnings, newsAlertEvent]);
+
+  useEffect(() => {
+    if (!nyTick) return;
+    const ny = SESSIONS.find(s => s.abbr === "NYC");
+    if (!ny) return;
+    if (isSessionOpen(nyTick, ny)) return;
+    const { minutes } = sessionCountdown(nyTick, ny);
+    if (minutes > NY_PREOPEN_ALERT_MIN || minutes <= 0) return;
+    const today = nyTick.toISOString().slice(0, 10);
+    let shownToday = false;
+    try {
+      shownToday = localStorage.getItem(NY_PREOPEN_MODAL_KEY) === today;
+    } catch { /* ignore */ }
+    if (shownToday) return;
+    try { localStorage.setItem(NY_PREOPEN_MODAL_KEY, today); } catch { /* ignore */ }
+    setNyPreopenModalOpen(true);
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        new Notification("Sesión NY en 15 min", {
+          body: "Prepárate: la sesión de New York abre en menos de 15 minutos.",
+          tag: `ny-preopen-${today}`,
+        });
+      } catch { /* ignore */ }
+    }
+  }, [nyTick]);
 
   useEffect(() => {
     const saved = (typeof window !== "undefined" && localStorage.getItem("theme")) as "dark" | "light" | null;
@@ -1850,14 +1892,13 @@ export default function Home() {
           openCount={stats?.open ?? openSignals.length}
           totalSignals={stats?.total_signals ?? totalSignals}
           onPairClick={(p) => { setFilter(p); setPage(1); }}
-          onRadarOpen={() => setView("radar")}
           stocksActiveSymbol={activeStockSymbol}
           onStocksSelect={(s) => { setActiveStockSymbol(s); setView("stocks"); }}
         />
       }
       main={
         <div className="legacy-main-pad">
-      {view !== "stocks" && view !== "correlations" && (
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && (
         <NewsAlertBar
           warnings={newsWarnings}
           thresholdMin={NEWS_ALERT_THRESHOLD_MIN}
@@ -1865,9 +1906,13 @@ export default function Home() {
         />
       )}
 
-      {view !== "stocks" && view !== "correlations" && <SessionsTimeline />}
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && <NYPreOpenBanner />}
 
-      {view !== "stocks" && view !== "correlations" && newsWarnings.length > 0 && (
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && <SessionsPanel />}
+
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && <SessionsTimeline />}
+
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && newsWarnings.length > 0 && (
         <div className="news-banner">
           {newsWarnings.map((w, i) => (
             <NewsBannerItem key={`${w.date_utc}-${i}`} warning={w} />
@@ -1877,8 +1922,6 @@ export default function Home() {
 
       {view === "zones" ? (
         <ZoneAnalysisView />
-      ) : view === "radar" ? (
-        <RadarView />
       ) : view === "stocks" ? (
         <StocksView
           activeSymbol={activeStockSymbol}
@@ -1886,6 +1929,8 @@ export default function Home() {
         />
       ) : view === "correlations" ? (
         <CorrelationsView />
+      ) : view === "playbook" ? (
+        <PlaybookView />
       ) : (
       <>
       {stats && (
@@ -2144,6 +2189,10 @@ export default function Home() {
           onClose={() => setNewsAlertEvent(null)}
         />
       )}
+
+      {nyPreopenModalOpen && (
+        <NYPreOpenModal onClose={() => setNyPreopenModalOpen(false)} />
+      )}
         </div>
       }
     />
@@ -2342,6 +2391,103 @@ function NewsAlertModal({
           )}
         </div>
         <div className="news-alert-modal-foot">
+          <button
+            className="modal-btn modal-btn-danger"
+            onClick={onClose}
+            autoFocus
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NYPreOpenBanner() {
+  const now = useClockTick(1000);
+  if (!now) return null;
+  const ny = SESSIONS.find(s => s.abbr === "NYC");
+  if (!ny) return null;
+  if (isSessionOpen(now, ny)) return null;
+  const { minutes } = sessionCountdown(now, ny);
+  if (minutes > NY_PREOPEN_ALERT_MIN || minutes <= 0) return null;
+
+  const totalSec = Math.max(0, Math.floor(minutes * 60));
+  const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const ss = String(totalSec % 60).padStart(2, "0");
+  const isImminent = minutes <= 5;
+  const madridTime = formatTime(now, "Europe/Madrid");
+
+  return (
+    <div
+      className={`ny-preopen-banner ${isImminent ? "is-imminent" : ""}`}
+      role="alert"
+      aria-live="polite"
+    >
+      <span className="ny-preopen-pulse" aria-hidden="true" />
+      <span className="ny-preopen-icon" aria-hidden="true">🗽</span>
+      <span className="ny-preopen-tag">PRE-OPEN NY</span>
+      <span className="ny-preopen-title">
+        Sesión de New York abre en menos de {NY_PREOPEN_ALERT_MIN} min
+      </span>
+      <span className="ny-preopen-madrid">Madrid <span className="num">{madridTime}</span></span>
+      <span className="ny-preopen-countdown num">{mm}:{ss}</span>
+    </div>
+  );
+}
+
+function NYPreOpenModal({ onClose }: { onClose: () => void }) {
+  const tick = useClockTick(1000);
+  const now = tick ?? new Date();
+  const ny = SESSIONS.find(s => s.abbr === "NYC")!;
+  const { minutes } = sessionCountdown(now, ny);
+  const totalSec = Math.max(0, Math.floor(minutes * 60));
+  const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const ss = String(totalSec % 60).padStart(2, "0");
+  const madridTime = formatTime(now, "Europe/Madrid");
+  const nyTime = formatTime(now, "America/New_York");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal modal-ny-preopen"
+        onClick={(e) => e.stopPropagation()}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="ny-preopen-title"
+      >
+        <div className="ny-preopen-modal-icon" aria-hidden="true">🗽</div>
+        <div className="ny-preopen-modal-tag">PRE-OPEN NEW YORK</div>
+        <h3 id="ny-preopen-title" className="ny-preopen-modal-title">
+          Sesión NY abre en menos de {NY_PREOPEN_ALERT_MIN} minutos
+        </h3>
+        <div className="ny-preopen-modal-meta">
+          <span className="ny-preopen-modal-pill">
+            <span className="ny-preopen-modal-pill-label">MAD</span>
+            <span className="num">{madridTime}</span>
+          </span>
+          <span className="ny-preopen-modal-pill">
+            <span className="ny-preopen-modal-pill-label">NYC</span>
+            <span className="num">{nyTime}</span>
+          </span>
+        </div>
+        <div className="ny-preopen-modal-countdown">
+          <div className="num">{mm}:{ss}</div>
+          <div className="ny-preopen-modal-sub">para la apertura</div>
+        </div>
+        <div className="ny-preopen-modal-hint">
+          Revisá radar y zonas. El overlap LDN+NYC es la mejor ventana del día.
+        </div>
+        <div className="ny-preopen-modal-foot">
           <button
             className="modal-btn modal-btn-danger"
             onClick={onClose}

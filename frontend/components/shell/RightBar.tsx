@@ -26,7 +26,6 @@ type Props = {
   openCount: number;
   totalSignals: number;
   onPairClick?: (pair: string) => void;
-  onRadarOpen?: () => void;
   /** Solo aplica si context==="stocks". */
   stocksActiveSymbol?: string | null;
   onStocksSelect?: (symbol: string) => void;
@@ -66,7 +65,6 @@ export function RightBar({
   openCount,
   totalSignals,
   onPairClick,
-  onRadarOpen,
   stocksActiveSymbol,
   onStocksSelect,
 }: Props) {
@@ -133,13 +131,6 @@ export function RightBar({
             </button>
           ))}
         </div>
-        <button
-          className="next-setup-cta"
-          onClick={onRadarOpen}
-          aria-label="Abrir radar de setups"
-        >
-          Abrir radar →
-        </button>
       </div>
 
       <div className="panel">

@@ -6,9 +6,10 @@ Contexto operativo del proyecto para futuras sesiones de Claude Code.
 
 **AI Trading Assistant**: motor de decisión contextual sobre señales de TradingView para scalp intradía (0–15 min) en EURUSD (XAUUSD removido del scanner por límite de 8 req/min en Twelve Data free tier — el script Pine de oro permanece pero no se consulta su OHLC). **No genera señales** — recibe las del Pine del usuario y decide **ENTER / WAIT / AVOID** según calidad, contexto y timing. Cuando una señal está fuerte pero el precio está extendido, degrada a WAIT y emite plan operativo (zona de espera, trigger, invalidación, instrucciones) para evitar entradas tardías.
 
-**Dos capas de análisis independientes complementan al Pine**:
+**Capas independientes que complementan al Pine**:
 - **Scanner en vivo** ("Análisis de zonas"): sesgo macro multi-factor (EMA9/21/50/200, RSI, rango, impulso) sobre ~11 pares. 3 bloques (trend / sin edge / reversión).
-- **Radar de setups** ("Radar"): puntos concretos de entrada (pin bar / envolvente sobre soporte/resistencia + divergencia RSI). 4 bloques (B1 compra válida, B2 trampa long, B3 venta válida, B4 trampa short). Cross-check con scanner — si conflicto se marca **NO CUMPLE MTF LOCK** (no reclasifica). Encima de la grilla, **semáforo consolidado** OPERAR/ESPERAR/EVITAR evalúa 5 filtros A+: kill zone, MTF LOCK, fuerza STRONG, RRR≥2:1, SL dentro del cap.
+- **Radar de setups** (UI oculta): puntos concretos de entrada (pin bar / envolvente sobre soporte/resistencia + divergencia RSI). Tab eliminada del Topbar; código backend + `/api/radar` siguen disponibles. Detalle del motor más abajo.
+- **Playbook** (estático): hoja de reglas operativas AUDUSD (09–14h Madrid) + USDCAD (14–21h Madrid). Quick cards con stats históricos, timeline visual 09–21h, detalle franja por franja, resumen por par, reglas globales. No consume APIs.
 
 ## Stack
 
@@ -33,8 +34,8 @@ TradingView (Pine) ─alert()→ Render ─POST→ FastAPI ─→ Supabase
                                                               via _ohlc_cache compartido (TTL 15min)
 Frontend Next.js (local) ←─polling── Render
    ├── dashboard: 5s   (/signals, /stats, /news/warnings)
-   ├── scanner:  5min  (/scanner/pairs)  — pausa si market_closed
-   └── radar:    5min  (/api/radar)      — pausa si market_closed
+   └── scanner:  5min  (/scanner/pairs)  — pausa si market_closed
+   (playbook estático · radar backend-only sin polling desde la UI)
 ```
 
 **Cache OHLC compartido**: scanner y radar llaman `scanner._fetch_chart()`. Misma key `f"{pair}:15min:200"` en `_ohlc_cache`. Una fetch por par cada 15min independiente de cuántas vistas la consulten.
@@ -53,15 +54,16 @@ backend/app/
   scanner.py          # Scanner Twelve Data 15m + _ohlc_cache
   radar.py            # Setups (pin bar/envolv + divergencia + SL cap) + cross-check
   stocks_client.py    # Twelve Data stocks + indicadores Python (SMA/EMA/RSI/MACD/BBANDS/ADX)
+  correlations.py     # Mapa estático 6 pares + system prompt + query() OpenRouter
   storage.py          # Dual-mode PG/SQLite. Tablas: signals + investor_profile + stocks_watchlist
 backend/tests/test_radar.py  # 49 tests del radar
 backend/{requirements.txt, render.yaml, supabase_init.sql, .env.example}
 
 frontend/
   app/{page.tsx, radarChart.ts, layout.tsx (next/font: Space Grotesk + Mono), globals.css}
-  components/{shell/, dashboard/, icons/, stocks/{onboarding/, dashboard/, ...}}
+  components/{shell/, dashboard/, icons/, stocks/{onboarding/, dashboard/, ...}, correlations/, playbook/}
   hooks/{useTick, useFavoritePairs, stocks/{useInvestorProfile, useStockSignal, useStocksWatchlist}}
-  lib/{api, types, sessions, killZones, format, dates, zones, symbols, blockLegend, config,
+  lib/{api, types, sessions, killZones, format, dates, zones, symbols, blockLegend, config, correlations,
        radar/{labels, blocks, aplus},
        stocks/{types, signalEngine(.test), twelvedata, profileStorage, watchlistStorage, marketHours}}
   .env.local          # NEXT_PUBLIC_API_URL → Render
@@ -138,6 +140,8 @@ Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros es
 | GET | `/stocks/indicators?symbol=&interval=` | **2 créditos TD**. IndicatorBundle. Intervalos: 15min/1h/4h/1day |
 | GET/POST/DELETE | `/stocks/profile` | Singleton id=1. POST validado |
 | GET/POST/DELETE/PATCH | `/stocks/watchlist[/{symbol}]` | POST idempotente. PATCH para `{lastDecision?, lastConfidence?}` |
+| GET | `/correlations` | Matriz estática 6×6. No consume TD ni AI |
+| POST | `/correlations/query` | Body `{question}` → OpenRouter haiku. 503 si falta key, 502 si OR falla |
 
 `?ai=1` activa OpenRouter; el motor heurístico siempre corre primero, fallback a heurística si la IA falla.
 
@@ -173,7 +177,8 @@ CRUD en `storage.py`: `get/save/clear_investor_profile`, `get/add/remove/update_
 ```bash
 DATABASE_URL=postgresql://postgres.XXX:PASS@aws-1-us-east-2.pooler.supabase.com:6543/postgres  # vacío = SQLite
 OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=anthropic/claude-sonnet-4
+OPENROUTER_MODEL=anthropic/claude-sonnet-4                # forex decision_engine
+OPENROUTER_MODEL_CORRELATIONS=anthropic/claude-haiku-4.5  # cheap, deterministic
 OPENROUTER_REFERER=http://localhost
 USE_AI=0
 NEWS_FILTER_ENABLED=1
@@ -357,7 +362,7 @@ Tabla señales: badge `EJEC` (verde) o `CAL` (azul) junto al resultado.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│ Topbar  Brand  [Dashboard|Zonas|Radar|Stocks] [⟳ ☼ ⚙]
+│ Topbar  Brand  [Dashboard|Zonas|Stocks|Correlaciones|Playbook] [⟳ ☼ ⚙]
 ├─────────┬──────────────────────────┬─────────────┤
 │ Sidebar │ Main                     │ RightBar    │
 │ 232px   │ flexible                 │ 320px       │
@@ -365,13 +370,15 @@ Tabla señales: badge `EJEC` (verde) o `CAL` (azul) junto al resultado.
 ```
 
 - **`AppShell`**: grid CSS `grid-template-areas`. `body[data-shell="active"]` → `overflow:hidden; height:100vh`, scroll por columna. Responsive: <1024 oculta rightbar, <768 oculta sidebar.
-- **`Topbar`**: brand + tabs + spacer + session pill + iconos. Shortcuts D/Z/R/S (ignora si foco en input). Pill usa `useTick(60_000)`.
-- **`Sidebar` (context-aware)**: prop `context: 'forex'|'stocks'`.
+- **`Topbar`**: brand + tabs + spacer + session pill + iconos. Shortcuts D/Z/S/C/P (ignora si foco en input). Pill usa `useTick(60_000)`. La tab `Radar de setups` (atajo R, botón "Abrir radar" del RightBar) fue removida del UI; `RadarView` queda como función inline en `page.tsx` (código muerto pero compilable).
+- **`Sidebar` (context-aware)**: prop `context: 'forex'|'stocks'`. Las vistas `correlations` y `playbook` también usan `forex`.
   - forex: search + lista de pares (favoritos en `useFavoritePairs`) + calendario mini-list.
   - stocks: `StocksSidebarSection` (search ticker + watchlist con pills BUY/SELL/HOLD).
 - **`RightBar` (context-aware)**:
   - forex: Next A+ Setup (countdown overlap LDN-NY) + Active Signals + Próxima ventana (Madrid) + disclaimer.
   - stocks: `MarketHoursCard` (NYSE pre/regular/post/closed + countdown ET) + `StocksActiveSignalsPanel` (top 5 BUY/SELL conf ≥40%) + disclaimer.
+
+**Banners forex ocultos** (NewsAlertBar, NYPreOpenBanner, SessionsPanel, SessionsTimeline, news-banner) en `view === "stocks" | "correlations" | "playbook"`. Solo Dashboard y Zonas los muestran.
 
 ### Dashboard view
 
@@ -487,6 +494,58 @@ Intervalo recomendado: day=15min, swing=4h, long_term=1day.
 - **Errores tipados**: `StocksApiError.code = NOT_FOUND|RATE_LIMIT|NETWORK|INVALID|UPSTREAM`. SignalCard traduce. Retry exponencial 1s/2s/4s en 429.
 - **Race en mutaciones rápidas**: 2-3 tickers seguidos puede causar parpadeo ~50-100ms. Self-correcting.
 - **`clearWatchlist()` solo limpia cache local** — backend no tiene clear-all.
+
+## Correlaciones FX
+
+Quinta pestaña (atajo `C`). Mapa fijo de correlaciones entre los 6 pares operables + chat asistente para preguntas en lenguaje natural. No consume Twelve Data.
+
+### Datos
+
+15 cruces estáticos (≈ media histórica M15-H1) hardcoded en backend (`correlations.py`) y frontend (`lib/correlations.ts`). **Mantener ambos sincronizados**: si cambias un valor, edita los dos archivos.
+
+```
+EURUSD ↔ USDCHF: -0.95   (espejo perfecto)
+EURUSD ↔ GBPUSD: +0.85
+GBPUSD ↔ USDCHF: -0.75
+EURUSD ↔ AUDUSD: +0.65
+AUDUSD ↔ USDCHF: -0.65
+EURUSD ↔ USDJPY/USDCAD: -0.60
+GBPUSD ↔ AUDUSD: +0.60
+USDCHF ↔ USDJPY: +0.60
+GBPUSD ↔ USDJPY: -0.55
+USDCHF ↔ USDCAD: +0.55
+AUDUSD ↔ USDCAD: -0.55
+GBPUSD ↔ USDCAD: -0.50
+USDJPY ↔ USDCAD: +0.50
+USDJPY ↔ AUDUSD: -0.50
+```
+
+### Tiers (`getTier`)
+
+| Tier | Umbral `\|v\|` | Emoji | Uso |
+|---|---|---|---|
+| extreme | ≥ 0.85 | 🔴 | mismo trade duplicado |
+| high | ≥ 0.70 | 🟠 | riesgo elevado |
+| moderate | ≥ 0.50 | 🟡 | vigilar |
+| low | < 0.50 | ⚪ | independientes |
+
+### Frontend (`components/correlations/CorrelationsView.tsx`)
+
+- Matriz 6×6 color-coded por tier. Diagonal en blanco. Click en celda abre detalle (par, valor, tipo, interpretación). Click en row-header cambia el par activo de la lista lateral.
+- Lista per-pair: ordenada por `|correlación|` desc, click → abre detalle.
+- Chat box: textarea + Enter para enviar, Shift+Enter newline. Quick prompts en chips. Render del answer en `<pre>` mono respetando los `═══`.
+- Sin polling, sin sidebar especial — usa context `forex` (lista de pares + calendario).
+
+### Endpoint AI (`/correlations/query`)
+
+Body `{question: str}`. System prompt con el rol del Correlation Checker (formatos `═══`, regla "solo correlaciones, sin opiniones de mercado", redirige preguntas fuera de scope). Errores: 400 (falta `question`), 503 (sin `OPENROUTER_API_KEY`), 502 (OpenRouter falla).
+
+**Modelo separado del motor forex**: `OPENROUTER_MODEL_CORRELATIONS` (default `claude-haiku-4.5`) → ~4× más barato que sonnet-4 que usa `ai_client.py`. Si la env var no está, cae a `OPENROUTER_MODEL`.
+
+### Gotchas
+
+- **Headers ASCII-only**: urllib codifica headers en latin-1. El header `X-Title` no puede llevar em-dash (`—`) ni acentos — usar guión normal.
+- **`os.getenv` evaluado al import**: cambiar la env var en runtime no refresca el modelo. Reinicia el proceso.
 
 ## Polling y créditos Twelve Data
 

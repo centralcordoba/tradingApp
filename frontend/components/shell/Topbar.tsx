@@ -23,9 +23,9 @@ type TopbarProps = {
 const TABS: { id: View; label: string; key: string }[] = [
   { id: "dashboard",    label: "Dashboard",         key: "D" },
   { id: "zones",        label: "Análisis de zonas", key: "Z" },
-  { id: "radar",        label: "Radar de setups",   key: "R" },
   { id: "stocks",       label: "Stocks",            key: "S" },
   { id: "correlations", label: "Correlaciones",     key: "C" },
+  { id: "playbook",     label: "Playbook",          key: "P" },
 ];
 
 export function Topbar({
@@ -48,9 +48,9 @@ export function Topbar({
       const k = e.key.toLowerCase();
       if (k === "d") { e.preventDefault(); onViewChange("dashboard"); }
       else if (k === "z") { e.preventDefault(); onViewChange("zones"); }
-      else if (k === "r") { e.preventDefault(); onViewChange("radar"); }
       else if (k === "s") { e.preventDefault(); onViewChange("stocks"); }
       else if (k === "c") { e.preventDefault(); onViewChange("correlations"); }
+      else if (k === "p") { e.preventDefault(); onViewChange("playbook"); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
