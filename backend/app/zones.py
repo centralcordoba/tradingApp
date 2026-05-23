@@ -2,8 +2,9 @@
 
 Tercera capa de análisis (independiente del scanner y del radar). Lee las 200
 velas M15 ya cacheadas por scanner._fetch_chart, las resamplea a M30 para
-calcular el bias direccional (EMA50 vs EMA200) y detecta niveles de
-soporte/resistencia por pivots + clustering aglomerativo single-linkage.
+calcular el bias direccional (EMA50 vs EMA100 — 100 es la EMA larga máxima
+viable con 200 velas M15 ≈ 100 velas M30) y detecta niveles de soporte/
+resistencia por pivots + clustering aglomerativo single-linkage.
 
 Cada nivel se etiqueta con:
 - precio, tipo (soporte/resistencia relativo al precio actual)
@@ -28,7 +29,7 @@ from . import scanner
 from .constants import (
     CACHE_TTL_OHLC_SCANNER,
     EMA_PERIOD_50,
-    EMA_PERIOD_200,
+    EMA_PERIOD_100,
     PIP_SIZES,
     ZONES_PIVOT_WINDOW,
     ZONES_MERGE_DISTANCE_PIPS,
@@ -127,25 +128,47 @@ def _ema_last(values: np.ndarray, period: int) -> Optional[float]:
 
 
 def _compute_m30_bias(m30: pd.DataFrame) -> dict:
-    """Bias direccional M30: EMA50 > EMA200 → BULL; EMA50 < EMA200 → BEAR.
+    """Bias direccional M30: EMA50 vs EMA100 sobre velas resampleadas.
 
-    Si no hay 200 velas M30 (200 velas M15 ≈ 100 M30), se devuelve NEUTRAL
-    con available=False para que el frontend lo muestre como datos insuficientes.
+    200 velas M15 ≈ 100 velas M30, así que la EMA larga máxima viable sin
+    pedir más datos a Twelve Data es EMA100 (~50h de contexto en M30 = 2
+    días, suficiente para sesgo de scalp).
+
+    Devuelve siempre el dict completo; si no se puede calcular, `available`
+    queda en False y `reason` indica el motivo exacto para que el badge del
+    frontend no se quede en un "n/d" mudo.
     """
-    out = {"label": "NEUTRAL", "ema50": None, "ema200": None, "available": False}
-    if m30 is None or len(m30) < EMA_PERIOD_200:
+    out: dict = {
+        "label": "NEUTRAL",
+        "ema50": None,
+        "ema100": None,
+        "available": False,
+        "reason": None,
+        "m30_bars": 0,
+        "m30_bars_required": EMA_PERIOD_100,
+    }
+    if m30 is None:
+        out["reason"] = "no_ohlc"
+        return out
+    out["m30_bars"] = int(len(m30))
+    if len(m30) < EMA_PERIOD_100:
+        out["reason"] = "insufficient_m30_bars"
         return out
     closes = m30["close"].to_numpy(dtype=float)
     ema50 = _ema_last(closes, EMA_PERIOD_50)
-    ema200 = _ema_last(closes, EMA_PERIOD_200)
-    if ema50 is None or ema200 is None:
+    ema100 = _ema_last(closes, EMA_PERIOD_100)
+    if ema50 is None or ema100 is None:
+        out["reason"] = "ema_failed"
         return out
-    label = "BULL" if ema50 > ema200 else ("BEAR" if ema50 < ema200 else "NEUTRAL")
+    label = "BULL" if ema50 > ema100 else ("BEAR" if ema50 < ema100 else "NEUTRAL")
     return {
         "label": label,
         "ema50": round(ema50, 5),
-        "ema200": round(ema200, 5),
+        "ema100": round(ema100, 5),
         "available": True,
+        "reason": None,
+        "m30_bars": int(len(m30)),
+        "m30_bars_required": EMA_PERIOD_100,
     }
 
 

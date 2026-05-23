@@ -12,8 +12,11 @@ export type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" |
 export type ZoneBiasM30 = {
   label: "BULL" | "BEAR" | "NEUTRAL";
   ema50: number | null;
-  ema200: number | null;
+  ema100: number | null;
   available: boolean;
+  reason: "no_ohlc" | "insufficient_m30_bars" | "ema_failed" | null;
+  m30_bars: number;
+  m30_bars_required: number;
 };
 
 export type ZoneLevel = {

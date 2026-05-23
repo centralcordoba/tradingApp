@@ -76,16 +76,32 @@ function Stars({ score }: { score: number }) {
 
 function BiasChip({ bias }: { bias: ZonesPairResponse["bias_m30"] }) {
   if (!bias.available) {
-    return <span className="zsr-bias zsr-bias-na" title="Datos M30 insuficientes">Bias M30 · n/d</span>;
+    const detail =
+      bias.reason === "insufficient_m30_bars"
+        ? `velas M30 insuficientes · ${bias.m30_bars}/${bias.m30_bars_required}`
+        : bias.reason === "no_ohlc"
+        ? "sin datos OHLC"
+        : bias.reason === "ema_failed"
+        ? "cálculo EMA falló"
+        : "no disponible";
+    const tooltip =
+      bias.reason === "insufficient_m30_bars"
+        ? `Hacen falta ${bias.m30_bars_required} velas M30, hay ${bias.m30_bars}`
+        : detail;
+    return (
+      <span className="zsr-bias zsr-bias-na" title={tooltip}>
+        Bias M30 · {detail}
+      </span>
+    );
   }
   const cls =
     bias.label === "BULL" ? "zsr-bias-bull" :
     bias.label === "BEAR" ? "zsr-bias-bear" :
     "zsr-bias-neutral";
   const txt =
-    bias.label === "BULL" ? "EMA50 sobre EMA200" :
-    bias.label === "BEAR" ? "EMA50 bajo EMA200" :
-    "EMA50 ≈ EMA200";
+    bias.label === "BULL" ? "EMA50 sobre EMA100" :
+    bias.label === "BEAR" ? "EMA50 bajo EMA100" :
+    "EMA50 ≈ EMA100";
   return (
     <span className={`zsr-bias ${cls}`} title={txt}>
       Bias M30 · {bias.label}
@@ -111,31 +127,55 @@ function LevelRow({ level, price }: { level: ZoneLevel; price: number }) {
   const incoherent = level.within_range && !level.coherent_with_bias;
 
   return (
-    <div className={`zsr-level ${level.active ? "zsr-level-active" : ""}`}>
-      <div className="zsr-level-type" data-type={level.type}>
-        <span className="zsr-level-arrow">{arrow}</span>
-        <span className="zsr-level-type-label">{typeLabel}</span>
-      </div>
-      <div className="zsr-level-price num">{level.price.toFixed(5)}</div>
-      <div className="zsr-level-strength">
-        <Stars score={level.strength} />
-        <span className="zsr-level-touches num" title={`${level.touches} toques registrados`}>
-          {level.touches}×
-        </span>
-      </div>
-      <div className="zsr-level-distance">
-        <span className="num">{level.distance_pips.toFixed(1)}</span>
-        <span className="zsr-level-distance-unit">pips {side}</span>
-      </div>
-      <div className={`zsr-level-state ${stateClass}`}>
-        {stateLabel}
-        {incoherent && (
-          <span className="zsr-level-flag" title="Nivel cercano, pero no coherente con el bias M30">
-            ⚠ contra bias
+    <article
+      className={`zsr-level ${level.active ? "zsr-level-active" : ""}`}
+      data-type={level.type}
+    >
+      <div className="zsr-level-bar" aria-hidden="true" />
+
+      <div className="zsr-level-body">
+        <div className="zsr-level-row-top">
+          <div className="zsr-level-type">
+            <span className="zsr-level-arrow" aria-hidden="true">{arrow}</span>
+            <span className="zsr-level-type-label">{typeLabel}</span>
+          </div>
+          <span className={`zsr-level-state ${stateClass}`}>
+            {stateLabel}
           </span>
-        )}
+        </div>
+
+        <div className="zsr-level-price num" title={`Precio del nivel: ${level.price.toFixed(5)}`}>
+          {level.price.toFixed(5)}
+        </div>
+
+        <div className="zsr-level-meta">
+          <span className="zsr-level-meta-item zsr-level-meta-strength">
+            <Stars score={level.strength} />
+          </span>
+          <span className="zsr-level-meta-sep" aria-hidden="true">·</span>
+          <span className="zsr-level-meta-item">
+            <span className="num">{level.touches}</span>
+            <span className="zsr-level-meta-label">{level.touches === 1 ? "toque" : "toques"}</span>
+          </span>
+          <span className="zsr-level-meta-sep" aria-hidden="true">·</span>
+          <span className="zsr-level-meta-item zsr-level-meta-distance">
+            <span className="num">{level.distance_pips.toFixed(1)}</span>
+            <span className="zsr-level-meta-label">pips {side}</span>
+          </span>
+          {incoherent && (
+            <>
+              <span className="zsr-level-meta-sep" aria-hidden="true">·</span>
+              <span
+                className="zsr-level-flag"
+                title="Nivel cercano, pero no coherente con el bias M30"
+              >
+                ⚠ contra bias
+              </span>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </article>
   );
 }
 

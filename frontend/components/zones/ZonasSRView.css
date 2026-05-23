@@ -337,134 +337,222 @@
 /* ── Level row ────────────────────────────────────────── */
 
 .zsr-level {
-  display: grid;
-  grid-template-columns: 110px 1fr 110px 100px 100px;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.25);
+  position: relative;
+  display: flex;
+  gap: 14px;
+  padding: 16px 18px 16px 0;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.3);
   border: 1px solid transparent;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.18s, border-color 0.18s, transform 0.18s;
+  overflow: hidden;
 }
 
 .zsr-level:hover {
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(15, 23, 42, 0.55);
+  transform: translateX(2px);
+}
+
+/* Border-left de color grueso para identificación visual inmediata */
+.zsr-level-bar {
+  width: 5px;
+  flex-shrink: 0;
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.zsr-level[data-type="support"] .zsr-level-bar {
+  background: var(--buy, #22c55e);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.35);
+}
+
+.zsr-level[data-type="resistance"] .zsr-level-bar {
+  background: var(--sell, #ef4444);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
 }
 
 .zsr-level-active {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.08);
 }
 
 .zsr-level-active:hover {
-  background: rgba(245, 158, 11, 0.1);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.zsr-level-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Row 1: tipo + estado */
+.zsr-level-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .zsr-level-type {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.zsr-level-type[data-type="support"] {
+.zsr-level[data-type="support"] .zsr-level-type {
   color: var(--buy, #22c55e);
 }
 
-.zsr-level-type[data-type="resistance"] {
+.zsr-level[data-type="resistance"] .zsr-level-type {
   color: var(--sell, #ef4444);
 }
 
 .zsr-level-arrow {
-  font-size: 10px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: currentColor;
+  color: var(--bg, #0b0d12);
 }
 
+.zsr-level[data-type="support"] .zsr-level-arrow {
+  background: var(--buy, #22c55e);
+}
+
+.zsr-level[data-type="resistance"] .zsr-level-arrow {
+  background: var(--sell, #ef4444);
+}
+
+/* Precio: hero number */
 .zsr-level-price {
   font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   font-feature-settings: "tnum";
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--text);
 }
 
-.zsr-level-strength {
+.zsr-level-active .zsr-level-price {
+  color: var(--accent, #f59e0b);
+}
+
+/* Meta row: estrellas + toques + distancia */
+.zsr-level-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 10px;
+  font-size: 14px;
+  flex-wrap: wrap;
 }
 
-.zsr-stars {
-  letter-spacing: 1px;
+.zsr-level-meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.zsr-level-meta-item .num {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.zsr-level-meta-label {
   font-size: 12px;
+  color: var(--text-muted);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.zsr-level-meta-strength {
+  margin-right: -2px;
+}
+
+.zsr-level-meta-distance .num {
+  color: var(--accent, #f59e0b);
+}
+
+.zsr-level-active .zsr-level-meta-distance .num {
+  color: var(--accent, #f59e0b);
+}
+
+.zsr-level-meta-sep {
+  color: rgba(148, 163, 184, 0.4);
+  font-size: 14px;
+  user-select: none;
+}
+
+/* Estrellas — más grandes y con espaciado generoso */
+.zsr-stars {
+  letter-spacing: 2px;
+  font-size: 17px;
+  line-height: 1;
+  display: inline-flex;
 }
 
 .zsr-star-on {
   color: var(--accent, #f59e0b);
+  text-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
 }
 
 .zsr-star-off {
-  color: rgba(148, 163, 184, 0.25);
+  color: rgba(148, 163, 184, 0.22);
 }
 
-.zsr-level-touches {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-feature-settings: "tnum";
-}
-
-.zsr-level-distance {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  font-size: 13px;
-  line-height: 1.1;
-}
-
-.zsr-level-distance .num {
-  font-family: var(--font-mono);
-  font-feature-settings: "tnum";
-  font-weight: 600;
-}
-
-.zsr-level-distance-unit {
-  font-size: 10px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
+/* Estado: pill bien visible */
 .zsr-level-state {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  text-transform: uppercase;
 }
 
 .zsr-state-active {
   color: var(--accent, #f59e0b);
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.45);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.15) inset;
 }
 
 .zsr-state-range {
   color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.25);
 }
 
 .zsr-state-far {
-  color: rgba(148, 163, 184, 0.5);
+  color: rgba(148, 163, 184, 0.7);
+  background: rgba(148, 163, 184, 0.05);
+  border-color: rgba(148, 163, 184, 0.15);
 }
 
 .zsr-level-flag {
-  font-size: 9px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--warn, #fb923c);
-  text-transform: none;
-  letter-spacing: 0;
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
 /* ── Empty states ─────────────────────────────────────── */
@@ -555,22 +643,21 @@
     font-size: 24px;
   }
   .zsr-level {
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "type price"
-      "strength state"
-      "distance distance";
-    gap: 6px 12px;
+    padding: 14px 14px 14px 0;
+    gap: 12px;
   }
-  .zsr-level-type { grid-area: type; }
-  .zsr-level-price { grid-area: price; text-align: right; }
-  .zsr-level-strength { grid-area: strength; }
-  .zsr-level-state { grid-area: state; text-align: right; }
-  .zsr-level-distance {
-    grid-area: distance;
-    flex-direction: row;
-    justify-content: flex-end;
-    align-items: baseline;
-    gap: 4px;
+  .zsr-level-price {
+    font-size: 24px;
+  }
+  .zsr-level-meta {
+    gap: 8px;
+    font-size: 13px;
+  }
+  .zsr-level-meta-item .num {
+    font-size: 14px;
+  }
+  .zsr-stars {
+    font-size: 15px;
+    letter-spacing: 1.5px;
   }
 }
