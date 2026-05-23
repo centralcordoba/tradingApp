@@ -248,6 +248,81 @@
   opacity: 0.55;
 }
 
+.zsr-bias-rango {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--accent, #f59e0b);
+  border-style: dashed;
+}
+
+/* ── Banner card-level cuando bias = RANGO ─────────────── */
+
+.zsr-rango-banner {
+  background: linear-gradient(
+    90deg,
+    rgba(245, 158, 11, 0.08) 0%,
+    rgba(148, 163, 184, 0.05) 100%
+  );
+  border: 1px dashed rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zsr-rango-banner-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent, #f59e0b);
+}
+
+.zsr-rango-banner-body {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.zsr-rango-banner-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+  padding-top: 4px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+}
+
+/* ── Slider del param RANGO ────────────────────────────── */
+
+.zsr-param-wide {
+  grid-column: 1 / -1;
+}
+
+.zsr-param-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.zsr-param-slider-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-3, rgba(148, 163, 184, 0.2));
+  border: none;
+  padding: 0;
+  border-radius: 999px;
+  accent-color: var(--accent, #f59e0b);
+  cursor: pointer;
+}
+
+.zsr-param-slider-num {
+  width: 80px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
 /* ── Closed banner ────────────────────────────────────── */
 
 .zsr-closed-banner {

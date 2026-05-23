@@ -15,6 +15,7 @@ type Params = {
   min_bars_between: number;
   touch_tolerance_pips: number;
   level_selector: "median" | "mean";
+  rango_atr_mult: number;
 };
 
 const DEFAULT_PARAMS: Params = {
@@ -24,6 +25,7 @@ const DEFAULT_PARAMS: Params = {
   min_bars_between: 3,
   touch_tolerance_pips: 3,
   level_selector: "median",
+  rango_atr_mult: 0.3,
 };
 
 const PARAMS_STORAGE_KEY = "tradingapp:zones_params";
@@ -49,6 +51,7 @@ function buildQuery(params: Params): string {
     min_bars_between: String(params.min_bars_between),
     touch_tolerance_pips: String(params.touch_tolerance_pips),
     level_selector: params.level_selector,
+    rango_atr_mult: String(params.rango_atr_mult),
   });
   return u.toString();
 }
@@ -83,6 +86,8 @@ function BiasChip({ bias }: { bias: ZonesPairResponse["bias_m30"] }) {
         ? "sin datos OHLC"
         : bias.reason === "ema_failed"
         ? "cálculo EMA falló"
+        : bias.reason === "atr_failed"
+        ? "cálculo ATR falló"
         : "no disponible";
     const tooltip =
       bias.reason === "insufficient_m30_bars"
@@ -97,15 +102,50 @@ function BiasChip({ bias }: { bias: ZonesPairResponse["bias_m30"] }) {
   const cls =
     bias.label === "BULL" ? "zsr-bias-bull" :
     bias.label === "BEAR" ? "zsr-bias-bear" :
+    bias.label === "RANGO" ? "zsr-bias-rango" :
     "zsr-bias-neutral";
+
+  // Diagnóstico técnico para el tooltip — ayuda a calibrar el multiplicador.
+  const ratio =
+    bias.separation != null && bias.atr_m30 != null && bias.atr_m30 > 0
+      ? bias.separation / bias.atr_m30
+      : null;
+  const diag =
+    bias.separation_pips != null && bias.atr_pips != null
+      ? `separación ${bias.separation_pips}p · ATR ${bias.atr_pips}p` +
+        (ratio != null ? ` · ratio ${ratio.toFixed(2)} (umbral ${bias.atr_mult_threshold})` : "")
+      : "";
   const txt =
-    bias.label === "BULL" ? "EMA50 sobre EMA100" :
-    bias.label === "BEAR" ? "EMA50 bajo EMA100" :
-    "EMA50 ≈ EMA100";
+    bias.label === "BULL" ? `EMA50 sobre EMA100 — ${diag}` :
+    bias.label === "BEAR" ? `EMA50 bajo EMA100 — ${diag}` :
+    bias.label === "RANGO" ? `EMAs pegadas — sin tendencia direccional — ${diag}` :
+    `EMA50 ≈ EMA100 — ${diag}`;
   return (
     <span className={`zsr-bias ${cls}`} title={txt}>
       Bias M30 · {bias.label}
     </span>
+  );
+}
+
+function RangoBanner({ bias }: { bias: ZonesPairResponse["bias_m30"] }) {
+  if (!bias.available || bias.label !== "RANGO") return null;
+  const ratio =
+    bias.separation != null && bias.atr_m30 != null && bias.atr_m30 > 0
+      ? (bias.separation / bias.atr_m30).toFixed(2)
+      : null;
+  return (
+    <div className="zsr-rango-banner" role="status">
+      <div className="zsr-rango-banner-title">Sin sesgo direccional M30</div>
+      <div className="zsr-rango-banner-body">
+        EMAs comprimidas — operable a ambos lados con confirmación en M5. Soportes y
+        resistencias son válidos para fade desde extremos.
+      </div>
+      {ratio != null && (
+        <div className="zsr-rango-banner-meta num">
+          separación {bias.separation_pips}p / ATR {bias.atr_pips}p = {ratio} · umbral {bias.atr_mult_threshold}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -200,6 +240,8 @@ function PairCard({ data }: { data: ZonesPairResponse }) {
         </div>
         <BiasChip bias={data.bias_m30} />
       </header>
+
+      <RangoBanner bias={data.bias_m30} />
 
       {data.market_closed && (
         <div className="zsr-closed-banner">
@@ -362,6 +404,26 @@ function ParamsPanel({
               <option value="mean">Media</option>
             </select>
             <em></em>
+          </label>
+          <label className="zsr-param zsr-param-wide">
+            <span>Umbral RANGO (× ATR M30)</span>
+            <div className="zsr-param-slider-row">
+              <input
+                type="range" min={0.1} max={1.0} step={0.05}
+                value={params.rango_atr_mult}
+                onChange={e => update("rango_atr_mult", Number(e.target.value))}
+              />
+              <input
+                type="number" min={0.1} max={1.0} step={0.05}
+                value={params.rango_atr_mult}
+                onChange={e => {
+                  const v = Number(e.target.value);
+                  if (!Number.isNaN(v)) update("rango_atr_mult", Math.max(0.1, Math.min(1.0, v)));
+                }}
+                className="zsr-param-slider-num"
+              />
+            </div>
+            <em>separación EMA50/EMA100 menor a este múltiplo del ATR M30 → RANGO. Default 0.3.</em>
           </label>
           <button type="button" className="zsr-params-reset" onClick={onReset}>
             Restaurar valores por defecto

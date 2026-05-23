@@ -10,11 +10,16 @@ export type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" |
 // ─── Zonas S/R ──────────────────────────────────────────────────
 
 export type ZoneBiasM30 = {
-  label: "BULL" | "BEAR" | "NEUTRAL";
+  label: "BULL" | "BEAR" | "RANGO" | "NEUTRAL";
   ema50: number | null;
   ema100: number | null;
+  atr_m30: number | null;
+  separation: number | null;
+  atr_pips: number | null;
+  separation_pips: number | null;
+  atr_mult_threshold: number;
   available: boolean;
-  reason: "no_ohlc" | "insufficient_m30_bars" | "ema_failed" | null;
+  reason: "no_ohlc" | "insufficient_m30_bars" | "ema_failed" | "atr_failed" | null;
   m30_bars: number;
   m30_bars_required: number;
 };

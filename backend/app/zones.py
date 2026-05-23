@@ -27,10 +27,12 @@ import pandas as pd
 
 from . import scanner
 from .constants import (
+    ATR_PERIOD,
     CACHE_TTL_OHLC_SCANNER,
     EMA_PERIOD_50,
     EMA_PERIOD_100,
     PIP_SIZES,
+    ZONES_RANGO_ATR_MULT_DEFAULT,
     ZONES_PIVOT_WINDOW,
     ZONES_MERGE_DISTANCE_PIPS,
     ZONES_ACTIVE_RANGE_PIPS,
@@ -127,21 +129,57 @@ def _ema_last(values: np.ndarray, period: int) -> Optional[float]:
     return ema
 
 
-def _compute_m30_bias(m30: pd.DataFrame) -> dict:
-    """Bias direccional M30: EMA50 vs EMA100 sobre velas resampleadas.
+def _atr_m30(m30: pd.DataFrame, period: int = ATR_PERIOD) -> Optional[float]:
+    """ATR Wilder sobre las velas M30 ya resampleadas. None si no hay datos."""
+    if m30 is None or len(m30) < period + 1:
+        return None
+    highs = m30["high"].to_numpy(dtype=float)
+    lows = m30["low"].to_numpy(dtype=float)
+    closes = m30["close"].to_numpy(dtype=float)
+    trs: list[float] = []
+    for i in range(1, len(closes)):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        trs.append(tr)
+    if len(trs) < period:
+        return None
+    atr = sum(trs[:period]) / period
+    for tr in trs[period:]:
+        atr = (atr * (period - 1) + tr) / period
+    return float(atr)
+
+
+def _compute_m30_bias(
+    m30: pd.DataFrame,
+    pip: float,
+    atr_mult: float = ZONES_RANGO_ATR_MULT_DEFAULT,
+) -> dict:
+    """Bias direccional M30: EMA50 vs EMA100 con tercer estado RANGO.
 
     200 velas M15 ≈ 100 velas M30, así que la EMA larga máxima viable sin
-    pedir más datos a Twelve Data es EMA100 (~50h de contexto en M30 = 2
-    días, suficiente para sesgo de scalp).
+    pedir más datos a Twelve Data es EMA100 (~50h de contexto = 2 días).
 
-    Devuelve siempre el dict completo; si no se puede calcular, `available`
-    queda en False y `reason` indica el motivo exacto para que el badge del
-    frontend no se quede en un "n/d" mudo.
+    Estados:
+      - BULL: EMA50 > EMA100 Y separación ≥ atr_mult × ATR(M30)
+      - BEAR: EMA50 < EMA100 Y separación ≥ atr_mult × ATR(M30)
+      - RANGO: separación < atr_mult × ATR(M30) — sin sesgo direccional fiable
+
+    Devuelve siempre el dict completo. Si no se puede calcular, `available`
+    queda False y `reason` indica el motivo (no_ohlc, insufficient_m30_bars,
+    ema_failed, atr_failed).
     """
     out: dict = {
         "label": "NEUTRAL",
         "ema50": None,
         "ema100": None,
+        "atr_m30": None,
+        "separation": None,
+        "atr_pips": None,
+        "separation_pips": None,
+        "atr_mult_threshold": round(float(atr_mult), 3),
         "available": False,
         "reason": None,
         "m30_bars": 0,
@@ -160,11 +198,32 @@ def _compute_m30_bias(m30: pd.DataFrame) -> dict:
     if ema50 is None or ema100 is None:
         out["reason"] = "ema_failed"
         return out
-    label = "BULL" if ema50 > ema100 else ("BEAR" if ema50 < ema100 else "NEUTRAL")
+    atr = _atr_m30(m30, ATR_PERIOD)
+    if atr is None or atr <= 0:
+        out["reason"] = "atr_failed"
+        out["ema50"] = round(ema50, 5)
+        out["ema100"] = round(ema100, 5)
+        return out
+
+    separation = abs(ema50 - ema100)
+    threshold = atr_mult * atr
+
+    if separation < threshold:
+        label = "RANGO"
+    elif ema50 > ema100:
+        label = "BULL"
+    else:
+        label = "BEAR"
+
     return {
         "label": label,
         "ema50": round(ema50, 5),
         "ema100": round(ema100, 5),
+        "atr_m30": round(atr, 5),
+        "separation": round(separation, 5),
+        "atr_pips": round(atr / pip, 1),
+        "separation_pips": round(separation / pip, 1),
+        "atr_mult_threshold": round(float(atr_mult), 3),
         "available": True,
         "reason": None,
         "m30_bars": int(len(m30)),
@@ -321,6 +380,9 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
     selector = str(params.get("level_selector", ZONES_LEVEL_SELECTOR_DEFAULT))
     if selector not in ("median", "mean"):
         selector = "median"
+    rango_atr_mult = float(params.get("rango_atr_mult", ZONES_RANGO_ATR_MULT_DEFAULT))
+    # Sanea: el multiplicador tiene que ser positivo y dentro de un rango razonable.
+    rango_atr_mult = max(0.05, min(2.0, rango_atr_mult))
 
     raw = scanner._fetch_chart(pair)
     if raw is None:
@@ -340,7 +402,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
 
     # Bias M30 (resample de las propias M15)
     m30 = _resample_m15_to_m30(ohlc)
-    bias = _compute_m30_bias(m30)
+    bias = _compute_m30_bias(m30, pip, atr_mult=rango_atr_mult)
 
     # Pivots
     p_highs, p_lows = _detect_pivots(highs, lows, window)
@@ -370,10 +432,13 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
         distance_pips = round(abs(price - last_close) / pip, 1)
         within_range = distance_pips <= active_range_pips
 
-        # Coherencia con bias M30:
-        # BULL: priorizamos SOPORTES (zonas donde podría rebotar en favor del bias)
-        # BEAR: priorizamos RESISTENCIAS
-        # NEUTRAL/sin bias: cualquier tipo es coherente
+        # Coherencia con bias M30 (filtro híbrido):
+        # BULL → priorizamos SOPORTES (potencial rebote a favor del bias)
+        # BEAR → priorizamos RESISTENCIAS
+        # RANGO / NEUTRAL / sin bias → DESACTIVAMOS el filtro direccional:
+        #   en rango el scalper opera ambos lados (fade desde extremos), así que
+        #   todos los niveles cercanos pasan a ACTIVO. La UI muestra el banner
+        #   de "sin sesgo direccional" para que el trader cambie el modo mental.
         if bias["label"] == "BULL":
             coherent = (kind == "support")
         elif bias["label"] == "BEAR":

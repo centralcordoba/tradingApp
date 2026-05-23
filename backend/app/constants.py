@@ -195,6 +195,11 @@ ZONES_LEVEL_SELECTOR_DEFAULT = "median"
 # Pares por defecto del módulo de zonas (los que el usuario opera)
 ZONES_DEFAULT_PAIRS = ["AUDUSD", "USDCAD"]
 
+# Umbral RANGO: separación EMA50-EMA100 menor a (mult × ATR M30) → RANGO.
+# 0.3 = frontera empírica entre ruido lateral y tendencia incipiente (FX majores).
+# Rango razonable de configuración: 0.1 (muy estricto) – 1.0 (muy permisivo).
+ZONES_RANGO_ATR_MULT_DEFAULT = 0.3
+
 # ─────────────────────────────────────────────────────────────────────────────
 # News — ventanas de warning
 # ─────────────────────────────────────────────────────────────────────────────

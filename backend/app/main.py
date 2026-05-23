@@ -175,6 +175,7 @@ def zones_sr(
     min_bars_between: int | None = None,
     touch_tolerance_pips: float | None = None,
     level_selector: str | None = None,
+    rango_atr_mult: float | None = None,
 ):
     """Zonas S/R activas para scalp M5/M15 con bias M30 resampleado.
 
@@ -204,6 +205,8 @@ def zones_sr(
         params["touch_tolerance_pips"] = touch_tolerance_pips
     if level_selector is not None:
         params["level_selector"] = level_selector
+    if rango_atr_mult is not None:
+        params["rango_atr_mult"] = rango_atr_mult
     return zones.get_zones_response(selected, params)
 
 
