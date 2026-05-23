@@ -5,7 +5,57 @@
    eliminan.
    ────────────────────────────────────────────────────────────────── */
 
-export type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook";
+export type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook" | "sr";
+
+// ─── Zonas S/R ──────────────────────────────────────────────────
+
+export type ZoneBiasM30 = {
+  label: "BULL" | "BEAR" | "NEUTRAL";
+  ema50: number | null;
+  ema200: number | null;
+  available: boolean;
+};
+
+export type ZoneLevel = {
+  price: number;
+  type: "support" | "resistance";
+  strength: number;        // 1-5 ★
+  touches: number;
+  age_bars: number;
+  pivots_in_cluster: number;
+  distance_pips: number;
+  within_range: boolean;
+  coherent_with_bias: boolean;
+  active: boolean;
+};
+
+export type ZonesPairResponse = {
+  pair: string;
+  price: number;
+  pip_size: number;
+  bias_m30: ZoneBiasM30;
+  params: {
+    window: number;
+    merge_distance_pips: number;
+    active_range_pips: number;
+    min_bars_between: number;
+    touch_tolerance_pips: number;
+    level_selector: "median" | "mean";
+  };
+  levels: ZoneLevel[];
+  active_count: number;
+  n_bars: number;
+  last_candle_ts: string | null;
+  data_age_minutes: number | null;
+  market_closed: boolean;
+};
+
+export type ZonesResponse = {
+  timestamp: string;
+  items: ZonesPairResponse[];
+  count: number;
+  market_closed: boolean;
+};
 
 // ─── Signals & journal ──────────────────────────────────────────
 

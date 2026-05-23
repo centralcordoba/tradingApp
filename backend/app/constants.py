@@ -170,6 +170,31 @@ MIN_RANGE_PCT = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Zonas S/R — detector de niveles con bias M30 (zones.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Swing window: N velas a cada lado para considerar un pivot
+ZONES_PIVOT_WINDOW = 3
+
+# Distancia máxima entre pivots para fundirlos en un mismo nivel (pips)
+ZONES_MERGE_DISTANCE_PIPS = 8.0
+
+# Mínimo de velas entre pivots del mismo tipo (evita ruido en consolidación)
+ZONES_MIN_BARS_BETWEEN_PEAKS = 3
+
+# Rango activo: niveles dentro de X pips del precio actual son operables (scalp M5)
+ZONES_ACTIVE_RANGE_PIPS = 25.0
+
+# Tolerancia para contar un "toque" en un nivel (pips)
+ZONES_TOUCH_TOLERANCE_PIPS = 3.0
+
+# 'median' (Recommended): robusto a outliers · 'mean': promedio simple
+ZONES_LEVEL_SELECTOR_DEFAULT = "median"
+
+# Pares por defecto del módulo de zonas (los que el usuario opera)
+ZONES_DEFAULT_PAIRS = ["AUDUSD", "USDCAD"]
+
+# ─────────────────────────────────────────────────────────────────────────────
 # News — ventanas de warning
 # ─────────────────────────────────────────────────────────────────────────────
 

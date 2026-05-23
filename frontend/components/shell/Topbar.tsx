@@ -21,7 +21,7 @@ type TopbarProps = {
 };
 
 const TABS: { id: View; label: string; key: string }[] = [
-  { id: "dashboard",    label: "Dashboard",         key: "D" },
+  { id: "sr",           label: "Zonas S/R",         key: "D" },
   { id: "zones",        label: "Análisis de zonas", key: "Z" },
   { id: "stocks",       label: "Stocks",            key: "S" },
   { id: "correlations", label: "Correlaciones",     key: "C" },
@@ -46,7 +46,7 @@ export function Topbar({
       if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k === "d") { e.preventDefault(); onViewChange("dashboard"); }
+      if (k === "d") { e.preventDefault(); onViewChange("sr"); }
       else if (k === "z") { e.preventDefault(); onViewChange("zones"); }
       else if (k === "s") { e.preventDefault(); onViewChange("stocks"); }
       else if (k === "c") { e.preventDefault(); onViewChange("correlations"); }

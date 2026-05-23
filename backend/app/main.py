@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations
+from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones
 from .correlations import CorrelationsAIDisabled
 from .stocks_client import StocksUpstreamError
 from .constants import (
@@ -164,6 +164,47 @@ def radar_setups(pairs: str = ""):
     """
     selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
     return radar.get_radar_response(selected)
+
+
+@app.get("/api/zones")
+def zones_sr(
+    pairs: str = "",
+    window: int | None = None,
+    merge_distance_pips: float | None = None,
+    active_range_pips: float | None = None,
+    min_bars_between: int | None = None,
+    touch_tolerance_pips: float | None = None,
+    level_selector: str | None = None,
+):
+    """Zonas S/R activas para scalp M5/M15 con bias M30 resampleado.
+
+    Reutiliza el OHLC cacheado por scanner._fetch_chart (sin créditos TD extra
+    si el cache es fresco). El bias M30 se calcula resampleando las propias
+    velas M15. Lenguaje neutro — describe niveles, no recomienda acciones.
+
+    Parámetros opcionales (override de defaults en constants.py):
+    - window: velas a cada lado para detectar pivot (default 3)
+    - merge_distance_pips: pips máx entre pivots del mismo nivel (default 8)
+    - active_range_pips: niveles dentro de X pips son operables (default 25)
+    - min_bars_between: mín. velas entre pivots del mismo tipo (default 3)
+    - touch_tolerance_pips: tolerancia para contar un "toque" (default 3)
+    - level_selector: 'median' o 'mean' para fijar el precio del cluster
+    """
+    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
+    params: dict = {}
+    if window is not None:
+        params["window"] = window
+    if merge_distance_pips is not None:
+        params["merge_distance_pips"] = merge_distance_pips
+    if active_range_pips is not None:
+        params["active_range_pips"] = active_range_pips
+    if min_bars_between is not None:
+        params["min_bars_between"] = min_bars_between
+    if touch_tolerance_pips is not None:
+        params["touch_tolerance_pips"] = touch_tolerance_pips
+    if level_selector is not None:
+        params["level_selector"] = level_selector
+    return zones.get_zones_response(selected, params)
 
 
 @app.get("/correlations")

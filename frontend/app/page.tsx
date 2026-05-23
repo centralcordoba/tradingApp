@@ -11,6 +11,7 @@ import { EquityCurve } from "@/components/dashboard/EquityCurve";
 import { StocksView } from "@/components/stocks/StocksView";
 import { CorrelationsView } from "@/components/correlations/CorrelationsView";
 import { PlaybookView } from "@/components/playbook/PlaybookView";
+import { ZonasSRView } from "@/components/zones/ZonasSRView";
 import { useTick } from "@/hooks/useTick";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -428,7 +429,7 @@ function zonaTooltip(zona: string, side: string): string {
   }
 }
 
-type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook";
+type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook" | "sr";
 
 // Pares operativos del usuario — usados por el radar para filtrar ruido.
 const WATCHLIST = ["EURUSD"];
@@ -1662,7 +1663,7 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
 
 export default function Home() {
   const PAGE_SIZE = 10;
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<View>("sr");
   const [items, setItems] = useState<Signal[]>([]);
   const [totalSignals, setTotalSignals] = useState(0);
   const [page, setPage] = useState(1);
@@ -1898,7 +1899,7 @@ export default function Home() {
       }
       main={
         <div className="legacy-main-pad">
-      {view !== "stocks" && view !== "correlations" && view !== "playbook" && (
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && view !== "sr" && (
         <NewsAlertBar
           warnings={newsWarnings}
           thresholdMin={NEWS_ALERT_THRESHOLD_MIN}
@@ -1906,13 +1907,13 @@ export default function Home() {
         />
       )}
 
-      {view !== "stocks" && view !== "correlations" && view !== "playbook" && <NYPreOpenBanner />}
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && view !== "sr" && <NYPreOpenBanner />}
 
-      {view !== "stocks" && view !== "correlations" && view !== "playbook" && <SessionsPanel />}
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && view !== "sr" && <SessionsPanel />}
 
-      {view !== "stocks" && view !== "correlations" && view !== "playbook" && <SessionsTimeline />}
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && view !== "sr" && <SessionsTimeline />}
 
-      {view !== "stocks" && view !== "correlations" && view !== "playbook" && newsWarnings.length > 0 && (
+      {view !== "stocks" && view !== "correlations" && view !== "playbook" && view !== "sr" && newsWarnings.length > 0 && (
         <div className="news-banner">
           {newsWarnings.map((w, i) => (
             <NewsBannerItem key={`${w.date_utc}-${i}`} warning={w} />
@@ -1920,7 +1921,9 @@ export default function Home() {
         </div>
       )}
 
-      {view === "zones" ? (
+      {view === "sr" ? (
+        <ZonasSRView />
+      ) : view === "zones" ? (
         <ZoneAnalysisView />
       ) : view === "stocks" ? (
         <StocksView

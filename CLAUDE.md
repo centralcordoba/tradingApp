@@ -198,9 +198,9 @@ Análisis independiente del Pine. Lectura técnica multi-factor sobre OHLC 15m, 
 - **Scoring**: 7 factores ±1/0. `bias = Σ`. `side: LONG si bias≥3, SHORT si ≤-3, NEUTRAL`. `confluence = |bias|` (0-7).
 - **Endpoint**: `/scanner/pairs?pairs=...` (default 11). Devuelve `{items, count, brief, last_error, market_closed, data_age_minutes}`. `market_closed=true` si vela más reciente >30min → frontend pausa polling. `/scanner/debug` para diagnóstico.
 
-## Radar de setups
+## Radar de setups (UI oculta · backend activo)
 
-Segunda capa: puntos concretos de entrada en zonas clave (M15) con price action puro.
+Segunda capa: puntos concretos de entrada en zonas clave (M15) con price action puro. **La tab del Topbar fue eliminada**; toda la lógica de `backend/app/radar.py`, el endpoint `/api/radar`, los tests (`backend/tests/test_radar.py`), `radarChart.ts` y `lib/radar/` permanecen. `RadarView` queda como función inline en `page.tsx` sin entrada al routing. Para reactivar: volver a colocar la entrada en `Topbar.tsx::TABS`, el atajo `r` y el caso `view === "radar"` en `page.tsx`.
 
 ### Pipeline (`radar._analyze_symbol`)
 
@@ -547,9 +547,31 @@ Body `{question: str}`. System prompt con el rol del Correlation Checker (format
 - **Headers ASCII-only**: urllib codifica headers en latin-1. El header `X-Title` no puede llevar em-dash (`—`) ni acentos — usar guión normal.
 - **`os.getenv` evaluado al import**: cambiar la env var en runtime no refresca el modelo. Reinicia el proceso.
 
+## Playbook
+
+Sexta pestaña (atajo `P`). Guía operativa estática AUDUSD + USDCAD. Sin polling, sin APIs, sin estado — pura información renderizada como hoja de reglas imprimible.
+
+### Contenido
+
+- **Quick cards**: AUDUSD ventana mañana (09–14h Madrid, 9/9 wins +$615) · USDCAD ventana tarde (14–21h Madrid, 8/8 wins +$679).
+- **Timeline visual** 13 celdas (09–21h Madrid arriba, 03–15h NY abajo) coloreadas por par habilitado: AUD verde, CAD cyan, cruce (14h) gradient, lunch NY (18h) gris.
+- **Hour blocks**: 6 franjas detalladas con `Sí operar` / `No operar` / `PROHIBIDO` por par + contexto explicativo (rotación de flujo, sesiones, históricos).
+- **Resumen por par + reglas globales**: SÍ/NO/NUNCA en cards verde/rojo. Reglas globales (no mover SL, máx 2 trades/día, no tras pérdida, etc).
+
+### Implementación
+
+- `frontend/components/playbook/PlaybookView.tsx` + `.css` — namespace `.playbook` con prefijo `.pb-*`.
+- Adapta a tokens del app via aliases CSS: `--pb-aud=--buy`, `--pb-cad=--info`, `--pb-no=--sell`, `--pb-warn=--warn`. Funciona en dark/light.
+- Tipografía aumentada ~30% vs resto del app (hero 44px, h2 30px, body 17px) — es una página de lectura, no de monitoreo.
+- Botón `Imprimir / PDF` llama `window.print()`. Media query `@media print` oculta `.pb-no-print` y desactiva hovers.
+
+### Cuándo editarla
+
+El contenido es snapshot de las estadísticas del usuario al momento de creación (mayo 2026). Si cambian las reglas operativas (ventanas, pares operados, P&L histórico, prohibiciones), actualizar `PlaybookView.tsx` directamente — no hay backend ni config externo.
+
 ## Polling y créditos Twelve Data
 
-- Frontend scanner/radar: 5min. TTL backend 15min → 2 de 3 polls = cache hit (0 cr).
+- Frontend scanner: 5min. TTL backend 15min → 2 de 3 polls = cache hit (0 cr). Radar ya no se consulta desde la UI; `/api/radar` sigue accesible pero sin tráfico orgánico.
 - `market_closed` pausa `setInterval` (cero tráfico finde).
 - `/health`, `/signals`, `/stats`, `/news/*`, webhook **NO consumen TD**.
 - **Backend NO tiene cron propio** — 100% reactivo. Si créditos suben sin nadie usando: (1) pinger mal configurado, (2) otra sesión abierta, (3) bot en URL pública. Verificar en Render Logs.

@@ -152,7 +152,7 @@ Verifica: http://127.0.0.1:8000/health → `{"ok":true}`
 cd frontend
 npm run dev
 ```
-Abre: http://localhost:3000
+Abre: http://localhost:3001
 
 ### 4) ngrok (solo si necesitas webhook de TradingView en local)
 
