@@ -208,7 +208,10 @@ ZONES_TOUCH_TOLERANCE_PIPS = 3.0
 ZONES_LEVEL_SELECTOR_DEFAULT = "median"
 
 # Pares por defecto del módulo de zonas (los 6 majors operables)
-ZONES_DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDCAD", "USDCHF", "AUDUSD", "USDJPY"]
+ZONES_DEFAULT_PAIRS = [
+    "AUDUSD", "USDCAD",
+    # "EURUSD", "GBPUSD", "USDCHF", "USDJPY",
+]
 
 # Umbral RANGO: separación EMA50-EMA100 menor a (mult × ATR M30) → RANGO.
 # 0.3 = frontera empírica entre ruido lateral y tendencia incipiente (FX majores).

@@ -6,7 +6,10 @@ import type { ZonesResponse, ZonesPairResponse, ZoneLevel } from "@/lib/types";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
-const DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDCAD", "USDCHF", "AUDUSD", "USDJPY"];
+const DEFAULT_PAIRS = [
+  "AUDUSD", "USDCAD",
+  // "EURUSD", "GBPUSD", "USDCHF", "USDJPY",
+];
 
 type Params = {
   window: number;
