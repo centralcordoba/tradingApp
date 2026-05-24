@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useId } from "react";
 import { drawRadarChart } from "./radarChart";
 import { AppShell } from "@/components/shell/AppShell";
 import { Topbar } from "@/components/shell/Topbar";
@@ -622,7 +622,14 @@ function Sparkline({ data, side, width = 120, height = 36 }: {
   width?: number;
   height?: number;
 }) {
-  if (!data || data.length < 2) return null;
+  const uid = useId().replace(/:/g, "");
+  if (!data || data.length < 2) {
+    return (
+      <svg className="spark" width={width} height={height}>
+        <rect width={width} height={height} fill="none" />
+      </svg>
+    );
+  }
   const min = Math.min(...data);
   const max = Math.max(...data);
   const rng = max - min || 1;
@@ -633,14 +640,14 @@ function Sparkline({ data, side, width = 120, height = 36 }: {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const color = side === "LONG" ? "#4ade80" : side === "SHORT" ? "#f87171" : "#60a5fa";
-  const fillId = `spark-${side}-${Math.random().toString(36).slice(2, 7)}`;
+  const fillId = `spark-${side}-${uid}`;
   const lastY = height - ((data[data.length - 1] - min) / rng) * height;
   const firstPt = `0,${height}`;
   const lastPt = `${width},${height}`;
   const areaPts = `${firstPt} ${pts} ${lastPt}`;
 
   return (
-    <svg className="spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+    <svg className="spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
       <defs>
         <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.35" />
@@ -776,12 +783,12 @@ function ZoneAnalysisView() {
           <button
             className={sideFilter === "B1" ? "tab active" : "tab"}
             onClick={() => setSideFilter("B1")}
-            title={`${BLOCK_LEGEND[0].name} — ${BLOCK_LEGEND[0].def}`}
+            title={`${BLOCK_LEGEND.find(b => b.k === "1")!.name} — ${BLOCK_LEGEND.find(b => b.k === "1")!.def}`}
           >🟢 B1</button>
           <button
             className={sideFilter === "B3" ? "tab active" : "tab"}
             onClick={() => setSideFilter("B3")}
-            title={`${BLOCK_LEGEND[1].name} — ${BLOCK_LEGEND[1].def}`}
+            title={`${BLOCK_LEGEND.find(b => b.k === "3")!.name} — ${BLOCK_LEGEND.find(b => b.k === "3")!.def}`}
           >🟡 B3</button>
           <button className={sideFilter === "LONG" ? "tab active" : "tab"} onClick={() => setSideFilter("LONG")}>LONG</button>
           <button className={sideFilter === "SHORT" ? "tab active" : "tab"} onClick={() => setSideFilter("SHORT")}>SHORT</button>

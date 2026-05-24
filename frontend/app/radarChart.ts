@@ -149,8 +149,8 @@ export function drawRadarChart(
     const c = candles[i];
     const bullish = c.close >= c.open;
     const color = bullish ? CANDLE_GREEN : CANDLE_RED;
-    const xLeft = xForIndex(i);
-    const xCenter = xLeft + candleWidth / 2;
+    const xLeft = Math.round(xForIndex(i));
+    const xCenter = Math.round(xLeft + candleWidth / 2) + 0.5;
 
     const yHigh = priceToY(c.high);
     const yLow = priceToY(c.low);
@@ -161,14 +161,13 @@ export function drawRadarChart(
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(Math.round(xCenter) + 0.5, yHigh);
-    ctx.lineTo(Math.round(xCenter) + 0.5, yLow);
+    ctx.moveTo(xCenter, yHigh);
+    ctx.lineTo(xCenter, yLow);
     ctx.stroke();
 
     // Cuerpo
     const bodyTop = Math.min(yOpen, yClose);
-    const bodyBot = Math.max(yOpen, yClose);
-    const bodyHeight = Math.max(bodyBot - bodyTop, 0);
+    const bodyHeight = Math.max(Math.max(yOpen, yClose) - bodyTop, 0);
     ctx.fillStyle = color;
     if (bodyHeight < 1) {
       ctx.fillRect(xLeft, Math.round(bodyTop), candleWidth, 1);
