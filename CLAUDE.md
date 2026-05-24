@@ -66,7 +66,7 @@ backend/{requirements.txt, render.yaml, supabase_init.sql, .env.example}
 
 frontend/
   app/{page.tsx, radarChart.ts, layout.tsx (next/font: Space Grotesk + Mono), globals.css}
-  components/{shell/, dashboard/, icons/, stocks/{onboarding/, dashboard/, ...}, correlations/, playbook/}
+  components/{shell/, dashboard/, icons/, stocks/{onboarding/, dashboard/, ...}, correlations/, playbook/, zones/ (ZonasSRView), cross/ (CrossBadge — compartido scanner+zonas)}
   hooks/{useTick, useFavoritePairs, stocks/{useInvestorProfile, useStockSignal, useStocksWatchlist}}
   lib/{api, types, sessions, killZones, format, dates, zones, symbols, blockLegend, config, correlations,
        radar/{labels, blocks, aplus},
@@ -139,8 +139,9 @@ Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros es
 | GET | `/news?symbol=&hours=` | Próximas high-impact relevantes |
 | GET | `/news/warnings?currencies=&now=` | Warnings activos (polling 5s, `now` para simular) |
 | GET | `/news/calendar?date=&impact=` | Eventos de un día en hora Madrid |
-| GET | `/scanner/pairs?pairs=` | **Consume TD**. Devuelve `market_closed` |
+| GET | `/scanner/pairs?pairs=` | **Consume TD** (M5). Devuelve `market_closed`. Cada item trae `cross` (veredicto M30+M5) |
 | GET | `/scanner/debug` | API key + `last_error` |
+| GET | `/api/zones?pairs=&window=&...` | **Consume TD** (M15). Niveles S/R + `bias_m30` + `cross` por par. Params override (rango_atr_mult, etc.) |
 | GET | `/api/radar?pairs=` | **Consume TD**. Active/expired separados, candles, alignment, market_closed |
 | GET | `/stocks/search?q=` | TD `symbol_search` (gratis). Cache 24h |
 | GET | `/stocks/quote?symbol=` | **1 crédito TD**. Cache 5min |
@@ -152,7 +153,7 @@ Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros es
 
 `?ai=1` activa OpenRouter; el motor heurístico siempre corre primero, fallback a heurística si la IA falla.
 
-**Endpoints que consumen créditos TD**: `/scanner/pairs`, `/api/radar`, `/stocks/quote`, `/stocks/indicators`. `/stocks/search` es gratis.
+**Endpoints que consumen créditos TD**: `/scanner/pairs`, `/api/zones`, `/api/radar`, `/stocks/quote`, `/stocks/indicators`. `/stocks/search` es gratis.
 
 ## Tablas DB (idénticas en SQLite y PostgreSQL)
 
@@ -196,14 +197,43 @@ TWELVEDATA_API_KEY=  # compartida scanner forex + módulo stocks
 
 ## Scanner en vivo
 
-Análisis independiente del Pine. Lectura técnica multi-factor sobre OHLC 15m, devuelve pares rankeados por confluencia.
+Análisis independiente del Pine. Lectura técnica multi-factor sobre **OHLC M5** (`SCANNER_INTERVAL="5min"`, `SCANNER_OUTPUTSIZE=200` en `constants.py`), devuelve pares rankeados por confluencia.
 
 - **Twelve Data** (`api.twelvedata.com/time_series`). Yahoo Finance no funciona desde Render (bloquea IPs datacenter).
 - **Símbolos**: conversión auto `EURUSD → EUR/USD` etc. `_parse_ohlc` extrae `open/high/low/close/ts` (el `open` lo usa el radar para pin bars).
-- **Cache**: `CACHE_TTL_SECONDS=900` (15min). `_cache` (cards scored) + `_ohlc_cache` (OHLC crudo, compartido con radar).
-- **Indicadores**: EMA9/21/50/200, RSI14, ATR14, posición rango 50v, impulso 5v.
+- **Cache**: `CACHE_TTL_OHLC_SCANNER=900` (15min). `_cache` (cards scored) + `_ohlc_cache` (OHLC crudo). Key `f"{pair}:{interval}:{outputsize}"` → scanner usa `pair:5min:200`, radar `pair:15min:200`, zones `pair:15min:200`.
+- **Indicadores**: EMA9/21/50, RSI14, ATR14, posición rango 50v, impulso 5v.
 - **Scoring**: 7 factores ±1/0. `bias = Σ`. `side: LONG si bias≥3, SHORT si ≤-3, NEUTRAL`. `confluence = |bias|` (0-7).
-- **Endpoint**: `/scanner/pairs?pairs=...` (default 11). Devuelve `{items, count, brief, last_error, market_closed, data_age_minutes}`. `market_closed=true` si vela más reciente >30min → frontend pausa polling. `/scanner/debug` para diagnóstico.
+- **Endpoint**: `/scanner/pairs?pairs=...` (default 6 majors). Devuelve `{items, count, brief, last_error, market_closed, data_age_minutes}`. Cada item lleva `cross` (veredicto M30+M5). `market_closed=true` si vela más reciente >30min → frontend pausa polling. `/scanner/debug` para diagnóstico.
+
+## Zonas S/R Activas + bias M30 (`zones.py` · view `sr`)
+
+Tercera capa: niveles soporte/resistencia operables (scalp M5/M15) + **bias direccional M30**. Lenguaje estrictamente descriptivo.
+
+- **Fetch M15 propio**: `zones.analyze_zones` llama `scanner._fetch_chart(pair, interval="15min", outputsize=200)` → cache key `pair:15min:200`, **independiente del scanner M5**. (El scanner pasó a M5 en commit `e7827e4`; antes zones compartía su caché — al cambiar a M5 zones recibía solo ~34 velas M30 y el bias caía a "insuficiente". El fix devolvió a zones su fetch M15: 200 M15 → ~100 M30.)
+- **Bias M30** (`_compute_m30_bias`): resample M15→M30 (`_resample_m15_to_m30`), EMA50 vs EMA100. Guard `len(m30) < EMA_PERIOD_100` (100) → `insufficient_m30_bars`. Estados: BULL (ema50>ema100), BEAR (ema50<ema100), RANGO (|ema50-ema100| < `rango_atr_mult`×ATR_M30, default 0.3). `available=false` con `reason` si no calculable.
+- **Niveles**: pivots fractales (ventana 3) + clustering single-linkage por pips. Cada nivel: precio, tipo (support/resistance), fuerza 1-5, toques, antigüedad, distancia, `active` (dentro de rango + coherente con bias), wick ratio del último toque.
+- **Endpoint** `/api/zones`: `{items, count, market_closed}`. Cada item: `bias_m30`, `levels[]`, `recent_wicks`, `cross`, `params`. Params override vía query (window, merge_distance_pips, active_range_pips, min_bars_between, touch_tolerance_pips, level_selector, rango_atr_mult). Cache `_zones_cache` por (pairs, params), TTL 15min.
+- **Pares default** (`ZONES_DEFAULT_PAIRS`): AUDUSD, USDCAD. Frontend `ZonasSRView` poll 5min, pausa si `market_closed`.
+
+## Veredicto cruzado M30+M5 (`cross_verdict.py`)
+
+Reconcilia el bias M30 (Zonas S/R) con el side del scanner M5. **Una sola fuente de verdad**: la función pura `reconcile()` (las reglas) + las cachés OHLC/scored compartidas (los inputs). Ambos endpoints llaman `build_cross_map()` → veredicto **idéntico** en scanner y Zonas S/R. Sin caché propia (reconcile es puro y barato; no queda stale respecto a sus inputs).
+
+| Estado | Condición | Tono | Etiqueta |
+|---|---|---|---|
+| A "A FAVOR" | BULL+LONG · BEAR+SHORT | verde | `A FAVOR M30 · [LONG/SHORT] de tendencia` (confluencia vale completa) |
+| B "FADE EN RANGO" | RANGO + (LONG\|SHORT) | ámbar | `FADE EN RANGO · objetivo extremo opuesto` (objetivo = S/R activo opuesto + precio; mean-reversion con caducidad) |
+| C "CONFLICTO" | BULL+SHORT · BEAR+LONG | rojo | `⚠ CONFLICTO M30/M5` (aviso fuerte, **NO bloquea**; decisión del usuario) |
+| D "SIN SETUP" | scanner NEUTRAL | gris | `Sin señal M5` |
+| NA | bias M30 no disponible | gris | `Bias M30 no disponible` (no se asume dirección) |
+| OUT | par fuera de `CROSS_PAIRS` | gris | `M30 fuera de alcance` (sin fetch) |
+
+- **Precedencia**: D (scanner NEUTRAL) → NA (bias no disponible) → A/B/C.
+- **`CROSS_PAIRS`** = `set(ZONES_DEFAULT_PAIRS)` = AUDUSD, USDCAD. Solo estos reciben cruce real; el resto del scanner cae en OUT sin consumir TD.
+- **Objetivo FADE**: `_nearest_opposite_level` saca el soporte (si SHORT) o resistencia (si LONG) activo más cercano de los `levels` de zones; el precio va en el texto `summary` (todo el texto se arma en backend → idéntico en ambas vistas).
+- **Params**: `/api/zones` propaga sus `params` (p.ej. `rango_atr_mult`) a `build_cross_map` para que el cruce use el mismo bias que el chip M30 de esa vista. `/scanner/pairs` usa defaults. Solo divergen en un par justo en la frontera RANGO con el slider movido.
+- **Frontend**: `CrossBadge` (componente compartido `components/cross/`) — compacto para A/D/NA/OUT (summary en tooltip), `summary` visible para B (FADE), bloque rojo pulsante para C (`role="alert"`).
 
 ## Radar de setups (UI oculta · backend activo)
 
@@ -588,6 +618,7 @@ El contenido es snapshot de las estadísticas del usuario al momento de creació
 ## Polling y créditos Twelve Data
 
 - Frontend scanner: 5min. TTL backend 15min → 2 de 3 polls = cache hit (0 cr). Radar ya no se consulta desde la UI; `/api/radar` sigue accesible pero sin tráfico orgánico.
+- **Veredicto cruzado**: el cruce añade ~+2 fetches TD por pantalla y ciclo (M15 al abrir el scanner para AUDUSD/USDCAD, M5 al abrir Zonas S/R) — solo los 2 pares de `CROSS_PAIRS`. Holgado bajo el cap 8 req/min. El cruce reutiliza cachés compartidas, así que abrir ambas vistas no duplica fetches dentro del TTL.
 - `market_closed` pausa `setInterval` (cero tráfico finde).
 - `/health`, `/signals`, `/stats`, `/news/*`, webhook **NO consumen TD**.
 - **Backend NO tiene cron propio** — 100% reactivo. Si créditos suben sin nadie usando: (1) pinger mal configurado, (2) otra sesión abierta, (3) bot en URL pública. Verificar en Render Logs.
