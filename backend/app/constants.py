@@ -95,6 +95,9 @@ SCANNER_RSI_EXHAUSTION = 75
 SCANNER_EMA9_ATR_EXTENDED = 1.5
 SCANNER_EMA9_ATR_SKIP = 2.5
 
+# Impulso mínimo detectable (5 velas)
+SCANNER_MOMENTUM_THRESHOLD = 0.001  # 0.1%
+
 # Sobre qué lookback detectar estructura HH/HL/LH/LL (velas M5)
 # 50 velas ≈ 4h de contexto = rango de sesión operativo
 SCANNER_STRUCT_LOOKBACK = 50
