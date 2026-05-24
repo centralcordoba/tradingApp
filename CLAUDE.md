@@ -7,7 +7,9 @@ Contexto operativo del proyecto para futuras sesiones de Claude Code.
 **AI Trading Assistant**: motor de decisión contextual sobre señales de TradingView para scalp intradía (0–15 min) en EURUSD (XAUUSD removido del scanner por límite de 8 req/min en Twelve Data free tier — el script Pine de oro permanece pero no se consulta su OHLC). **No genera señales** — recibe las del Pine del usuario y decide **ENTER / WAIT / AVOID** según calidad, contexto y timing. Cuando una señal está fuerte pero el precio está extendido, degrada a WAIT y emite plan operativo (zona de espera, trigger, invalidación, instrucciones) para evitar entradas tardías.
 
 **Capas independientes que complementan al Pine**:
-- **Scanner en vivo** ("Análisis de zonas"): sesgo macro multi-factor (EMA9/21/50/200, RSI, rango, impulso) sobre ~11 pares. 3 bloques (trend / sin edge / reversión).
+- **Scanner en vivo** ("Análisis de zonas", view `zones`): sesgo macro multi-factor (EMA9/21/50, RSI, rango, impulso) **sobre M5** (intervalo configurable, hoy `5min`). Veredicto LONG/SHORT/NEUTRAL por par + 3 bloques (trend / sin edge / reversión). Es la señal de ENTRADA de corto plazo.
+- **Zonas S/R Activas** (view `sr`, `zones.py`): niveles soporte/resistencia por pivots + clustering sobre M15 + **bias direccional M30** (EMA50 vs EMA100 sobre velas M30 resampleadas de M15; tercer estado RANGO). Es el sesgo DIRECCIONAL de medio plazo. Lenguaje neutro — marca el terreno, no recomienda.
+- **Veredicto cruzado M30+M5** (`cross_verdict.py`): reconcilia el bias M30 con el side del scanner → A FAVOR / FADE EN RANGO / CONFLICTO / SIN SETUP. **Mismo veredicto en ambas pantallas** (scanner + Zonas S/R). Filosofía: el M30 manda, el M5 ejecuta dentro de lo que el M30 permite. Detalle más abajo.
 - **Radar de setups** (UI oculta): puntos concretos de entrada (pin bar / envolvente sobre soporte/resistencia + divergencia RSI). Tab eliminada del Topbar; código backend + `/api/radar` siguen disponibles. Detalle del motor más abajo.
 - **Playbook** (estático): hoja de reglas operativas AUDUSD (09–14h Madrid) + USDCAD (14–21h Madrid). Quick cards con stats históricos, timeline visual 09–21h, detalle franja por franja, resumen por par, reglas globales. No consume APIs.
 
@@ -51,10 +53,13 @@ backend/app/
   tv_parser.py        # Acepta JSON o texto legacy multilínea
   ai_client.py        # OpenRouter via urllib
   news_client.py      # ForexFactory + cache + warnings
-  scanner.py          # Scanner Twelve Data 15m + _ohlc_cache
+  scanner.py          # Scanner Twelve Data M5 (SCANNER_INTERVAL="5min") + _ohlc_cache
+  zones.py            # Zonas S/R + bias M30 (EMA50 vs EMA100, M15→M30). Fetch M15 propio
+  cross_verdict.py    # Veredicto cruzado M30+M5 (reconcile + build_cross_map). Fuente única
   radar.py            # Setups (pin bar/envolv + divergencia + SL cap) + cross-check
   stocks_client.py    # Twelve Data stocks + indicadores Python (SMA/EMA/RSI/MACD/BBANDS/ADX)
   correlations.py     # Mapa estático 6 pares + system prompt + query() OpenRouter
+  constants.py        # Valores mágicos centralizados (intervalos, TTLs, EMA periods, pares)
   storage.py          # Dual-mode PG/SQLite. Tablas: signals + investor_profile + stocks_watchlist
 backend/tests/test_radar.py  # 49 tests del radar
 backend/{requirements.txt, render.yaml, supabase_init.sql, .env.example}
