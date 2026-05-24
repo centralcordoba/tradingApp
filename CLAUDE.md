@@ -66,10 +66,12 @@ frontend/
   lib/{api, types, sessions, killZones, format, dates, zones, symbols, blockLegend, config, correlations,
        radar/{labels, blocks, aplus},
        stocks/{types, signalEngine(.test), twelvedata, profileStorage, watchlistStorage, marketHours}}
+  public/patterns.html # Referencia estática de patrones (link "Patrones ↗" del Topbar)
   .env.local          # NEXT_PUBLIC_API_URL → Render
 
 scriptsTradingView/   # Pine scripts
 dashboard_mockup.html # Referencia visual del rediseño AppShell
+Iniciar App.cmd       # Lanzador 1-clic del frontend (+ acceso directo en Escritorio)
 ```
 
 ## Motor de decisión (forex)
@@ -370,7 +372,7 @@ Tabla señales: badge `EJEC` (verde) o `CAL` (azul) junto al resultado.
 ```
 
 - **`AppShell`**: grid CSS `grid-template-areas`. `body[data-shell="active"]` → `overflow:hidden; height:100vh`, scroll por columna. Responsive: <1024 oculta rightbar, <768 oculta sidebar.
-- **`Topbar`**: brand + tabs + spacer + session pill + iconos. Shortcuts D/Z/S/C/P (ignora si foco en input). Pill usa `useTick(60_000)`. La tab `Radar de setups` (atajo R, botón "Abrir radar" del RightBar) fue removida del UI; `RadarView` queda como función inline en `page.tsx` (código muerto pero compilable).
+- **`Topbar`**: brand + tabs + spacer + session pill + iconos. Shortcuts D/Z/S/C/P (ignora si foco en input). Pill usa `useTick(60_000)`. La tab `Radar de setups` (atajo R, botón "Abrir radar" del RightBar) fue removida del UI; `RadarView` queda como función inline en `page.tsx` (código muerto pero compilable). Junto a la tab Playbook hay un enlace externo **"Patrones ↗"** (`<a>` estilizado como tab, color ámbar `.tab-link`) que abre `/patterns.html` en pestaña nueva — NO es un `View` ni tiene atajo de teclado.
 - **`Sidebar` (context-aware)**: prop `context: 'forex'|'stocks'`. Las vistas `correlations` y `playbook` también usan `forex`.
   - forex: search + lista de pares (favoritos en `useFavoritePairs`) + calendario mini-list.
   - stocks: `StocksSidebarSection` (search ticker + watchlist con pills BUY/SELL/HOLD).
@@ -569,6 +571,15 @@ Sexta pestaña (atajo `P`). Guía operativa estática AUDUSD + USDCAD. Sin polli
 
 El contenido es snapshot de las estadísticas del usuario al momento de creación (mayo 2026). Si cambian las reglas operativas (ventanas, pares operados, P&L histórico, prohibiciones), actualizar `PlaybookView.tsx` directamente — no hay backend ni config externo.
 
+## Patrones (referencia estática)
+
+`frontend/public/patterns.html` — hoja de referencia de 28 patrones (Estructura SMC, figuras chartistas, velas) con minigráficos SVG inline puros (sin librerías) y, por cada patrón, `NO entrar` / `Entrada válida` / `Invalidación`. **No es parte del app React**: es HTML+CSS+JS standalone servido por Next desde `public/` en `/patterns.html`. Se abre con el enlace "Patrones ↗" del Topbar (pestaña nueva).
+
+- **Agrupación conmutable** (control segmentado en la toolbar): **Por sesgo** (default) → 3 bloques 🟢 Alcista / 🔴 Bajista / ⏳ Sin decisión·esperar · **Por metodología** → grupos originales (SMC / figuras / velas).
+- El sesgo de cada card lo deriva el JS del `.bias-tag:not(.rel-tag)` ya presente en el markup (`bias-bull`→bull, `bias-bear`→bear, `bias-neutral`/`bias-warn`→wait). El regrupado mueve nodos DOM (no clona); iterar en orden de documento preserva el orden dentro de cada bloque.
+- Buscador por nombre (`data-name`) funciona en ambos modos; los grupos vacíos se ocultan solos vía `applyFilter`.
+- Para editar patrones: cada uno es un `<article class="card">` con `data-name`, un `bias-tag` (define a qué bloque cae), un `<svg>` y el `<dl>` de info. Para añadir uno nuevo basta con seguir ese molde — el JS lo recoge automáticamente.
+
 ## Polling y créditos Twelve Data
 
 - Frontend scanner: 5min. TTL backend 15min → 2 de 3 polls = cache hit (0 cr). Radar ya no se consulta desde la UI; `/api/radar` sigue accesible pero sin tráfico orgánico.
@@ -600,13 +611,15 @@ El contenido es snapshot de las estadísticas del usuario al momento de creació
 cd backend; .venv\Scripts\activate; uvicorn app.main:app --reload
 
 # Frontend (editar .env.local para apuntar a localhost)
-cd frontend; npm run dev
+cd frontend; npm run dev   # next dev -p 3001
 
 # ngrok si quieres webhook TV en local
 ngrok.exe http 8000
 ```
 
-Frontend http://localhost:3000 · Docs API http://127.0.0.1:8000/docs.
+Frontend http://localhost:3001 · Docs API http://127.0.0.1:8000/docs.
+
+**Lanzador 1-clic**: `Iniciar App.cmd` en la raíz (+ acceso directo "Trading App" en el Escritorio). Verifica/instala deps, corre `npm run dev` (frontend → Render) y abre el navegador en `http://localhost:3001` cuando el server responde. Para el flujo normal del usuario (frontend local contra backend en Render) no hace falta levantar backend ni tocar `.env.local`.
 
 ## Próximos pasos posibles (no hechos)
 

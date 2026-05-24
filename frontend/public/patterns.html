@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patrones & Estructura · Trading Reference</title>
+<style>
+:root{
+  --bg:#0a0d12; --bg-2:#0f141c; --bg-3:#161d27;
+  --border:#1f2937; --text:#e2e8f0; --muted:#94a3b8;
+  --bull:#22c55e; --bear:#ef4444; --accent:#f59e0b;
+  --neutral:#94a3b8; --warn:#fb923c; --info:#38bdf8;
+  --zone-guess:rgba(148,163,184,0.10);
+  --zone-guess-bd:rgba(148,163,184,0.45);
+  --zone-entry:rgba(34,197,94,0.16);
+  --zone-entry-bd:#22c55e;
+  --zone-entry-bear:rgba(239,68,68,0.16);
+  --zone-entry-bear-bd:#ef4444;
+  --zone-warn:rgba(245,158,11,0.14);
+  --zone-warn-bd:#f59e0b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+
+.banner{
+  position:sticky;top:0;z-index:10;
+  background:linear-gradient(180deg,var(--bg-2),rgba(10,13,18,0.92));
+  border-bottom:1px solid var(--border);
+  padding:18px 24px;backdrop-filter:blur(10px);
+}
+.banner h1{margin:0 0 6px;font-size:22px;font-weight:700;letter-spacing:-0.01em}
+.banner .principle{
+  margin:0;font-size:13px;color:var(--text);font-weight:500;
+  border-left:3px solid var(--accent);padding:2px 0 2px 10px;
+  background:linear-gradient(90deg,rgba(245,158,11,0.08),transparent);
+}
+.banner .principle b{color:var(--accent);font-weight:700}
+
+main{padding:20px 24px 60px;max-width:1500px;margin:0 auto}
+
+.toolbar{display:flex;gap:12px;margin-bottom:24px;align-items:center;flex-wrap:wrap}
+.toolbar input{
+  flex:1;min-width:240px;background:var(--bg-2);border:1px solid var(--border);
+  color:var(--text);padding:10px 14px;border-radius:8px;font-size:14px;
+  font-family:inherit;
+}
+.toolbar input:focus{outline:none;border-color:var(--accent)}
+.toolbar .count{color:var(--muted);font-size:13px;font-family:monospace}
+
+/* Segmented control — agrupar por sesgo / metodología */
+.seg{display:flex;gap:2px;background:var(--bg-2);border:1px solid var(--border);
+  border-radius:8px;padding:3px;flex-shrink:0}
+.seg-btn{background:none;border:none;color:var(--muted);font-family:inherit;
+  font-size:13px;font-weight:600;padding:7px 13px;border-radius:6px;cursor:pointer;
+  white-space:nowrap;transition:color .15s,background .15s}
+.seg-btn:hover{color:var(--text)}
+.seg-btn.active{background:var(--bg-3);color:var(--text);box-shadow:0 0 0 1px var(--border)}
+
+.group{margin-bottom:36px}
+.group-toggle{
+  width:100%;background:none;border:none;color:var(--text);text-align:left;
+  font-size:18px;font-weight:700;padding:12px 0;cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center;
+  border-bottom:1px solid var(--border);
+}
+.group-toggle:hover{color:var(--accent)}
+.group-toggle .chev{font-size:13px;color:var(--muted);transition:transform .2s}
+.group[data-open="false"] .chev{transform:rotate(-90deg)}
+.group[data-open="false"] .group-body{display:none}
+.group .subtitle{font-size:12px;color:var(--muted);font-weight:400;margin-left:10px}
+.bias-group-bull > .group-toggle{color:var(--bull)}
+.bias-group-bear > .group-toggle{color:var(--bear)}
+.bias-group-wait > .group-toggle{color:var(--accent)}
+.bias-group-bull > .group-toggle:hover,
+.bias-group-bear > .group-toggle:hover,
+.bias-group-wait > .group-toggle:hover{opacity:0.85}
+.group-body{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));
+  gap:18px;padding-top:18px;
+}
+
+.card{
+  background:var(--bg-2);border:1px solid var(--border);
+  border-radius:10px;padding:16px;
+  display:flex;flex-direction:column;gap:12px;
+  transition:border-color .15s,transform .15s;
+}
+.card:hover{border-color:#2d3748;transform:translateY(-1px)}
+.card.hidden{display:none}
+
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.card-head h3{margin:0;font-size:16px;font-weight:700;letter-spacing:-0.01em}
+.card-tags{display:flex;gap:6px;flex-wrap:wrap}
+
+.bias-tag,.rel-tag{
+  font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  padding:3px 8px;border-radius:999px;border:1px solid transparent;
+  font-family:monospace;
+}
+.bias-bull{color:var(--bull);background:rgba(34,197,94,0.1);border-color:rgba(34,197,94,0.3)}
+.bias-bear{color:var(--bear);background:rgba(239,68,68,0.1);border-color:rgba(239,68,68,0.3)}
+.bias-neutral{color:var(--muted);background:rgba(148,163,184,0.1);border-color:rgba(148,163,184,0.25)}
+.bias-warn{color:var(--accent);background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.35)}
+
+.rel-high{color:var(--bull)}
+.rel-mid{color:var(--accent)}
+.rel-low{color:var(--muted);opacity:0.75}
+
+.pattern-svg{
+  width:100%;height:auto;display:block;
+  background:#070a0f;border-radius:6px;border:1px solid #131923;
+}
+
+.info{font-size:13px}
+.info dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px}
+.info dt{
+  font-weight:700;color:var(--muted);font-size:10px;
+  text-transform:uppercase;letter-spacing:0.06em;
+  align-self:start;padding-top:3px;white-space:nowrap;
+}
+.info dt.no{color:var(--bear)}
+.info dt.ok{color:var(--bull)}
+.info dt.inv{color:var(--accent)}
+.info dd{margin:0;color:var(--text);line-height:1.45}
+
+/* SVG primitives — keeps the markup compact across 28 patterns */
+.w-bull{stroke:var(--bull);stroke-width:1.4;stroke-linecap:round}
+.b-bull{fill:var(--bull)}
+.w-bear{stroke:var(--bear);stroke-width:1.4;stroke-linecap:round}
+.b-bear{fill:var(--bear)}
+.b-doji{fill:none;stroke:var(--neutral);stroke-width:1.4}
+.zone-guess{fill:var(--zone-guess);stroke:var(--zone-guess-bd);stroke-width:1;stroke-dasharray:4 3}
+.zone-entry{fill:var(--zone-entry);stroke:var(--zone-entry-bd);stroke-width:1.4}
+.zone-entry-bear{fill:var(--zone-entry-bear);stroke:var(--zone-entry-bear-bd);stroke-width:1.4}
+.zone-warn{fill:var(--zone-warn);stroke:var(--zone-warn-bd);stroke-width:1.4;stroke-dasharray:5 3}
+.struct{stroke:var(--accent);stroke-width:1.2;stroke-dasharray:5 3;fill:none}
+.struct-solid{stroke:var(--accent);stroke-width:1.4;fill:none}
+.struct-info{stroke:var(--info);stroke-width:1.2;stroke-dasharray:5 3;fill:none}
+.zone-label{font-size:9px;font-weight:700;font-family:monospace;letter-spacing:0.06em}
+.zone-label-g{fill:#94a3b8}
+.zone-label-e{fill:#22c55e}
+.zone-label-eb{fill:#ef4444}
+.zone-label-w{fill:#f59e0b}
+.struct-label{font-family:monospace;font-size:10px;fill:var(--accent);font-weight:700}
+.struct-label-i{font-family:monospace;font-size:10px;fill:var(--info);font-weight:700}
+.svg-legend{font-size:10px;fill:var(--muted)}
+
+.entry-arrow{fill:var(--bull)}
+.entry-arrow-bear{fill:var(--bear)}
+.sweep-line{stroke:var(--warn);stroke-width:1.6;fill:none;marker-end:url(#arr-warn)}
+
+@media (max-width:720px){
+  main{padding:14px}
+  .group-body{grid-template-columns:1fr}
+  .banner{padding:14px 16px}
+  .banner h1{font-size:18px}
+}
+</style>
+</head>
+<body>
+
+<header class="banner">
+  <h1>Patrones & Estructura</h1>
+  <p class="principle">
+    <b>El patrón da la probabilidad. La confirmación da el trade.</b>
+    Dentro del patrón = no hay trade. La <i>zona de adivinar</i> es donde sigues mirando; la
+    <i>entrada válida</i> es donde puedes operar.
+  </p>
+</header>
+
+<main>
+  <div class="toolbar">
+    <input id="filter" type="search" placeholder="Buscar patrón… (ej: order block, fvg, wedge, engulfing)">
+    <div class="seg" id="grouping" role="tablist" aria-label="Agrupar patrones">
+      <button class="seg-btn active" data-mode="bias" type="button">Por sesgo</button>
+      <button class="seg-btn" data-mode="methodology" type="button">Por metodología</button>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <marker id="arr-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#fb923c"/>
+      </marker>
+      <marker id="arr-bull" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#22c55e"/>
+      </marker>
+      <marker id="arr-bear" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="#ef4444"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       GROUP 1 · ESTRUCTURA SMC
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="group" data-open="true">
+    <button class="group-toggle">
+      <span>Estructura SMC <span class="subtitle">· Mi metodología principal: Order Blocks, FVG, BOS, CHoCH, sweeps</span></span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="group-body">
+
+    <!-- 1. Order Block alcista -->
+    <article class="card" data-name="order block alcista bullish ob smc">
+      <header class="card-head">
+        <h3>Order Block alcista</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Alcista post-confirmación</span>
+          <span class="bias-tag rel-tag rel-high">★★★ alta</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <rect class="zone-guess" x="84" y="40" width="108" height="92" rx="2"/>
+        <text class="zone-label zone-label-g" x="138" y="34" text-anchor="middle">ZONA DE ADIVINAR · impulso</text>
+        <rect class="zone-entry" x="60" y="124" width="32" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="76" y="170" text-anchor="middle">ENTRADA · retest OB</text>
+        <line class="w-bear" x1="30" y1="46" x2="30" y2="106"/><rect class="b-bear" x="26" y="55" width="8" height="42"/>
+        <line class="w-bear" x1="52" y1="72" x2="52" y2="130"/><rect class="b-bear" x="48" y="84" width="8" height="42"/>
+        <line class="w-bear" x1="74" y1="118" x2="74" y2="148"/><rect class="b-bear" x="70" y="126" width="8" height="18"/>
+        <text class="struct-label" x="74" y="160" text-anchor="middle">OB</text>
+        <line class="w-bull" x1="96" y1="46" x2="96" y2="146"/><rect class="b-bull" x="92" y="50" width="8" height="86"/>
+        <line class="w-bull" x1="118" y1="34" x2="118" y2="68"/><rect class="b-bull" x="114" y="38" width="8" height="24"/>
+        <line class="w-bear" x1="140" y1="48" x2="140" y2="138"/><rect class="b-bear" x="136" y="56" width="8" height="68"/>
+        <line class="w-bull" x1="162" y1="98" x2="162" y2="148"/><rect class="b-bull" x="158" y="108" width="8" height="36"/>
+        <path class="entry-arrow" d="M180 128 L192 120 L188 124 L196 124 L196 132 L188 132 L192 136 Z"/>
+        <line class="w-bull" x1="206" y1="60" x2="206" y2="104"/><rect class="b-bull" x="202" y="64" width="8" height="38"/>
+        <line class="w-bull" x1="228" y1="36" x2="228" y2="72"/><rect class="b-bull" x="224" y="42" width="8" height="26"/>
+        <text class="svg-legend" x="180" y="208" text-anchor="middle">Última vela bajista que origina un impulso alcista limpio</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro del impulso alcista — perseguir velas extendidas mata el RRR.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Retest del bloque (vela bajista origen) con confirmación M5 cerrando dentro de su rango.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo del low del Order Block.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 2. Order Block bajista -->
+    <article class="card" data-name="order block bajista bearish ob smc">
+      <header class="card-head">
+        <h3>Order Block bajista</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Bajista post-confirmación</span>
+          <span class="bias-tag rel-tag rel-high">★★★ alta</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <rect class="zone-guess" x="84" y="88" width="108" height="92" rx="2"/>
+        <text class="zone-label zone-label-g" x="138" y="196" text-anchor="middle">ZONA DE ADIVINAR · impulso</text>
+        <rect class="zone-entry-bear" x="60" y="74" width="32" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="76" y="62" text-anchor="middle">ENTRADA · retest OB</text>
+        <line class="w-bull" x1="30" y1="114" x2="30" y2="174"/><rect class="b-bull" x="26" y="123" width="8" height="42"/>
+        <line class="w-bull" x1="52" y1="90" x2="52" y2="148"/><rect class="b-bull" x="48" y="96" width="8" height="42"/>
+        <line class="w-bull" x1="74" y1="72" x2="74" y2="102"/><rect class="b-bull" x="70" y="76" width="8" height="18"/>
+        <text class="struct-label" x="74" y="68" text-anchor="middle">OB</text>
+        <line class="w-bear" x1="96" y1="74" x2="96" y2="174"/><rect class="b-bear" x="92" y="84" width="8" height="86"/>
+        <line class="w-bear" x1="118" y1="152" x2="118" y2="186"/><rect class="b-bear" x="114" y="158" width="8" height="24"/>
+        <line class="w-bull" x1="140" y1="82" x2="140" y2="172"/><rect class="b-bull" x="136" y="96" width="8" height="68"/>
+        <line class="w-bear" x1="162" y1="72" x2="162" y2="122"/><rect class="b-bear" x="158" y="76" width="8" height="36"/>
+        <path class="entry-arrow-bear" d="M180 92 L192 100 L188 96 L196 96 L196 88 L188 88 L192 84 Z"/>
+        <line class="w-bear" x1="206" y1="116" x2="206" y2="160"/><rect class="b-bear" x="202" y="118" width="8" height="38"/>
+        <line class="w-bear" x1="228" y1="148" x2="228" y2="184"/><rect class="b-bear" x="224" y="152" width="8" height="26"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Última vela alcista que origina un impulso bajista limpio</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro del impulso bajista — entrar tarde te mete en la zona de exhaustion.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Retest del bloque (vela alcista origen) con confirmación M5 cerrando dentro de su rango.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por encima del high del Order Block.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 3. Fair Value Gap -->
+    <article class="card" data-name="fvg fair value gap imbalance smc">
+      <header class="card-head">
+        <h3>Fair Value Gap (FVG)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Alcista o bajista según dirección</span>
+          <span class="bias-tag rel-tag rel-high">★★★ alta si fresco</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <rect class="zone-guess" x="64" y="40" width="80" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="104" y="34" text-anchor="middle">ZONA DE ADIVINAR</text>
+        <rect class="zone-entry" x="100" y="96" width="44" height="24" rx="2"/>
+        <text class="zone-label zone-label-e" x="122" y="92" text-anchor="middle">FVG · ENTRADA al retest</text>
+        <!-- C1: pequeña, high low -->
+        <line class="w-bear" x1="30" y1="80" x2="30" y2="140"/><rect class="b-bear" x="26" y="96" width="8" height="36"/>
+        <text class="svg-legend" x="30" y="156" text-anchor="middle">C1</text>
+        <!-- C2: HUGE bullish leaving gap -->
+        <line class="w-bull" x1="74" y1="48" x2="74" y2="138"/><rect class="b-bull" x="70" y="56" width="8" height="76"/>
+        <text class="svg-legend" x="74" y="156" text-anchor="middle">C2</text>
+        <!-- C3: continues higher, low > C1.high -->
+        <line class="w-bull" x1="118" y1="42" x2="118" y2="88"/><rect class="b-bull" x="114" y="50" width="8" height="30"/>
+        <text class="svg-legend" x="118" y="106" text-anchor="middle">C3</text>
+        <!-- FVG marker: gap between C1.high (~80) and C3.low (~88) -->
+        <line class="struct-info" x1="20" y1="96" x2="340" y2="96"/>
+        <line class="struct-info" x1="20" y1="120" x2="340" y2="120"/>
+        <text class="struct-label-i" x="148" y="115">FVG</text>
+        <!-- Pullback -->
+        <line class="w-bear" x1="162" y1="44" x2="162" y2="110"/><rect class="b-bear" x="158" y="52" width="8" height="56"/>
+        <line class="w-bear" x1="184" y1="60" x2="184" y2="124"/><rect class="b-bear" x="180" y="68" width="8" height="50"/>
+        <!-- Entry candle in FVG -->
+        <line class="w-bull" x1="206" y1="86" x2="206" y2="118"/><rect class="b-bull" x="202" y="92" width="8" height="20"/>
+        <path class="entry-arrow" d="M222 108 L234 100 L230 104 L238 104 L238 112 L230 112 L234 116 Z"/>
+        <line class="w-bull" x1="250" y1="60" x2="250" y2="98"/><rect class="b-bull" x="246" y="64" width="8" height="30"/>
+        <line class="w-bull" x1="272" y1="38" x2="272" y2="74"/><rect class="b-bull" x="268" y="42" width="8" height="28"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Gap entre el high de C1 y el low de C3 = ineficiencia que el mercado tiende a rellenar</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Durante el impulso que crea el FVG — el precio aún está fuera, sin retest.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Retest del FVG con vela de rechazo (50% del gap o low/high del gap según dirección).</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 que llena el gap por completo y cierra al otro lado.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 4. BOS — Break of Structure -->
+    <article class="card" data-name="bos break of structure ruptura estructura smc">
+      <header class="card-head">
+        <h3>Break of Structure (BOS)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Continuación de la tendencia</span>
+          <span class="bias-tag rel-tag rel-high">★★★ alta</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <!-- Structure dashed at previous HH -->
+        <line class="struct" x1="20" y1="86" x2="340" y2="86"/>
+        <text class="struct-label" x="332" y="82" text-anchor="end">HH previo</text>
+        <rect class="zone-guess" x="118" y="40" width="60" height="120" rx="2"/>
+        <text class="zone-label zone-label-g" x="148" y="34" text-anchor="middle">ZONA DE ADIVINAR · ruptura</text>
+        <rect class="zone-entry" x="186" y="78" width="46" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="209" y="116" text-anchor="middle">ENTRADA · retest del nivel roto</text>
+        <!-- Uptrend: HL-HH-HL-HH... -->
+        <line class="w-bull" x1="30" y1="120" x2="30" y2="160"/><rect class="b-bull" x="26" y="128" width="8" height="28"/>
+        <line class="w-bull" x1="52" y1="98" x2="52" y2="140"/><rect class="b-bull" x="48" y="104" width="8" height="32"/>
+        <circle cx="52" cy="98" r="3" fill="var(--accent)"/><text class="struct-label" x="52" y="92" text-anchor="middle">HH</text>
+        <line class="w-bear" x1="74" y1="100" x2="74" y2="150"/><rect class="b-bear" x="70" y="108" width="8" height="38"/>
+        <circle cx="74" cy="146" r="3" fill="var(--accent)"/><text class="struct-label" x="74" y="160" text-anchor="middle">HL</text>
+        <line class="w-bull" x1="96" y1="88" x2="96" y2="138"/><rect class="b-bull" x="92" y="92" width="8" height="42"/>
+        <!-- Breaking candle into BOS area -->
+        <line class="w-bull" x1="118" y1="54" x2="118" y2="92"/><rect class="b-bull" x="114" y="60" width="8" height="28"/>
+        <line class="w-bull" x1="140" y1="40" x2="140" y2="74"/><rect class="b-bull" x="136" y="46" width="8" height="24"/>
+        <text class="struct-label" x="140" y="36" text-anchor="middle">BOS</text>
+        <!-- Pullback to broken level -->
+        <line class="w-bear" x1="162" y1="46" x2="162" y2="92"/><rect class="b-bear" x="158" y="52" width="8" height="38"/>
+        <line class="w-bear" x1="184" y1="62" x2="184" y2="100"/><rect class="b-bear" x="180" y="68" width="8" height="30"/>
+        <!-- Confirmation -->
+        <line class="w-bull" x1="206" y1="56" x2="206" y2="96"/><rect class="b-bull" x="202" y="62" width="8" height="32"/>
+        <path class="entry-arrow" d="M222 82 L234 74 L230 78 L238 78 L238 86 L230 86 L234 90 Z"/>
+        <line class="w-bull" x1="250" y1="30" x2="250" y2="64"/><rect class="b-bull" x="246" y="36" width="8" height="24"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Cierre M15 sobre el HH previo = ruptura · espera retest, no entres en la ruptura</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En la vela que rompe el nivel — alto riesgo de ruptura falsa y wick fuera.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Retest del nivel roto (ahora soporte) con vela de confirmación M5 cerrando alcista.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo del HL previo a la ruptura → la estructura vuelve a estar rota a la baja.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 5. CHoCH — Change of Character -->
+    <article class="card" data-name="choch change of character cambio caracter smc">
+      <header class="card-head">
+        <h3>Change of Character (CHoCH)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-warn">Aviso · NO entrada</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="84" x2="340" y2="84"/>
+        <text class="struct-label" x="332" y="80" text-anchor="end">LH previo</text>
+        <rect class="zone-warn" x="20" y="40" width="320" height="140" rx="2"/>
+        <text class="zone-label zone-label-w" x="180" y="32" text-anchor="middle">⚠ CHoCH = AVISO DE CAMBIO · NO ES ENTRADA</text>
+        <!-- Downtrend: LH-LL-LH-LL... -->
+        <line class="w-bear" x1="30" y1="50" x2="30" y2="100"/><rect class="b-bear" x="26" y="58" width="8" height="38"/>
+        <circle cx="30" cy="50" r="3" fill="var(--accent)"/><text class="struct-label" x="30" y="46" text-anchor="middle">LH</text>
+        <line class="w-bear" x1="52" y1="80" x2="52" y2="130"/><rect class="b-bear" x="48" y="86" width="8" height="38"/>
+        <line class="w-bear" x1="74" y1="100" x2="74" y2="148"/><rect class="b-bear" x="70" y="106" width="8" height="38"/>
+        <circle cx="74" cy="148" r="3" fill="var(--accent)"/><text class="struct-label" x="74" y="160" text-anchor="middle">LL</text>
+        <line class="w-bull" x1="96" y1="80" x2="96" y2="138"/><rect class="b-bull" x="92" y="88" width="8" height="42"/>
+        <line class="w-bear" x1="118" y1="82" x2="118" y2="124"/><rect class="b-bear" x="114" y="86" width="8" height="32"/>
+        <circle cx="118" cy="82" r="3" fill="var(--accent)"/><text class="struct-label" x="118" y="78" text-anchor="middle">LH</text>
+        <!-- Now the CHoCH: a higher high breaks the LH -->
+        <line class="w-bull" x1="140" y1="80" x2="140" y2="132"/><rect class="b-bull" x="136" y="88" width="8" height="38"/>
+        <line class="w-bull" x1="162" y1="62" x2="162" y2="96"/><rect class="b-bull" x="158" y="68" width="8" height="22"/>
+        <line class="w-bull" x1="184" y1="44" x2="184" y2="80"/><rect class="b-bull" x="180" y="50" width="8" height="24"/>
+        <text class="struct-label" x="184" y="40" text-anchor="middle">CHoCH</text>
+        <!-- Where REAL entry happens later: retest of OB/FVG that formed during the impulse, or wait for BOS -->
+        <rect class="zone-entry" x="220" y="80" width="40" height="20" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-e" x="240" y="112" text-anchor="middle">Entrada SOLO después:</text>
+        <text class="zone-label zone-label-e" x="240" y="124" text-anchor="middle">BOS + retest OB</text>
+        <line class="w-bear" x1="228" y1="58" x2="228" y2="98"/><rect class="b-bear" x="224" y="62" width="8" height="32"/>
+        <line class="w-bull" x1="250" y1="68" x2="250" y2="98"/><rect class="b-bull" x="246" y="74" width="8" height="22"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Primer rompimiento del LH en downtrend = CAMBIO, no entrada. Espera estructura confirmada.</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>NUNCA en el CHoCH solo — es solo aviso de que la inercia previa puede acabar. Falsos abundantes.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Espera el BOS siguiente + retest del OB/FVG dejado por el impulso del CHoCH. Doble confirmación.</dd>
+        <dt class="inv">Invalidación</dt><dd>Nuevo LL después del CHoCH → era ruptura falsa, vuelve la tendencia previa.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 6. Liquidity Sweep -->
+    <article class="card" data-name="liquidity sweep stop hunt mecha barrido smc">
+      <header class="card-head">
+        <h3>Liquidity sweep / stop hunt</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-neutral">Reversión inmediata</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="60" x2="340" y2="60"/>
+        <text class="struct-label" x="332" y="56" text-anchor="end">High swing (liquidez)</text>
+        <rect class="zone-guess" x="118" y="40" width="50" height="50" rx="2"/>
+        <text class="zone-label zone-label-g" x="143" y="34" text-anchor="middle">ZONA DE ADIVINAR</text>
+        <rect class="zone-entry-bear" x="172" y="68" width="46" height="24" rx="2"/>
+        <text class="zone-label zone-label-eb" x="195" y="108" text-anchor="middle">ENTRADA · vela de reversión</text>
+        <!-- Buildup -->
+        <line class="w-bull" x1="30" y1="86" x2="30" y2="130"/><rect class="b-bull" x="26" y="92" width="8" height="32"/>
+        <line class="w-bear" x1="52" y1="80" x2="52" y2="120"/><rect class="b-bear" x="48" y="84" width="8" height="32"/>
+        <!-- Approaching the high -->
+        <line class="w-bull" x1="74" y1="64" x2="74" y2="108"/><rect class="b-bull" x="70" y="72" width="8" height="32"/>
+        <!-- The sweep candle: wick above the high, body closes back inside -->
+        <line class="w-bear" x1="118" y1="42" x2="118" y2="118"/><rect class="b-bear" x="114" y="76" width="8" height="38"/>
+        <text class="struct-label" x="118" y="36" text-anchor="middle">SWEEP</text>
+        <path class="sweep-line" d="M104 56 Q 110 48, 118 46"/>
+        <!-- Reversal -->
+        <line class="w-bear" x1="162" y1="92" x2="162" y2="140"/><rect class="b-bear" x="158" y="96" width="8" height="38"/>
+        <line class="w-bear" x1="184" y1="116" x2="184" y2="160"/><rect class="b-bear" x="180" y="122" width="8" height="32"/>
+        <path class="entry-arrow-bear" d="M200 130 L212 138 L208 134 L216 134 L216 126 L208 126 L212 122 Z"/>
+        <line class="w-bear" x1="206" y1="140" x2="206" y2="182"/><rect class="b-bear" x="202" y="146" width="8" height="30"/>
+        <line class="w-bear" x1="228" y1="166" x2="228" y2="200"/><rect class="b-bear" x="224" y="172" width="8" height="22"/>
+        <text class="svg-legend" x="180" y="216" text-anchor="middle">Wick excede el high anterior · cuerpo cierra dentro = liquidez barrida</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Cuando la mecha está formándose — todavía no sabes si va a cerrar dentro o continuar.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Tras el CIERRE de la vela del sweep, en la vela siguiente que confirma reversión con cuerpo claro.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por encima del extremo de la mecha → no era sweep, era continuación.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 7. Equal highs / equal lows -->
+    <article class="card" data-name="equal highs lows iguales liquidez doble pico smc">
+      <header class="card-head">
+        <h3>Equal highs / equal lows</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-neutral">Magnet de liquidez</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="58" x2="340" y2="58"/>
+        <text class="struct-label" x="20" y="54">Equal Highs (liquidez por encima)</text>
+        <rect class="zone-guess" x="20" y="40" width="240" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="146" text-anchor="middle">ZONA DE ADIVINAR · oscilación entre highs</text>
+        <rect class="zone-entry-bear" x="268" y="74" width="48" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="292" y="116" text-anchor="middle">ENTRADA · post-sweep</text>
+        <!-- First high -->
+        <line class="w-bull" x1="30" y1="64" x2="30" y2="110"/><rect class="b-bull" x="26" y="72" width="8" height="32"/>
+        <line class="w-bear" x1="52" y1="58" x2="52" y2="116"/><rect class="b-bear" x="48" y="64" width="8" height="38"/>
+        <circle cx="52" cy="58" r="3" fill="var(--accent)"/>
+        <line class="w-bear" x1="74" y1="92" x2="74" y2="148"/><rect class="b-bear" x="70" y="98" width="8" height="38"/>
+        <line class="w-bull" x1="96" y1="100" x2="96" y2="140"/><rect class="b-bull" x="92" y="106" width="8" height="30"/>
+        <!-- Second high — equal -->
+        <line class="w-bull" x1="118" y1="60" x2="118" y2="110"/><rect class="b-bull" x="114" y="68" width="8" height="32"/>
+        <line class="w-bear" x1="140" y1="58" x2="140" y2="118"/><rect class="b-bear" x="136" y="64" width="8" height="38"/>
+        <circle cx="140" cy="58" r="3" fill="var(--accent)"/>
+        <line class="w-bear" x1="162" y1="86" x2="162" y2="138"/><rect class="b-bear" x="158" y="90" width="8" height="38"/>
+        <line class="w-bull" x1="184" y1="92" x2="184" y2="128"/><rect class="b-bull" x="180" y="98" width="8" height="28"/>
+        <!-- Third attempt that sweeps -->
+        <line class="w-bull" x1="206" y1="62" x2="206" y2="106"/><rect class="b-bull" x="202" y="70" width="8" height="32"/>
+        <line class="w-bear" x1="228" y1="42" x2="228" y2="112"/><rect class="b-bear" x="224" y="74" width="8" height="36"/>
+        <text class="struct-label" x="228" y="36" text-anchor="middle">SWEEP</text>
+        <line class="w-bear" x1="250" y1="88" x2="250" y2="140"/><rect class="b-bear" x="246" y="92" width="8" height="38"/>
+        <path class="entry-arrow-bear" d="M268 122 L280 130 L276 126 L284 126 L284 118 L276 118 L280 114 Z"/>
+        <line class="w-bear" x1="294" y1="120" x2="294" y2="168"/><rect class="b-bear" x="290" y="124" width="8" height="34"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">2-3 highs muy similares = liquidez acumulada → expect sweep antes de reversión</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Mientras el precio oscila entre los highs iguales — está cocinando el sweep.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Tras el sweep + vela de reversión a la dirección contraria al barrido.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 limpio sobre los equal highs (sin mecha) → ruptura genuina, no sweep.</dd>
+      </dl></div>
+    </article>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       GROUP 2 · FIGURAS CHARTISTAS
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="group" data-open="true">
+    <button class="group-toggle">
+      <span>Figuras chartistas <span class="subtitle">· Cuñas, triángulos, banderas, dobles, hombro-cabeza-hombro</span></span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="group-body">
+
+    <!-- 8. Falling Wedge -->
+    <article class="card" data-name="falling wedge cuna descendente alcista">
+      <header class="card-head">
+        <h3>Cuña descendente (Falling wedge)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Sesgo alcista</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media en scalp</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <!-- Wedge lines: upper from (30,50) to (220,120) shallow; lower from (30,90) to (220,130) less shallow -->
+        <line class="struct-solid" x1="30" y1="50" x2="240" y2="120"/>
+        <line class="struct-solid" x1="30" y1="90" x2="240" y2="135"/>
+        <rect class="zone-guess" x="30" y="50" width="210" height="90" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="135" y="158" text-anchor="middle">ZONA DE ADIVINAR · dentro de la cuña</text>
+        <rect class="zone-entry" x="252" y="72" width="64" height="24" rx="2"/>
+        <text class="zone-label zone-label-e" x="284" y="68" text-anchor="middle">ENTRADA · retest línea rota</text>
+        <!-- Candles inside the wedge -->
+        <line class="w-bear" x1="36" y1="56" x2="36" y2="92"/><rect class="b-bear" x="32" y="60" width="8" height="28"/>
+        <line class="w-bull" x1="58" y1="76" x2="58" y2="110"/><rect class="b-bull" x="54" y="80" width="8" height="26"/>
+        <line class="w-bear" x1="80" y1="68" x2="80" y2="116"/><rect class="b-bear" x="76" y="74" width="8" height="36"/>
+        <line class="w-bull" x1="102" y1="92" x2="102" y2="120"/><rect class="b-bull" x="98" y="96" width="8" height="22"/>
+        <line class="w-bear" x1="124" y1="86" x2="124" y2="124"/><rect class="b-bear" x="120" y="90" width="8" height="30"/>
+        <line class="w-bull" x1="146" y1="106" x2="146" y2="128"/><rect class="b-bull" x="142" y="110" width="8" height="14"/>
+        <line class="w-bear" x1="168" y1="100" x2="168" y2="130"/><rect class="b-bear" x="164" y="104" width="8" height="22"/>
+        <line class="w-bull" x1="190" y1="112" x2="190" y2="132"/><rect class="b-bull" x="186" y="116" width="8" height="14"/>
+        <!-- Breakout candle -->
+        <line class="w-bull" x1="220" y1="74" x2="220" y2="130"/><rect class="b-bull" x="216" y="80" width="8" height="40"/>
+        <!-- Retest -->
+        <line class="w-bear" x1="252" y1="68" x2="252" y2="100"/><rect class="b-bear" x="248" y="74" width="8" height="22"/>
+        <line class="w-bull" x1="274" y1="58" x2="274" y2="92"/><rect class="b-bull" x="270" y="64" width="8" height="22"/>
+        <path class="entry-arrow" d="M292 82 L304 74 L300 78 L308 78 L308 86 L300 86 L304 90 Z"/>
+        <line class="w-bull" x1="298" y1="36" x2="298" y2="70"/><rect class="b-bull" x="294" y="40" width="8" height="22"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Dos líneas descendentes convergentes · volatilidad comprimiéndose · ruptura al alza esperada</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro de la cuña — la dirección final no está confirmada hasta la ruptura.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Cierre M5 fuera de la línea superior + retest de esa línea (ahora soporte) → mejor RRR.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo de la línea inferior → ruptura al lado contrario, sesgo destruido.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 9. Rising Wedge -->
+    <article class="card" data-name="rising wedge cuna ascendente bajista">
+      <header class="card-head">
+        <h3>Cuña ascendente (Rising wedge)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Sesgo bajista</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media en scalp</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-solid" x1="30" y1="160" x2="240" y2="90"/>
+        <line class="struct-solid" x1="30" y1="120" x2="240" y2="80"/>
+        <rect class="zone-guess" x="30" y="80" width="210" height="90" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="135" y="184" text-anchor="middle">ZONA DE ADIVINAR · dentro de la cuña</text>
+        <rect class="zone-entry-bear" x="252" y="120" width="64" height="24" rx="2"/>
+        <text class="zone-label zone-label-eb" x="284" y="158" text-anchor="middle">ENTRADA · retest línea rota</text>
+        <line class="w-bull" x1="36" y1="118" x2="36" y2="154"/><rect class="b-bull" x="32" y="124" width="8" height="26"/>
+        <line class="w-bear" x1="58" y1="100" x2="58" y2="134"/><rect class="b-bear" x="54" y="106" width="8" height="22"/>
+        <line class="w-bull" x1="80" y1="94" x2="80" y2="142"/><rect class="b-bull" x="76" y="100" width="8" height="36"/>
+        <line class="w-bear" x1="102" y1="92" x2="102" y2="120"/><rect class="b-bear" x="98" y="98" width="8" height="20"/>
+        <line class="w-bull" x1="124" y1="86" x2="124" y2="124"/><rect class="b-bull" x="120" y="92" width="8" height="28"/>
+        <line class="w-bear" x1="146" y1="84" x2="146" y2="108"/><rect class="b-bear" x="142" y="88" width="8" height="18"/>
+        <line class="w-bull" x1="168" y1="78" x2="168" y2="112"/><rect class="b-bull" x="164" y="84" width="8" height="26"/>
+        <line class="w-bear" x1="190" y1="76" x2="190" y2="98"/><rect class="b-bear" x="186" y="80" width="8" height="16"/>
+        <line class="w-bear" x1="220" y1="78" x2="220" y2="138"/><rect class="b-bear" x="216" y="84" width="8" height="50"/>
+        <line class="w-bull" x1="252" y1="110" x2="252" y2="142"/><rect class="b-bull" x="248" y="114" width="8" height="22"/>
+        <line class="w-bear" x1="274" y1="116" x2="274" y2="148"/><rect class="b-bear" x="270" y="120" width="8" height="22"/>
+        <path class="entry-arrow-bear" d="M292 128 L304 136 L300 132 L308 132 L308 124 L300 124 L304 120 Z"/>
+        <line class="w-bear" x1="298" y1="138" x2="298" y2="178"/><rect class="b-bear" x="294" y="146" width="8" height="28"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Dos líneas ascendentes convergentes · agotamiento alcista · ruptura a la baja esperada</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro de la cuña — el alza puede seguir antes del fallo.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Cierre M5 fuera de la línea inferior + retest de esa línea (ahora resistencia).</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 sobre la línea superior → la cuña se convierte en continuación.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 10. Symmetric Triangle -->
+    <article class="card" data-name="symmetric triangle triangulo simetrico">
+      <header class="card-head">
+        <h3>Triángulo simétrico</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-neutral">Sin sesgo direccional</span>
+          <span class="bias-tag rel-tag rel-mid">★★ continuación de tendencia previa</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-solid" x1="30" y1="60" x2="240" y2="110"/>
+        <line class="struct-solid" x1="30" y1="160" x2="240" y2="110"/>
+        <rect class="zone-guess" x="30" y="60" width="210" height="100" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="135" y="184" text-anchor="middle">ZONA DE ADIVINAR · dentro del triángulo</text>
+        <rect class="zone-entry" x="252" y="58" width="60" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="282" y="54" text-anchor="middle">ENTRADA · retest tras break</text>
+        <line class="w-bull" x1="36" y1="64" x2="36" y2="150"/><rect class="b-bull" x="32" y="70" width="8" height="74"/>
+        <line class="w-bear" x1="58" y1="74" x2="58" y2="156"/><rect class="b-bear" x="54" y="80" width="8" height="70"/>
+        <line class="w-bull" x1="80" y1="78" x2="80" y2="148"/><rect class="b-bull" x="76" y="84" width="8" height="56"/>
+        <line class="w-bear" x1="102" y1="82" x2="102" y2="142"/><rect class="b-bear" x="98" y="86" width="8" height="50"/>
+        <line class="w-bull" x1="124" y1="88" x2="124" y2="134"/><rect class="b-bull" x="120" y="92" width="8" height="36"/>
+        <line class="w-bear" x1="146" y1="94" x2="146" y2="128"/><rect class="b-bear" x="142" y="98" width="8" height="26"/>
+        <line class="w-bull" x1="168" y1="98" x2="168" y2="122"/><rect class="b-bull" x="164" y="102" width="8" height="16"/>
+        <line class="w-bear" x1="190" y1="100" x2="190" y2="120"/><rect class="b-bear" x="186" y="104" width="8" height="12"/>
+        <line class="w-bull" x1="220" y1="56" x2="220" y2="116"/><rect class="b-bull" x="216" y="62" width="8" height="46"/>
+        <line class="w-bear" x1="252" y1="62" x2="252" y2="84"/><rect class="b-bear" x="248" y="66" width="8" height="14"/>
+        <line class="w-bull" x1="274" y1="46" x2="274" y2="78"/><rect class="b-bull" x="270" y="52" width="8" height="22"/>
+        <path class="entry-arrow" d="M292 68 L304 60 L300 64 L308 64 L308 72 L300 72 L304 76 Z"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Resolución suele alinearse con la tendencia previa · ruptura + retest es la entrada</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro del triángulo — la dirección de salida puede ser cualquiera.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Cierre M5 fuera de la línea + retest de esa línea desde el lado contrario.</dd>
+        <dt class="inv">Invalidación</dt><dd>Vuelta dentro del triángulo tras la ruptura → fakeout, esperar otra señal.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 11. Ascending Triangle -->
+    <article class="card" data-name="ascending triangle triangulo ascendente continuacion">
+      <header class="card-head">
+        <h3>Triángulo ascendente</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Sesgo alcista (con tendencia previa)</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-solid" x1="30" y1="60" x2="240" y2="60"/>
+        <line class="struct-solid" x1="30" y1="160" x2="240" y2="80"/>
+        <rect class="zone-guess" x="30" y="60" width="210" height="100" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="135" y="184" text-anchor="middle">ZONA DE ADIVINAR · LH menores, top plano</text>
+        <rect class="zone-entry" x="252" y="48" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="284" y="44" text-anchor="middle">ENTRADA · retest del techo</text>
+        <line class="w-bull" x1="36" y1="68" x2="36" y2="150"/><rect class="b-bull" x="32" y="74" width="8" height="70"/>
+        <line class="w-bear" x1="58" y1="62" x2="58" y2="146"/><rect class="b-bear" x="54" y="68" width="8" height="60"/>
+        <line class="w-bull" x1="80" y1="74" x2="80" y2="140"/><rect class="b-bull" x="76" y="80" width="8" height="50"/>
+        <line class="w-bear" x1="102" y1="60" x2="102" y2="130"/><rect class="b-bear" x="98" y="66" width="8" height="44"/>
+        <line class="w-bull" x1="124" y1="66" x2="124" y2="124"/><rect class="b-bull" x="120" y="72" width="8" height="40"/>
+        <line class="w-bear" x1="146" y1="62" x2="146" y2="116"/><rect class="b-bear" x="142" y="66" width="8" height="38"/>
+        <line class="w-bull" x1="168" y1="64" x2="168" y2="108"/><rect class="b-bull" x="164" y="70" width="8" height="32"/>
+        <line class="w-bear" x1="190" y1="62" x2="190" y2="100"/><rect class="b-bear" x="186" y="66" width="8" height="26"/>
+        <line class="w-bull" x1="220" y1="44" x2="220" y2="96"/><rect class="b-bull" x="216" y="50" width="8" height="36"/>
+        <line class="w-bear" x1="252" y1="50" x2="252" y2="74"/><rect class="b-bear" x="248" y="54" width="8" height="16"/>
+        <line class="w-bull" x1="274" y1="36" x2="274" y2="68"/><rect class="b-bull" x="270" y="42" width="8" height="20"/>
+        <path class="entry-arrow" d="M292 56 L304 48 L300 52 L308 52 L308 60 L300 60 L304 64 Z"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Resistencia plana + lows ascendentes · presión alcista · ruptura típicamente al alza</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En el cuarto/quinto rebote del techo plano — está cocinando la ruptura.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Cierre M5 sobre el techo + retest del nivel roto (ahora soporte).</dd>
+        <dt class="inv">Invalidación</dt><dd>Pérdida del HL más reciente → la presión alcista se ha agotado.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 12. Descending Triangle -->
+    <article class="card" data-name="descending triangle triangulo descendente continuacion">
+      <header class="card-head">
+        <h3>Triángulo descendente</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Sesgo bajista (con tendencia previa)</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-solid" x1="30" y1="160" x2="240" y2="160"/>
+        <line class="struct-solid" x1="30" y1="60" x2="240" y2="140"/>
+        <rect class="zone-guess" x="30" y="60" width="210" height="100" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="135" y="184" text-anchor="middle">ZONA DE ADIVINAR · HL menores, suelo plano</text>
+        <rect class="zone-entry-bear" x="252" y="150" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="284" y="184" text-anchor="middle">ENTRADA · retest del suelo</text>
+        <line class="w-bull" x1="36" y1="68" x2="36" y2="158"/><rect class="b-bull" x="32" y="76" width="8" height="76"/>
+        <line class="w-bear" x1="58" y1="74" x2="58" y2="164"/><rect class="b-bear" x="54" y="82" width="8" height="76"/>
+        <line class="w-bull" x1="80" y1="86" x2="80" y2="158"/><rect class="b-bull" x="76" y="92" width="8" height="58"/>
+        <line class="w-bear" x1="102" y1="92" x2="102" y2="160"/><rect class="b-bear" x="98" y="96" width="8" height="58"/>
+        <line class="w-bull" x1="124" y1="98" x2="124" y2="158"/><rect class="b-bull" x="120" y="104" width="8" height="50"/>
+        <line class="w-bear" x1="146" y1="104" x2="146" y2="160"/><rect class="b-bear" x="142" y="108" width="8" height="46"/>
+        <line class="w-bull" x1="168" y1="110" x2="168" y2="158"/><rect class="b-bull" x="164" y="116" width="8" height="38"/>
+        <line class="w-bear" x1="190" y1="118" x2="190" y2="160"/><rect class="b-bear" x="186" y="122" width="8" height="34"/>
+        <line class="w-bear" x1="220" y1="126" x2="220" y2="180"/><rect class="b-bear" x="216" y="132" width="8" height="44"/>
+        <line class="w-bull" x1="252" y1="142" x2="252" y2="168"/><rect class="b-bull" x="248" y="146" width="8" height="20"/>
+        <line class="w-bear" x1="274" y1="148" x2="274" y2="178"/><rect class="b-bear" x="270" y="154" width="8" height="22"/>
+        <path class="entry-arrow-bear" d="M292 164 L304 172 L300 168 L308 168 L308 160 L300 160 L304 156 Z"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Soporte plano + highs descendentes · presión bajista · ruptura típicamente a la baja</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Antes de la ruptura del suelo — los rebotes pueden seguir.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Cierre M5 bajo el suelo + retest del nivel (ahora resistencia).</dd>
+        <dt class="inv">Invalidación</dt><dd>Ruptura del LH más reciente al alza → la presión bajista se agotó.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 13. Bull Flag -->
+    <article class="card" data-name="flag bullish bandera alcista continuacion">
+      <header class="card-head">
+        <h3>Bandera alcista (Bull flag)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Continuación alcista</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-solid" x1="100" y1="58" x2="220" y2="80"/>
+        <line class="struct-solid" x1="100" y1="110" x2="220" y2="132"/>
+        <text class="struct-label" x="60" y="46" text-anchor="middle">FLAGPOLE</text>
+        <rect class="zone-guess" x="100" y="58" width="120" height="74" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="160" y="148" text-anchor="middle">ZONA DE ADIVINAR · la bandera</text>
+        <rect class="zone-entry" x="232" y="60" width="62" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="263" y="56" text-anchor="middle">ENTRADA · retest del techo</text>
+        <!-- Flagpole: 3 big green candles -->
+        <line class="w-bull" x1="30" y1="150" x2="30" y2="188"/><rect class="b-bull" x="26" y="158" width="8" height="26"/>
+        <line class="w-bull" x1="52" y1="100" x2="52" y2="160"/><rect class="b-bull" x="48" y="106" width="8" height="50"/>
+        <line class="w-bull" x1="74" y1="60" x2="74" y2="118"/><rect class="b-bull" x="70" y="66" width="8" height="48"/>
+        <!-- Flag: small descending parallel channel -->
+        <line class="w-bear" x1="106" y1="56" x2="106" y2="106"/><rect class="b-bear" x="102" y="62" width="8" height="38"/>
+        <line class="w-bull" x1="128" y1="80" x2="128" y2="112"/><rect class="b-bull" x="124" y="84" width="8" height="22"/>
+        <line class="w-bear" x1="150" y1="74" x2="150" y2="118"/><rect class="b-bear" x="146" y="80" width="8" height="32"/>
+        <line class="w-bull" x1="172" y1="92" x2="172" y2="124"/><rect class="b-bull" x="168" y="96" width="8" height="22"/>
+        <line class="w-bear" x1="194" y1="86" x2="194" y2="130"/><rect class="b-bear" x="190" y="92" width="8" height="32"/>
+        <!-- Breakout -->
+        <line class="w-bull" x1="220" y1="58" x2="220" y2="110"/><rect class="b-bull" x="216" y="64" width="8" height="40"/>
+        <!-- Retest -->
+        <line class="w-bear" x1="240" y1="60" x2="240" y2="86"/><rect class="b-bear" x="236" y="64" width="8" height="20"/>
+        <line class="w-bull" x1="262" y1="50" x2="262" y2="80"/><rect class="b-bull" x="258" y="54" width="8" height="20"/>
+        <path class="entry-arrow" d="M280 70 L292 62 L288 66 L296 66 L296 74 L288 74 L292 78 Z"/>
+        <line class="w-bull" x1="290" y1="32" x2="290" y2="64"/><rect class="b-bull" x="286" y="38" width="8" height="22"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Movimiento fuerte (flagpole) + canal de consolidación inclinado · ruptura al alza</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro de la bandera — la pausa puede prolongarse o invertirse.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Cierre M5 sobre la línea superior del canal + retest opcional para mejor RRR.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo de la línea inferior del canal → no era continuación.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 14. Pennant -->
+    <article class="card" data-name="pennant banderin continuacion">
+      <header class="card-head">
+        <h3>Banderín (Pennant)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Continuación direccional</span>
+          <span class="bias-tag rel-tag rel-low">★ baja en scalp</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-solid" x1="100" y1="58" x2="200" y2="100"/>
+        <line class="struct-solid" x1="100" y1="120" x2="200" y2="100"/>
+        <text class="struct-label" x="60" y="46" text-anchor="middle">IMPULSO</text>
+        <rect class="zone-guess" x="100" y="58" width="100" height="62" rx="2" opacity="0.5"/>
+        <text class="zone-label zone-label-g" x="150" y="138" text-anchor="middle">ZONA DE ADIVINAR · banderín</text>
+        <rect class="zone-entry" x="220" y="50" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="252" y="46" text-anchor="middle">ENTRADA · break + retest</text>
+        <!-- Impulse -->
+        <line class="w-bull" x1="30" y1="150" x2="30" y2="188"/><rect class="b-bull" x="26" y="158" width="8" height="26"/>
+        <line class="w-bull" x1="52" y1="90" x2="52" y2="158"/><rect class="b-bull" x="48" y="96" width="8" height="58"/>
+        <line class="w-bull" x1="74" y1="58" x2="74" y2="106"/><rect class="b-bull" x="70" y="64" width="8" height="40"/>
+        <!-- Pennant -->
+        <line class="w-bear" x1="106" y1="64" x2="106" y2="108"/><rect class="b-bear" x="102" y="70" width="8" height="32"/>
+        <line class="w-bull" x1="128" y1="76" x2="128" y2="110"/><rect class="b-bull" x="124" y="80" width="8" height="24"/>
+        <line class="w-bear" x1="150" y1="80" x2="150" y2="108"/><rect class="b-bear" x="146" y="84" width="8" height="20"/>
+        <line class="w-bull" x1="172" y1="88" x2="172" y2="104"/><rect class="b-bull" x="168" y="92" width="8" height="10"/>
+        <line class="w-bear" x1="194" y1="90" x2="194" y2="104"/><rect class="b-bear" x="190" y="94" width="8" height="8"/>
+        <!-- Breakout -->
+        <line class="w-bull" x1="216" y1="50" x2="216" y2="100"/><rect class="b-bull" x="212" y="56" width="8" height="38"/>
+        <line class="w-bull" x1="240" y1="58" x2="240" y2="80"/><rect class="b-bull" x="236" y="62" width="8" height="16"/>
+        <line class="w-bear" x1="258" y1="52" x2="258" y2="74"/><rect class="b-bear" x="254" y="58" width="8" height="14"/>
+        <path class="entry-arrow" d="M278 62 L290 54 L286 58 L294 58 L294 66 L286 66 L290 70 Z"/>
+        <line class="w-bull" x1="288" y1="30" x2="288" y2="56"/><rect class="b-bull" x="284" y="36" width="8" height="16"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Impulso + pequeño triángulo simétrico · pausa muy breve · romper rápido o no es banderín</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Dentro del banderín — su validez es muy breve (~5-10 velas máx).</dd>
+        <dt class="ok">Entrada válida</dt><dd>Ruptura en dirección del impulso previo + retest. Sin volumen, ignorar.</dd>
+        <dt class="inv">Invalidación</dt><dd>Más de 10-15 velas sin ruptura → ya no es banderín, es lateralización.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 15. Double Bottom -->
+    <article class="card" data-name="double bottom doble suelo reversion">
+      <header class="card-head">
+        <h3>Doble suelo</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Reversión alcista</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media-alta con sweep</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="160" x2="340" y2="160"/>
+        <text class="struct-label" x="30" y="156">Soporte = doble suelo</text>
+        <line class="struct-info" x1="20" y1="80" x2="340" y2="80"/>
+        <text class="struct-label-i" x="332" y="76" text-anchor="end">Neckline</text>
+        <rect class="zone-guess" x="20" y="80" width="220" height="80" rx="2"/>
+        <text class="zone-label zone-label-g" x="130" y="178" text-anchor="middle">ZONA DE ADIVINAR · oscilación entre el suelo y la neckline</text>
+        <rect class="zone-entry" x="252" y="68" width="62" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="283" y="64" text-anchor="middle">ENTRADA · retest neckline</text>
+        <!-- Drop to first bottom -->
+        <line class="w-bear" x1="30" y1="60" x2="30" y2="120"/><rect class="b-bear" x="26" y="66" width="8" height="46"/>
+        <line class="w-bear" x1="52" y1="100" x2="52" y2="156"/><rect class="b-bear" x="48" y="106" width="8" height="44"/>
+        <line class="w-bear" x1="74" y1="138" x2="74" y2="164"/><rect class="b-bear" x="70" y="142" width="8" height="18"/>
+        <circle cx="74" cy="160" r="3" fill="var(--accent)"/>
+        <!-- Bounce to neckline -->
+        <line class="w-bull" x1="96" y1="84" x2="96" y2="150"/><rect class="b-bull" x="92" y="92" width="8" height="52"/>
+        <line class="w-bull" x1="118" y1="78" x2="118" y2="108"/><rect class="b-bull" x="114" y="82" width="8" height="22"/>
+        <!-- Second drop -->
+        <line class="w-bear" x1="140" y1="84" x2="140" y2="138"/><rect class="b-bear" x="136" y="88" width="8" height="46"/>
+        <line class="w-bear" x1="162" y1="120" x2="162" y2="160"/><rect class="b-bear" x="158" y="126" width="8" height="30"/>
+        <line class="w-bear" x1="184" y1="144" x2="184" y2="164"/><rect class="b-bear" x="180" y="148" width="8" height="12"/>
+        <circle cx="184" cy="160" r="3" fill="var(--accent)"/>
+        <!-- Push to neckline -->
+        <line class="w-bull" x1="206" y1="86" x2="206" y2="156"/><rect class="b-bull" x="202" y="92" width="8" height="56"/>
+        <line class="w-bull" x1="228" y1="76" x2="228" y2="102"/><rect class="b-bull" x="224" y="80" width="8" height="20"/>
+        <!-- Break of neckline + retest -->
+        <line class="w-bull" x1="252" y1="60" x2="252" y2="92"/><rect class="b-bull" x="248" y="66" width="8" height="20"/>
+        <line class="w-bear" x1="274" y1="68" x2="274" y2="94"/><rect class="b-bear" x="270" y="74" width="8" height="16"/>
+        <line class="w-bull" x1="296" y1="58" x2="296" y2="86"/><rect class="b-bull" x="292" y="62" width="8" height="18"/>
+        <path class="entry-arrow" d="M312 76 L324 68 L320 72 L328 72 L328 80 L320 80 L324 84 Z"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Dos suelos similares + ruptura de la neckline · el retest del neckline = entrada de mejor RRR</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En el segundo toque del suelo — sigue siendo "adivinar" hasta que la neckline se rompa.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Ruptura de la neckline + retest desde arriba con vela de confirmación.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo del segundo suelo → la reversión falló.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 16. Double Top -->
+    <article class="card" data-name="double top doble techo reversion">
+      <header class="card-head">
+        <h3>Doble techo</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Reversión bajista</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media-alta con sweep</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="56" x2="340" y2="56"/>
+        <text class="struct-label" x="30" y="52">Resistencia = doble techo</text>
+        <line class="struct-info" x1="20" y1="130" x2="340" y2="130"/>
+        <text class="struct-label-i" x="332" y="126" text-anchor="end">Neckline</text>
+        <rect class="zone-guess" x="20" y="56" width="220" height="74" rx="2"/>
+        <text class="zone-label zone-label-g" x="130" y="178" text-anchor="middle">ZONA DE ADIVINAR · oscilación entre techo y neckline</text>
+        <rect class="zone-entry-bear" x="252" y="124" width="62" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="283" y="162" text-anchor="middle">ENTRADA · retest neckline</text>
+        <line class="w-bull" x1="30" y1="160" x2="30" y2="200"/><rect class="b-bull" x="26" y="166" width="8" height="30"/>
+        <line class="w-bull" x1="52" y1="80" x2="52" y2="170"/><rect class="b-bull" x="48" y="88" width="8" height="76"/>
+        <line class="w-bull" x1="74" y1="52" x2="74" y2="100"/><rect class="b-bull" x="70" y="58" width="8" height="40"/>
+        <circle cx="74" cy="52" r="3" fill="var(--accent)"/>
+        <line class="w-bear" x1="96" y1="62" x2="96" y2="140"/><rect class="b-bear" x="92" y="70" width="8" height="62"/>
+        <line class="w-bear" x1="118" y1="108" x2="118" y2="138"/><rect class="b-bear" x="114" y="112" width="8" height="22"/>
+        <line class="w-bull" x1="140" y1="68" x2="140" y2="138"/><rect class="b-bull" x="136" y="76" width="8" height="58"/>
+        <line class="w-bull" x1="162" y1="52" x2="162" y2="100"/><rect class="b-bull" x="158" y="58" width="8" height="30"/>
+        <circle cx="162" cy="52" r="3" fill="var(--accent)"/>
+        <line class="w-bear" x1="184" y1="60" x2="184" y2="122"/><rect class="b-bear" x="180" y="68" width="8" height="50"/>
+        <line class="w-bear" x1="206" y1="86" x2="206" y2="138"/><rect class="b-bear" x="202" y="94" width="8" height="40"/>
+        <line class="w-bear" x1="228" y1="120" x2="228" y2="148"/><rect class="b-bear" x="224" y="124" width="8" height="20"/>
+        <line class="w-bear" x1="252" y1="130" x2="252" y2="166"/><rect class="b-bear" x="248" y="134" width="8" height="28"/>
+        <line class="w-bull" x1="274" y1="120" x2="274" y2="148"/><rect class="b-bull" x="270" y="126" width="8" height="18"/>
+        <line class="w-bear" x1="296" y1="128" x2="296" y2="156"/><rect class="b-bear" x="292" y="134" width="8" height="18"/>
+        <path class="entry-arrow-bear" d="M312 142 L324 150 L320 146 L328 146 L328 138 L320 138 L324 134 Z"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Dos techos similares + ruptura de neckline · retest = entrada limpia</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En el segundo techo — la ruptura aún no ha sucedido.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Ruptura de neckline + retest desde abajo con vela bajista de confirmación.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 sobre el segundo techo → la reversión falló.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 17. Head and Shoulders -->
+    <article class="card" data-name="head and shoulders hombro cabeza hombro hch reversion">
+      <header class="card-head">
+        <h3>Hombro-Cabeza-Hombro</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Reversión bajista (techo)</span>
+          <span class="bias-tag rel-tag rel-low">★ baja en M5</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-info" x1="20" y1="120" x2="340" y2="120"/>
+        <text class="struct-label-i" x="332" y="116" text-anchor="end">Neckline</text>
+        <rect class="zone-guess" x="20" y="40" width="240" height="80" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="138" text-anchor="middle">ZONA DE ADIVINAR · formación H-C-H</text>
+        <rect class="zone-entry-bear" x="270" y="114" width="60" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="300" y="152" text-anchor="middle">ENTRADA · retest neckline</text>
+        <!-- Left shoulder -->
+        <line class="w-bull" x1="30" y1="110" x2="30" y2="160"/><rect class="b-bull" x="26" y="116" width="8" height="36"/>
+        <line class="w-bull" x1="52" y1="80" x2="52" y2="118"/><rect class="b-bull" x="48" y="84" width="8" height="28"/>
+        <circle cx="52" cy="80" r="3" fill="var(--accent)"/><text class="struct-label" x="52" y="74" text-anchor="middle">H</text>
+        <line class="w-bear" x1="74" y1="86" x2="74" y2="124"/><rect class="b-bear" x="70" y="92" width="8" height="28"/>
+        <line class="w-bear" x1="96" y1="112" x2="96" y2="128"/><rect class="b-bear" x="92" y="116" width="8" height="8"/>
+        <!-- Head -->
+        <line class="w-bull" x1="118" y1="98" x2="118" y2="128"/><rect class="b-bull" x="114" y="104" width="8" height="20"/>
+        <line class="w-bull" x1="140" y1="56" x2="140" y2="108"/><rect class="b-bull" x="136" y="62" width="8" height="40"/>
+        <circle cx="140" cy="56" r="3" fill="var(--accent)"/><text class="struct-label" x="140" y="50" text-anchor="middle">C</text>
+        <line class="w-bear" x1="162" y1="62" x2="162" y2="118"/><rect class="b-bear" x="158" y="70" width="8" height="44"/>
+        <line class="w-bear" x1="184" y1="106" x2="184" y2="128"/><rect class="b-bear" x="180" y="112" width="8" height="14"/>
+        <!-- Right shoulder -->
+        <line class="w-bull" x1="206" y1="84" x2="206" y2="124"/><rect class="b-bull" x="202" y="90" width="8" height="30"/>
+        <line class="w-bull" x1="228" y1="78" x2="228" y2="108"/><rect class="b-bull" x="224" y="82" width="8" height="22"/>
+        <circle cx="228" cy="78" r="3" fill="var(--accent)"/><text class="struct-label" x="228" y="72" text-anchor="middle">H</text>
+        <line class="w-bear" x1="250" y1="84" x2="250" y2="124"/><rect class="b-bear" x="246" y="90" width="8" height="30"/>
+        <!-- Break of neckline -->
+        <line class="w-bear" x1="272" y1="116" x2="272" y2="158"/><rect class="b-bear" x="268" y="122" width="8" height="32"/>
+        <line class="w-bull" x1="294" y1="114" x2="294" y2="142"/><rect class="b-bull" x="290" y="118" width="8" height="18"/>
+        <line class="w-bear" x1="316" y1="124" x2="316" y2="170"/><rect class="b-bear" x="312" y="128" width="8" height="38"/>
+        <text class="svg-legend" x="180" y="212" text-anchor="middle">Tres picos: cabeza más alta entre dos hombros · ruptura del neckline es la entrada</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En el hombro derecho — todavía puede romper al alza y anular la figura.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Ruptura del neckline + retest desde abajo con vela bajista.</dd>
+        <dt class="inv">Invalidación</dt><dd>Hombro derecho hace nuevo máximo sobre la cabeza → figura anulada.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 18. Inverse H&S -->
+    <article class="card" data-name="inverse head shoulders hombro cabeza hombro invertido reversion">
+      <header class="card-head">
+        <h3>Hombro-Cabeza-Hombro invertido</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Reversión alcista (suelo)</span>
+          <span class="bias-tag rel-tag rel-low">★ baja en M5</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct-info" x1="20" y1="80" x2="340" y2="80"/>
+        <text class="struct-label-i" x="332" y="76" text-anchor="end">Neckline</text>
+        <rect class="zone-guess" x="20" y="80" width="240" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="194" text-anchor="middle">ZONA DE ADIVINAR · formación invertida</text>
+        <rect class="zone-entry" x="270" y="60" width="60" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="300" y="56" text-anchor="middle">ENTRADA · retest neckline</text>
+        <line class="w-bear" x1="30" y1="56" x2="30" y2="106"/><rect class="b-bear" x="26" y="62" width="8" height="38"/>
+        <line class="w-bear" x1="52" y1="100" x2="52" y2="140"/><rect class="b-bear" x="48" y="106" width="8" height="30"/>
+        <circle cx="52" cy="140" r="3" fill="var(--accent)"/><text class="struct-label" x="52" y="154" text-anchor="middle">H</text>
+        <line class="w-bull" x1="74" y1="92" x2="74" y2="138"/><rect class="b-bull" x="70" y="98" width="8" height="34"/>
+        <line class="w-bull" x1="96" y1="76" x2="96" y2="104"/><rect class="b-bull" x="92" y="80" width="8" height="20"/>
+        <line class="w-bear" x1="118" y1="84" x2="118" y2="122"/><rect class="b-bear" x="114" y="88" width="8" height="28"/>
+        <line class="w-bear" x1="140" y1="116" x2="140" y2="168"/><rect class="b-bear" x="136" y="124" width="8" height="40"/>
+        <circle cx="140" cy="168" r="3" fill="var(--accent)"/><text class="struct-label" x="140" y="180" text-anchor="middle">C</text>
+        <line class="w-bull" x1="162" y1="98" x2="162" y2="166"/><rect class="b-bull" x="158" y="106" width="8" height="50"/>
+        <line class="w-bull" x1="184" y1="80" x2="184" y2="110"/><rect class="b-bull" x="180" y="84" width="8" height="22"/>
+        <line class="w-bear" x1="206" y1="86" x2="206" y2="124"/><rect class="b-bear" x="202" y="92" width="8" height="28"/>
+        <line class="w-bear" x1="228" y1="116" x2="228" y2="148"/><rect class="b-bear" x="224" y="122" width="8" height="22"/>
+        <circle cx="228" cy="148" r="3" fill="var(--accent)"/><text class="struct-label" x="228" y="162" text-anchor="middle">H</text>
+        <line class="w-bull" x1="250" y1="98" x2="250" y2="142"/><rect class="b-bull" x="246" y="106" width="8" height="32"/>
+        <line class="w-bull" x1="272" y1="60" x2="272" y2="100"/><rect class="b-bull" x="268" y="66" width="8" height="30"/>
+        <line class="w-bear" x1="294" y1="66" x2="294" y2="92"/><rect class="b-bear" x="290" y="72" width="8" height="16"/>
+        <line class="w-bull" x1="316" y1="46" x2="316" y2="80"/><rect class="b-bull" x="312" y="50" width="8" height="22"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Tres mínimos: cabeza más profunda entre dos hombros · ruptura del neckline alcista</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En el hombro derecho — todavía puede romper a la baja y anular la figura.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Ruptura del neckline + retest desde arriba con vela alcista de confirmación.</dd>
+        <dt class="inv">Invalidación</dt><dd>Hombro derecho hace nuevo mínimo bajo la cabeza → figura anulada.</dd>
+      </dl></div>
+    </article>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       GROUP 3 · VELAS INDIVIDUALES Y DE 2-3 VELAS
+       ════════════════════════════════════════════════════════════════ -->
+  <section class="group" data-open="true">
+    <button class="group-toggle">
+      <span>Velas · Gatillo en M5 <span class="subtitle">· Patrones de 1-3 velas para confirmación de entrada</span></span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="group-body">
+
+    <!-- 19. Pin bar / Hammer -->
+    <article class="card" data-name="pin bar martillo hammer pinbar vela rechazo">
+      <header class="card-head">
+        <h3>Pin bar / Martillo</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Reversión sobre soporte</span>
+          <span class="bias-tag rel-tag rel-high">★★★ sobre S/R limpio</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="150" x2="340" y2="150"/>
+        <text class="struct-label" x="30" y="146">Soporte clave</text>
+        <rect class="zone-guess" x="100" y="60" width="80" height="120" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="200" text-anchor="middle">ZONA DE ADIVINAR · pin formándose</text>
+        <rect class="zone-entry" x="200" y="86" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="232" y="124" text-anchor="middle">ENTRADA · vela siguiente</text>
+        <line class="w-bear" x1="30" y1="84" x2="30" y2="138"/><rect class="b-bear" x="26" y="90" width="8" height="42"/>
+        <line class="w-bear" x1="52" y1="100" x2="52" y2="142"/><rect class="b-bear" x="48" y="106" width="8" height="32"/>
+        <line class="w-bear" x1="74" y1="116" x2="74" y2="146"/><rect class="b-bear" x="70" y="122" width="8" height="22"/>
+        <!-- The pin bar: long lower wick, small body at top -->
+        <line class="w-bull" x1="118" y1="92" x2="118" y2="176"/><rect class="b-bull" x="114" y="92" width="8" height="14"/>
+        <text class="struct-label" x="118" y="84" text-anchor="middle">PIN</text>
+        <!-- Optional 2nd small candle -->
+        <line class="w-bull" x1="140" y1="98" x2="140" y2="124"/><rect class="b-bull" x="136" y="102" width="8" height="18"/>
+        <!-- Entry trigger: next bullish candle -->
+        <line class="w-bull" x1="208" y1="80" x2="208" y2="112"/><rect class="b-bull" x="204" y="86" width="8" height="20"/>
+        <path class="entry-arrow" d="M226 96 L238 88 L234 92 L242 92 L242 100 L234 100 L238 104 Z"/>
+        <line class="w-bull" x1="246" y1="62" x2="246" y2="90"/><rect class="b-bull" x="242" y="68" width="8" height="18"/>
+        <line class="w-bull" x1="268" y1="50" x2="268" y2="74"/><rect class="b-bull" x="264" y="54" width="8" height="16"/>
+        <line class="w-bull" x1="290" y1="40" x2="290" y2="62"/><rect class="b-bull" x="286" y="46" width="8" height="12"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Mecha inferior ≥ 2× del cuerpo · cuerpo en el tercio superior · S/R válido debajo</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En la propia vela del pin — está formándose, su cierre no es seguro.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Tras el cierre del pin, en la vela siguiente que continúa al alza (cuerpo verde sobre el cierre del pin).</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo del low del pin → el soporte cede.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 20. Shooting Star -->
+    <article class="card" data-name="shooting star estrella fugaz vela rechazo bajista">
+      <header class="card-head">
+        <h3>Estrella fugaz (Shooting star)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Reversión sobre resistencia</span>
+          <span class="bias-tag rel-tag rel-high">★★★ sobre S/R limpio</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="70" x2="340" y2="70"/>
+        <text class="struct-label" x="30" y="66">Resistencia clave</text>
+        <rect class="zone-guess" x="100" y="40" width="80" height="120" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="32" text-anchor="middle">ZONA DE ADIVINAR · estrella formándose</text>
+        <rect class="zone-entry-bear" x="200" y="112" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="232" y="152" text-anchor="middle">ENTRADA · vela siguiente</text>
+        <line class="w-bull" x1="30" y1="82" x2="30" y2="136"/><rect class="b-bull" x="26" y="88" width="8" height="42"/>
+        <line class="w-bull" x1="52" y1="78" x2="52" y2="120"/><rect class="b-bull" x="48" y="82" width="8" height="32"/>
+        <line class="w-bull" x1="74" y1="74" x2="74" y2="104"/><rect class="b-bull" x="70" y="78" width="8" height="22"/>
+        <line class="w-bear" x1="118" y1="44" x2="118" y2="128"/><rect class="b-bear" x="114" y="114" width="8" height="14"/>
+        <text class="struct-label" x="118" y="38" text-anchor="middle">STAR</text>
+        <line class="w-bear" x1="140" y1="96" x2="140" y2="122"/><rect class="b-bear" x="136" y="100" width="8" height="18"/>
+        <line class="w-bear" x1="208" y1="108" x2="208" y2="140"/><rect class="b-bear" x="204" y="114" width="8" height="20"/>
+        <path class="entry-arrow-bear" d="M226 124 L238 132 L234 128 L242 128 L242 120 L234 120 L238 116 Z"/>
+        <line class="w-bear" x1="246" y1="130" x2="246" y2="158"/><rect class="b-bear" x="242" y="134" width="8" height="18"/>
+        <line class="w-bear" x1="268" y1="146" x2="268" y2="170"/><rect class="b-bear" x="264" y="150" width="8" height="16"/>
+        <line class="w-bear" x1="290" y1="158" x2="290" y2="180"/><rect class="b-bear" x="286" y="162" width="8" height="14"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Mecha superior ≥ 2× del cuerpo · cuerpo en el tercio inferior · S/R válido encima</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Durante la formación — la mecha podría no cerrarse.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Tras el cierre de la estrella, vela siguiente bajista bajo el cierre de la estrella.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 sobre el high de la estrella → resistencia rota, no era reversión.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 21. Doji -->
+    <article class="card" data-name="doji indecision">
+      <header class="card-head">
+        <h3>Doji</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-neutral">Indecisión · solo en contexto</span>
+          <span class="bias-tag rel-tag rel-low">★ baja aislado</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="110" x2="340" y2="110"/>
+        <text class="struct-label" x="30" y="106">S/R (única razón para mirar un doji)</text>
+        <rect class="zone-guess" x="100" y="40" width="80" height="160" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="32" text-anchor="middle">ZONA DE ADIVINAR · doji aislado = ruido</text>
+        <rect class="zone-entry" x="200" y="92" width="120" height="36" rx="2"/>
+        <text class="zone-label zone-label-e" x="260" y="146" text-anchor="middle">ENTRADA · solo con CONTEXTO S/R y vela siguiente</text>
+        <line class="w-bear" x1="30" y1="60" x2="30" y2="146"/><rect class="b-bear" x="26" y="68" width="8" height="60"/>
+        <line class="w-bear" x1="52" y1="78" x2="52" y2="156"/><rect class="b-bear" x="48" y="82" width="8" height="54"/>
+        <line class="w-bear" x1="74" y1="92" x2="74" y2="156"/><rect class="b-bear" x="70" y="98" width="8" height="44"/>
+        <line class="b-doji" x1="118" y1="74" x2="118" y2="146" stroke="#94a3b8"/>
+        <line class="b-doji" x1="110" y1="110" x2="126" y2="110" stroke="#94a3b8" stroke-width="2"/>
+        <text class="struct-label" x="118" y="66" text-anchor="middle">DOJI</text>
+        <line class="w-bull" x1="140" y1="92" x2="140" y2="138"/><rect class="b-bull" x="136" y="98" width="8" height="34"/>
+        <line class="w-bull" x1="208" y1="86" x2="208" y2="124"/><rect class="b-bull" x="204" y="92" width="8" height="26"/>
+        <path class="entry-arrow" d="M226 106 L238 98 L234 102 L242 102 L242 110 L234 110 L238 114 Z"/>
+        <line class="w-bull" x1="246" y1="74" x2="246" y2="98"/><rect class="b-bull" x="242" y="78" width="8" height="16"/>
+        <line class="w-bull" x1="268" y1="58" x2="268" y2="84"/><rect class="b-bull" x="264" y="62" width="8" height="18"/>
+        <line class="w-bull" x1="290" y1="46" x2="290" y2="70"/><rect class="b-bull" x="286" y="50" width="8" height="16"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Open ≈ Close · solo opera doji si está sobre S/R limpio Y la vela siguiente lo confirma</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Doji a media estructura — es solo indecisión, no señal. Lo usas en contexto o no lo usas.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Doji sobre S/R clave + vela siguiente con cuerpo claro en la dirección esperada.</dd>
+        <dt class="inv">Invalidación</dt><dd>Segunda vela rompe el extremo opuesto del doji → no hay reversión.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 22. Marubozu -->
+    <article class="card" data-name="marubozu vela cuerpo solido">
+      <header class="card-head">
+        <h3>Marubozu</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-neutral">Fuerza direccional · ambigua</span>
+          <span class="bias-tag rel-tag rel-low">★ baja aislado</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <rect class="zone-guess" x="100" y="40" width="80" height="160" rx="2"/>
+        <text class="zone-label zone-label-g" x="140" y="32" text-anchor="middle">ZONA DE ADIVINAR · marubozu aislado</text>
+        <rect class="zone-entry" x="200" y="80" width="120" height="36" rx="2"/>
+        <text class="zone-label zone-label-e" x="260" y="134" text-anchor="middle">ENTRADA · solo con confirmación de continuación</text>
+        <line class="w-bear" x1="30" y1="58" x2="30" y2="100"/><rect class="b-bear" x="26" y="62" width="8" height="34"/>
+        <line class="w-bear" x1="52" y1="86" x2="52" y2="130"/><rect class="b-bear" x="48" y="90" width="8" height="36"/>
+        <line class="w-bull" x1="74" y1="110" x2="74" y2="150"/><rect class="b-bull" x="70" y="116" width="8" height="30"/>
+        <rect class="b-bull" x="113" y="60" width="10" height="140"/>
+        <text class="struct-label" x="118" y="50" text-anchor="middle">MARUBOZU</text>
+        <line class="w-bear" x1="140" y1="48" x2="140" y2="78"/><rect class="b-bear" x="136" y="52" width="8" height="20"/>
+        <line class="w-bull" x1="208" y1="60" x2="208" y2="92"/><rect class="b-bull" x="204" y="64" width="8" height="22"/>
+        <path class="entry-arrow" d="M226 76 L238 68 L234 72 L242 72 L242 80 L234 80 L238 84 Z"/>
+        <line class="w-bull" x1="246" y1="40" x2="246" y2="74"/><rect class="b-bull" x="242" y="44" width="8" height="22"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Cuerpo grande sin mechas · fuerza pero también riesgo de exhaustion al extremo</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En el cierre del marubozu — puede ser continuación O exhaustion. Sin contexto, 50/50.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Tras vela siguiente que confirma continuación con cuerpo claro y sin mecha contraria larga.</dd>
+        <dt class="inv">Invalidación</dt><dd>Vela siguiente engulfing en sentido contrario → era exhaustion, no continuación.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 23. Bullish Engulfing -->
+    <article class="card" data-name="bullish engulfing envolvente alcista">
+      <header class="card-head">
+        <h3>Envolvente alcista (Bullish engulfing)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Reversión sobre soporte</span>
+          <span class="bias-tag rel-tag rel-high">★★★ con S/R debajo</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="150" x2="340" y2="150"/>
+        <text class="struct-label" x="30" y="146">Soporte clave</text>
+        <rect class="zone-guess" x="80" y="60" width="80" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="120" y="180" text-anchor="middle">ZA · velas individuales formándose</text>
+        <rect class="zone-entry" x="200" y="86" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="232" y="126" text-anchor="middle">ENTRADA · al cierre de la envolvente</text>
+        <line class="w-bear" x1="30" y1="60" x2="30" y2="116"/><rect class="b-bear" x="26" y="66" width="8" height="38"/>
+        <line class="w-bear" x1="52" y1="88" x2="52" y2="134"/><rect class="b-bear" x="48" y="94" width="8" height="32"/>
+        <line class="w-bear" x1="74" y1="110" x2="74" y2="148"/><rect class="b-bear" x="70" y="116" width="8" height="22"/>
+        <line class="w-bear" x1="96" y1="116" x2="96" y2="138"/><rect class="b-bear" x="92" y="120" width="8" height="14"/>
+        <text class="struct-label" x="96" y="112" text-anchor="middle">C1</text>
+        <line class="w-bull" x1="118" y1="84" x2="118" y2="146"/><rect class="b-bull" x="114" y="90" width="8" height="50"/>
+        <text class="struct-label" x="118" y="78" text-anchor="middle">C2 envuelve</text>
+        <line class="w-bull" x1="208" y1="76" x2="208" y2="106"/><rect class="b-bull" x="204" y="82" width="8" height="20"/>
+        <path class="entry-arrow" d="M226 96 L238 88 L234 92 L242 92 L242 100 L234 100 L238 104 Z"/>
+        <line class="w-bull" x1="246" y1="58" x2="246" y2="88"/><rect class="b-bull" x="242" y="62" width="8" height="22"/>
+        <line class="w-bull" x1="268" y1="44" x2="268" y2="68"/><rect class="b-bull" x="264" y="48" width="8" height="16"/>
+        <line class="w-bull" x1="290" y1="36" x2="290" y2="56"/><rect class="b-bull" x="286" y="40" width="8" height="14"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Vela verde cuyo cuerpo cubre entero el cuerpo rojo previo · debe formarse tras downmove</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En la primera vela bajista — el engulfing aún no está confirmado.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Al cierre de la vela alcista que envuelve, o en la siguiente para mayor seguridad.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por debajo del low de la envolvente → el rechazo falló.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 24. Bearish Engulfing -->
+    <article class="card" data-name="bearish engulfing envolvente bajista">
+      <header class="card-head">
+        <h3>Envolvente bajista (Bearish engulfing)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Reversión sobre resistencia</span>
+          <span class="bias-tag rel-tag rel-high">★★★ con S/R encima</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="70" x2="340" y2="70"/>
+        <text class="struct-label" x="30" y="66">Resistencia clave</text>
+        <rect class="zone-guess" x="80" y="60" width="80" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="120" y="40" text-anchor="middle">ZA · velas individuales formándose</text>
+        <rect class="zone-entry-bear" x="200" y="112" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="232" y="152" text-anchor="middle">ENTRADA · al cierre de la envolvente</text>
+        <line class="w-bull" x1="30" y1="160" x2="30" y2="200"/><rect class="b-bull" x="26" y="166" width="8" height="32"/>
+        <line class="w-bull" x1="52" y1="120" x2="52" y2="168"/><rect class="b-bull" x="48" y="126" width="8" height="36"/>
+        <line class="w-bull" x1="74" y1="92" x2="74" y2="138"/><rect class="b-bull" x="70" y="98" width="8" height="32"/>
+        <line class="w-bull" x1="96" y1="82" x2="96" y2="108"/><rect class="b-bull" x="92" y="86" width="8" height="18"/>
+        <text class="struct-label" x="96" y="78" text-anchor="middle">C1</text>
+        <line class="w-bear" x1="118" y1="68" x2="118" y2="138"/><rect class="b-bear" x="114" y="76" width="8" height="50"/>
+        <text class="struct-label" x="118" y="148" text-anchor="middle">C2 envuelve</text>
+        <line class="w-bear" x1="208" y1="100" x2="208" y2="130"/><rect class="b-bear" x="204" y="106" width="8" height="20"/>
+        <path class="entry-arrow-bear" d="M226 122 L238 130 L234 126 L242 126 L242 118 L234 118 L238 114 Z"/>
+        <line class="w-bear" x1="246" y1="124" x2="246" y2="158"/><rect class="b-bear" x="242" y="128" width="8" height="22"/>
+        <line class="w-bear" x1="268" y1="146" x2="268" y2="174"/><rect class="b-bear" x="264" y="150" width="8" height="18"/>
+        <line class="w-bear" x1="290" y1="160" x2="290" y2="184"/><rect class="b-bear" x="286" y="164" width="8" height="16"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Vela roja cuyo cuerpo cubre entero el cuerpo verde previo · debe formarse tras upmove</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En la primera vela alcista — el engulfing aún no está confirmado.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Al cierre de la vela bajista que envuelve, o en la siguiente para mayor seguridad.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 por encima del high de la envolvente → el rechazo falló.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 25. Morning Star -->
+    <article class="card" data-name="morning star estrella manana reversion alcista">
+      <header class="card-head">
+        <h3>Estrella de la mañana (Morning star)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Reversión alcista 3 velas</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media-alta</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="150" x2="340" y2="150"/>
+        <text class="struct-label" x="30" y="146">Soporte clave</text>
+        <rect class="zone-guess" x="56" y="60" width="120" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="116" y="180" text-anchor="middle">ZA · formación de las 3 velas</text>
+        <rect class="zone-entry" x="200" y="80" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="232" y="120" text-anchor="middle">ENTRADA · cierre de C3</text>
+        <line class="w-bear" x1="30" y1="60" x2="30" y2="138"/><rect class="b-bear" x="26" y="66" width="8" height="60"/>
+        <line class="w-bear" x1="60" y1="104" x2="60" y2="144"/><rect class="b-bear" x="56" y="110" width="8" height="32"/>
+        <text class="struct-label" x="60" y="98" text-anchor="middle">C1 bajista</text>
+        <line class="b-doji" x1="104" y1="140" x2="104" y2="160" stroke="#94a3b8"/>
+        <line class="b-doji" x1="100" y1="148" x2="108" y2="148" stroke="#94a3b8" stroke-width="2"/>
+        <text class="struct-label" x="104" y="134" text-anchor="middle">C2 doji/spinning</text>
+        <line class="w-bull" x1="148" y1="64" x2="148" y2="146"/><rect class="b-bull" x="144" y="70" width="8" height="62"/>
+        <text class="struct-label" x="148" y="58" text-anchor="middle">C3 alcista</text>
+        <line class="w-bull" x1="208" y1="74" x2="208" y2="100"/><rect class="b-bull" x="204" y="80" width="8" height="18"/>
+        <path class="entry-arrow" d="M226 90 L238 82 L234 86 L242 86 L242 94 L234 94 L238 98 Z"/>
+        <line class="w-bull" x1="246" y1="52" x2="246" y2="82"/><rect class="b-bull" x="242" y="58" width="8" height="20"/>
+        <line class="w-bull" x1="268" y1="40" x2="268" y2="64"/><rect class="b-bull" x="264" y="44" width="8" height="16"/>
+        <line class="w-bull" x1="290" y1="32" x2="290" y2="52"/><rect class="b-bull" x="286" y="36" width="8" height="14"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">C1 bajista grande · C2 indecisión (doji/spinning) · C3 alcista grande que recupera ≥ 50% de C1</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En C1 o C2 — son solo set-up. Sin C3 confirmada no hay patrón.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Al cierre de C3 si supera el 50% del cuerpo de C1. Mejor RRR si está sobre soporte previo.</dd>
+        <dt class="inv">Invalidación</dt><dd>C3 que no alcanza el medio del cuerpo de C1, o cierre M5 bajo el low del patrón.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 26. Evening Star -->
+    <article class="card" data-name="evening star estrella atardecer reversion bajista">
+      <header class="card-head">
+        <h3>Estrella del atardecer (Evening star)</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Reversión bajista 3 velas</span>
+          <span class="bias-tag rel-tag rel-mid">★★ media-alta</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="70" x2="340" y2="70"/>
+        <text class="struct-label" x="30" y="66">Resistencia clave</text>
+        <rect class="zone-guess" x="56" y="60" width="120" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="116" y="40" text-anchor="middle">ZA · formación de las 3 velas</text>
+        <rect class="zone-entry-bear" x="200" y="118" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="232" y="158" text-anchor="middle">ENTRADA · cierre de C3</text>
+        <line class="w-bull" x1="30" y1="160" x2="30" y2="200"/><rect class="b-bull" x="26" y="166" width="8" height="32"/>
+        <line class="w-bull" x1="60" y1="76" x2="60" y2="154"/><rect class="b-bull" x="56" y="82" width="8" height="60"/>
+        <text class="struct-label" x="60" y="74" text-anchor="middle">C1 alcista</text>
+        <line class="b-doji" x1="104" y1="60" x2="104" y2="80" stroke="#94a3b8"/>
+        <line class="b-doji" x1="100" y1="70" x2="108" y2="70" stroke="#94a3b8" stroke-width="2"/>
+        <text class="struct-label" x="104" y="54" text-anchor="middle">C2 doji/spinning</text>
+        <line class="w-bear" x1="148" y1="74" x2="148" y2="156"/><rect class="b-bear" x="144" y="80" width="8" height="62"/>
+        <text class="struct-label" x="148" y="170" text-anchor="middle">C3 bajista</text>
+        <line class="w-bear" x1="208" y1="106" x2="208" y2="138"/><rect class="b-bear" x="204" y="112" width="8" height="22"/>
+        <path class="entry-arrow-bear" d="M226 128 L238 136 L234 132 L242 132 L242 124 L234 124 L238 120 Z"/>
+        <line class="w-bear" x1="246" y1="128" x2="246" y2="166"/><rect class="b-bear" x="242" y="134" width="8" height="26"/>
+        <line class="w-bear" x1="268" y1="156" x2="268" y2="184"/><rect class="b-bear" x="264" y="160" width="8" height="18"/>
+        <line class="w-bear" x1="290" y1="170" x2="290" y2="194"/><rect class="b-bear" x="286" y="174" width="8" height="16"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">C1 alcista grande · C2 indecisión · C3 bajista grande que devuelve ≥ 50% de C1</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>En C1 o C2 — son solo set-up. Sin C3 confirmada no hay patrón.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Al cierre de C3 si devuelve ≥ 50% del cuerpo de C1. Mejor sobre resistencia previa.</dd>
+        <dt class="inv">Invalidación</dt><dd>C3 que no alcanza el medio del cuerpo de C1, o cierre M5 sobre el high del patrón.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 27. Tweezer Top -->
+    <article class="card" data-name="tweezer top dos velas iguales techo">
+      <header class="card-head">
+        <h3>Tweezer top</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bear">Reversión sobre resistencia</span>
+          <span class="bias-tag rel-tag rel-low">★ baja sin contexto</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="60" x2="340" y2="60"/>
+        <text class="struct-label" x="30" y="56">Resistencia · alta tocada por 2 mechas idénticas</text>
+        <rect class="zone-guess" x="80" y="60" width="80" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="120" y="180" text-anchor="middle">ZA · pareja de mechas formándose</text>
+        <rect class="zone-entry-bear" x="200" y="110" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-eb" x="232" y="148" text-anchor="middle">ENTRADA · vela siguiente</text>
+        <line class="w-bull" x1="30" y1="120" x2="30" y2="170"/><rect class="b-bull" x="26" y="126" width="8" height="38"/>
+        <line class="w-bull" x1="52" y1="90" x2="52" y2="146"/><rect class="b-bull" x="48" y="96" width="8" height="44"/>
+        <line class="w-bull" x1="74" y1="76" x2="74" y2="122"/><rect class="b-bull" x="70" y="80" width="8" height="34"/>
+        <line class="w-bull" x1="96" y1="60" x2="96" y2="100"/><rect class="b-bull" x="92" y="68" width="8" height="28"/>
+        <line class="w-bear" x1="118" y1="60" x2="118" y2="106"/><rect class="b-bear" x="114" y="70" width="8" height="28"/>
+        <text class="struct-label" x="107" y="50" text-anchor="middle">TWEEZER</text>
+        <line class="w-bear" x1="208" y1="100" x2="208" y2="134"/><rect class="b-bear" x="204" y="106" width="8" height="22"/>
+        <path class="entry-arrow-bear" d="M226 120 L238 128 L234 124 L242 124 L242 116 L234 116 L238 112 Z"/>
+        <line class="w-bear" x1="246" y1="124" x2="246" y2="156"/><rect class="b-bear" x="242" y="128" width="8" height="22"/>
+        <line class="w-bear" x1="268" y1="146" x2="268" y2="174"/><rect class="b-bear" x="264" y="150" width="8" height="18"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Dos velas consecutivas con el mismo high · resistencia probada dos veces</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Sin S/R relevante encima — sin contexto, dos velas iguales son ruido.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Sobre resistencia clave + vela siguiente bajista bajo el cierre de la segunda tweezer.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 sobre el high de las tweezers → la resistencia ha cedido.</dd>
+      </dl></div>
+    </article>
+
+    <!-- 28. Tweezer Bottom -->
+    <article class="card" data-name="tweezer bottom dos velas iguales suelo">
+      <header class="card-head">
+        <h3>Tweezer bottom</h3>
+        <div class="card-tags">
+          <span class="bias-tag bias-bull">Reversión sobre soporte</span>
+          <span class="bias-tag rel-tag rel-low">★ baja sin contexto</span>
+        </div>
+      </header>
+      <svg viewBox="0 0 360 220" class="pattern-svg">
+        <line class="struct" x1="20" y1="160" x2="340" y2="160"/>
+        <text class="struct-label" x="30" y="156">Soporte · baja tocada por 2 mechas idénticas</text>
+        <rect class="zone-guess" x="80" y="60" width="80" height="100" rx="2"/>
+        <text class="zone-label zone-label-g" x="120" y="40" text-anchor="middle">ZA · pareja de mechas formándose</text>
+        <rect class="zone-entry" x="200" y="86" width="64" height="22" rx="2"/>
+        <text class="zone-label zone-label-e" x="232" y="124" text-anchor="middle">ENTRADA · vela siguiente</text>
+        <line class="w-bear" x1="30" y1="60" x2="30" y2="106"/><rect class="b-bear" x="26" y="66" width="8" height="34"/>
+        <line class="w-bear" x1="52" y1="86" x2="52" y2="138"/><rect class="b-bear" x="48" y="92" width="8" height="42"/>
+        <line class="w-bear" x1="74" y1="116" x2="74" y2="146"/><rect class="b-bear" x="70" y="122" width="8" height="22"/>
+        <line class="w-bear" x1="96" y1="124" x2="96" y2="160"/><rect class="b-bear" x="92" y="128" width="8" height="30"/>
+        <line class="w-bull" x1="118" y1="124" x2="118" y2="160"/><rect class="b-bull" x="114" y="130" width="8" height="28"/>
+        <text class="struct-label" x="107" y="174" text-anchor="middle">TWEEZER</text>
+        <line class="w-bull" x1="208" y1="80" x2="208" y2="112"/><rect class="b-bull" x="204" y="86" width="8" height="20"/>
+        <path class="entry-arrow" d="M226 100 L238 92 L234 96 L242 96 L242 104 L234 104 L238 108 Z"/>
+        <line class="w-bull" x1="246" y1="58" x2="246" y2="92"/><rect class="b-bull" x="242" y="62" width="8" height="22"/>
+        <line class="w-bull" x1="268" y1="40" x2="268" y2="68"/><rect class="b-bull" x="264" y="46" width="8" height="18"/>
+        <text class="svg-legend" x="180" y="214" text-anchor="middle">Dos velas consecutivas con el mismo low · soporte probado dos veces</text>
+      </svg>
+      <div class="info"><dl>
+        <dt class="no">NO entrar</dt><dd>Sin S/R relevante debajo — sin contexto, dos velas iguales son ruido.</dd>
+        <dt class="ok">Entrada válida</dt><dd>Sobre soporte clave + vela siguiente alcista sobre el cierre de la segunda tweezer.</dd>
+        <dt class="inv">Invalidación</dt><dd>Cierre M5 bajo el low de las tweezers → el soporte ha cedido.</dd>
+      </dl></div>
+    </article>
+
+    </div>
+  </section>
+
+</main>
+
+<script>
+  const main = document.querySelector('main');
+  const input = document.getElementById('filter');
+  const countEl = document.getElementById('count');
+  const cards = Array.from(document.querySelectorAll('.card'));
+  const total = cards.length;
+
+  // Sesgo de cada card desde el tag que ya existe en el markup, y su sitio original
+  cards.forEach(c => {
+    c._parent = c.parentNode;
+    const tag = c.querySelector('.bias-tag:not(.rel-tag)');
+    const cl = tag ? tag.classList : null;
+    c._bias = cl && cl.contains('bias-bull') ? 'bull'
+            : cl && cl.contains('bias-bear') ? 'bear'
+            : 'wait';
+  });
+
+  // Grupos por sesgo (cómo escanea un trader: largos / cortos / esperar)
+  const BIAS_DEFS = [
+    { id:'bull', label:'🟢 Alcista · Long',
+      sub:'Sesgo comprador — buscar entradas largas tras confirmación' },
+    { id:'bear', label:'🔴 Bajista · Short',
+      sub:'Sesgo vendedor — buscar entradas cortas tras confirmación' },
+    { id:'wait', label:'⏳ Sin decisión · esperar',
+      sub:'Aviso / indecisión / sin dirección — no operar hasta que la estructura confirme' },
+  ];
+  const biasBodies = {};
+  BIAS_DEFS.forEach(def => {
+    const section = document.createElement('section');
+    section.className = 'group bias-group bias-group-' + def.id;
+    section.dataset.open = 'true';
+    section.innerHTML =
+      '<button class="group-toggle"><span>' + def.label +
+      ' <span class="subtitle">· ' + def.sub + '</span></span>' +
+      '<span class="chev">▾</span></button><div class="group-body"></div>';
+    main.appendChild(section);
+    biasBodies[def.id] = section.querySelector('.group-body');
+  });
+
+  let mode = 'bias';
+  function layout() {
+    // Mover cada card al destino del modo activo. Iterar en orden de documento
+    // preserva el orden original dentro de cada bloque.
+    cards.forEach(c => {
+      (mode === 'bias' ? biasBodies[c._bias] : c._parent).appendChild(c);
+    });
+    applyFilter();
+  }
+
+  function applyFilter() {
+    const q = input.value.trim().toLowerCase();
+    let visible = 0;
+    cards.forEach(c => {
+      const tokens = (c.dataset.name || '') + ' ' + c.querySelector('h3').textContent.toLowerCase();
+      const hit = !q || tokens.includes(q);
+      c.classList.toggle('hidden', !hit);
+      if (hit) visible++;
+    });
+    countEl.textContent = q ? `${visible}/${total} resultados` : `${total} patrones`;
+    // Grupos vacíos (los del modo inactivo, o sin coincidencias) se ocultan
+    document.querySelectorAll('.group').forEach(g => {
+      const anyVisible = Array.from(g.querySelectorAll('.card')).some(c => !c.classList.contains('hidden'));
+      g.style.display = anyVisible ? '' : 'none';
+    });
+  }
+
+  // Toggle de colapso por grupo (delegación: cubre también los grupos por sesgo)
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.group-toggle');
+    if (!btn) return;
+    const group = btn.closest('.group');
+    group.dataset.open = group.dataset.open === 'true' ? 'false' : 'true';
+  });
+
+  // Conmutador sesgo / metodología
+  document.getElementById('grouping').addEventListener('click', e => {
+    const b = e.target.closest('.seg-btn');
+    if (!b) return;
+    mode = b.dataset.mode;
+    document.querySelectorAll('#grouping .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+    layout();
+  });
+
+  input.addEventListener('input', applyFilter);
+  layout();
+</script>
+
+</body>
+</html>

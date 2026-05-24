@@ -65,6 +65,17 @@
   box-shadow: 0 0 0 1px var(--border-default);
 }
 
+/* Link externo (patterns.html) — mismo look que un tab pero es <a> */
+.tab-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--accent);
+}
+.tab-link:hover { color: var(--accent); background: var(--bg-hover); }
+.tab-link-ext { font-size: 0.85em; opacity: 0.8; }
+
 .topbar-spacer { flex: 1; }
 
 /* Session pill */

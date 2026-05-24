@@ -99,6 +99,15 @@ export function Topbar({
             {t.label}
           </button>
         ))}
+        <a
+          className="tab tab-link"
+          href="/patterns.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Patrones · abre en pestaña nueva"
+        >
+          Patrones <span className="tab-link-ext" aria-hidden="true">↗</span>
+        </a>
       </nav>
 
       <div className="topbar-spacer" />
