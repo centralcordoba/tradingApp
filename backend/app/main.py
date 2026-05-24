@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones
+from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones, cross_verdict
 from .correlations import CorrelationsAIDisabled
 from .stocks_client import StocksUpstreamError
 from .constants import (
@@ -141,6 +141,10 @@ def scan_pairs(pairs: str = ""):
     probe_list = selected or scanner.DEFAULT_PAIRS
     age_min = radar._probe_market_age_minutes(probe_list)
     market_closed = age_min is not None and age_min > radar.MARKET_STALE_THRESHOLD_MIN
+    # Veredicto cruzado M30+M5 (misma fuente de verdad que /api/zones).
+    cross = cross_verdict.build_cross_map([r["pair"] for r in results])
+    for r in results:
+        r["cross"] = cross.get(r["pair"])
     return {
         "items": results,
         "count": len(results),
@@ -207,7 +211,13 @@ def zones_sr(
         params["level_selector"] = level_selector
     if rango_atr_mult is not None:
         params["rango_atr_mult"] = rango_atr_mult
-    return zones.get_zones_response(selected, params)
+    response = zones.get_zones_response(selected, params)
+    # Mismo veredicto cruzado que /scanner/pairs. Propaga params para que el
+    # bias del cruce coincida con el chip M30 que se renderiza en esta vista.
+    cross = cross_verdict.build_cross_map([it["pair"] for it in response.get("items", [])], zones_params=params)
+    for it in response.get("items", []):
+        it["cross"] = cross.get(it["pair"])
+    return response
 
 
 @app.get("/correlations")

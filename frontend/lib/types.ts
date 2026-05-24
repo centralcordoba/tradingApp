@@ -7,6 +7,18 @@
 
 export type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook" | "sr";
 
+// ─── Veredicto cruzado M30 + M5 (cross_verdict.py) ──────────────
+// Misma fuente de verdad para el scanner y para Zonas S/R.
+
+export type CrossVerdict = {
+  state: "A" | "B" | "C" | "D" | "NA" | "OUT";
+  tone: "green" | "amber" | "red" | "gray";
+  label: string;
+  summary: string;
+  target_side: "support" | "resistance" | null;
+  target_price: number | null;
+};
+
 // ─── Zonas S/R ──────────────────────────────────────────────────
 
 export type ZoneBiasM30 = {
@@ -71,6 +83,7 @@ export type ZonesPairResponse = {
   last_candle_ts: string | null;
   data_age_minutes: number | null;
   market_closed: boolean;
+  cross?: CrossVerdict | null;
 };
 
 export type ZonesResponse = {
@@ -226,6 +239,7 @@ export type ScannerPair = {
   extended_status: "normal" | "extended" | "skip";
   structure: string;
   struct_bullish: boolean | null;
+  cross?: CrossVerdict | null;
 };
 
 export type DailyBrief = {

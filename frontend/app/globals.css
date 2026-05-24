@@ -1549,6 +1549,12 @@ html[data-theme="light"] .session-card.session-warn {
 
 .spark { display: block; }
 
+.scanner-cross-row {
+  margin-bottom: 8px;
+}
+.scanner-cross-row .xv {
+  width: 100%;
+}
 .scanner-price-row {
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
   padding-bottom: 8px; border-bottom: 1px solid var(--border);

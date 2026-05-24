@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API } from "@/lib/api";
 import type { ZonesResponse, ZonesPairResponse, ZoneLevel } from "@/lib/types";
+import { CrossBadge } from "@/components/cross/CrossBadge";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
@@ -255,6 +256,12 @@ function PairCard({ data }: { data: ZonesPairResponse }) {
         </div>
         <BiasChip bias={data.bias_m30} />
       </header>
+
+      {data.cross && (
+        <div className="zsr-cross-row">
+          <CrossBadge cross={data.cross} />
+        </div>
+      )}
 
       <RangoBanner bias={data.bias_m30} />
 

@@ -196,6 +196,13 @@
   gap: 16px;
 }
 
+.zsr-cross-row {
+  margin-top: 10px;
+}
+.zsr-cross-row .xv {
+  width: 100%;
+}
+
 .zsr-card-pair {
   font-size: 22px;
   font-weight: 700;

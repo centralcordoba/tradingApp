@@ -12,6 +12,8 @@ import { StocksView } from "@/components/stocks/StocksView";
 import { CorrelationsView } from "@/components/correlations/CorrelationsView";
 import { PlaybookView } from "@/components/playbook/PlaybookView";
 import { ZonasSRView } from "@/components/zones/ZonasSRView";
+import { CrossBadge } from "@/components/cross/CrossBadge";
+import type { CrossVerdict } from "@/lib/types";
 import { useTick } from "@/hooks/useTick";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -611,6 +613,7 @@ type ScannerPair = {
   extended_status: "normal" | "extended" | "skip";
   structure: string;
   struct_bullish: boolean | null;
+  cross?: CrossVerdict | null;
 };
 
 type DailyBrief = {
@@ -1644,6 +1647,12 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
         </div>
         <Sparkline data={data.spark} side={data.side} />
       </div>
+
+      {data.cross && (
+        <div className="scanner-cross-row">
+          <CrossBadge cross={data.cross} />
+        </div>
+      )}
 
       <div className="scanner-price-row">
         <span className="scanner-price">{data.price}</span>
