@@ -559,8 +559,8 @@ export function ZonasSRView() {
       <footer className="zsr-footer">
         <span className="zsr-footer-note">
           Detección: swing pivots ± ventana N + clustering aglomerativo single-linkage por
-          distancia en pips. Bias M30 = EMA50 vs EMA200 sobre velas resampleadas. Cache OHLC
-          compartido con scanner (15 min).
+          distancia en pips. Bias M30 = EMA50 vs EMA100 sobre velas M15 resampleadas. Cache OHLC
+          propio (15 min).
         </span>
       </footer>
     </div>

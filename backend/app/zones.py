@@ -1,9 +1,10 @@
 """Detector de Zonas S/R activas para scalp M5/M15 con bias M30.
 
-Tercera capa de análisis (independiente del scanner y del radar). Lee las 200
-velas M5 ya cacheadas por scanner._fetch_chart, las resamplea a M30 para
-calcular el bias direccional (EMA50 vs EMA100) y detecta niveles de soporte/
-resistencia por pivots + clustering aglomerativo single-linkage.
+Tercera capa de análisis (independiente del scanner y del radar). Pide 200
+velas M15 a scanner._fetch_chart (cache propio, key 'pair:15min:200'; el
+scanner corre en M5), las resamplea a M30 para calcular el bias direccional
+(EMA50 vs EMA100) y detecta niveles de soporte/resistencia por pivots +
+clustering aglomerativo single-linkage.
 
 Además incluye datos de acción del precio (wick ratio de últimas 3 velas) para
 que el scalper vea si hay rechazo activo en los niveles.
@@ -87,11 +88,13 @@ def _parse_candle_ts(raw: Optional[str]) -> Optional[datetime]:
 
 
 # ---------------------------------------------------------------------------
-# Resample M5 → M30
+# Resample M15 → M30
 # ---------------------------------------------------------------------------
 
-def _resample_m5_to_m30(ohlc: dict) -> Optional[pd.DataFrame]:
-    """Agrupa las velas M5 en velas M30 alineadas a :00 y :30."""
+def _resample_m15_to_m30(ohlc: dict) -> Optional[pd.DataFrame]:
+    """Agrupa las velas M15 en velas M30 alineadas a :00 y :30.
+
+    200 velas M15 ≈ 100 velas M30, suficiente para la EMA larga (EMA100)."""
     if not ohlc.get("ts") or not ohlc.get("close"):
         return None
     try:
@@ -400,7 +403,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
     # Sanea: el multiplicador tiene que ser positivo y dentro de un rango razonable.
     rango_atr_mult = max(0.05, min(2.0, rango_atr_mult))
 
-    raw = scanner._fetch_chart(pair)
+    raw = scanner._fetch_chart(pair, interval="15min", outputsize=200)
     if raw is None:
         return None
     ohlc = scanner._parse_ohlc(raw)
@@ -416,8 +419,8 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
 
     last_ts = ohlc["ts"][-1] if ohlc["ts"] else None
 
-    # Bias M30 (resample de las propias M5)
-    m30 = _resample_m5_to_m30(ohlc)
+    # Bias M30 (resample de las propias M15)
+    m30 = _resample_m15_to_m30(ohlc)
     bias = _compute_m30_bias(m30, pip, atr_mult=rango_atr_mult)
 
     # Wick ratio de las últimas 3 velas (acción del precio inmediata)
