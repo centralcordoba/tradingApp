@@ -606,6 +606,11 @@ type ScannerPair = {
   bloque_reason?: string;
   factors: ScannerFactor[];
   spark: number[];
+  // Nuevos campos para scalping M5
+  ema9_dist_atr: number | null;
+  extended_status: "normal" | "extended" | "skip";
+  structure: string;
+  struct_bullish: boolean | null;
 };
 
 type DailyBrief = {
@@ -748,7 +753,7 @@ function ZoneAnalysisView() {
           <div>
             <div className="zone-intro-title">🎯 Scanner en vivo · confluencia técnica</div>
             <div className="zone-intro-sub">
-              Análisis independiente multi-factor (EMA9/21/50/200, RSI, rango, impulso) sobre datos 15m.
+              Análisis independiente multi-factor (EMA9/21/50, RSI, rango, impulso, estructura) sobre datos M5.
               Prioriza los pares con <b>mayor confluencia</b>.
             </div>
           </div>
@@ -1612,8 +1617,14 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
   const strength = pct >= 70 ? "high" : pct >= 40 ? "mid" : "low";
   const changeUp = data.change_pct >= 0;
 
+  const extendedLabel =
+    data.extended_status === "skip" ? "⚠ SKIP" :
+    data.extended_status === "extended" ? "⚠ EXTENDED" : null;
+
+  const structLabel = data.structure !== "RANGE" ? data.structure : null;
+
   return (
-    <article className={`scanner-card scanner-${sideClass} scanner-${strength} ${isTop ? "scanner-top" : ""}`}>
+    <article className={`scanner-card scanner-${sideClass} scanner-${strength} ${isTop ? "scanner-top" : ""} ${data.extended_status === "skip" ? "scanner-skip" : data.extended_status === "extended" ? "scanner-extended" : ""}`}>
       {isTop && <div className="scanner-top-tag">🏆 MAYOR CONFLUENCIA</div>}
 
       <div className="scanner-head">
@@ -1623,6 +1634,11 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
           {data.bloque && (
             <span className={`bloque-badge bloque-b${data.bloque}`} title={data.bloque_reason || ""}>
               B{data.bloque}
+            </span>
+          )}
+          {structLabel && (
+            <span className={`struct-badge struct-${data.struct_bullish === true ? "bull" : data.struct_bullish === false ? "bear" : "neutral"}`}>
+              {structLabel}
             </span>
           )}
         </div>
@@ -1636,6 +1652,26 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
         </span>
       </div>
 
+      {extendedLabel && (
+        <div className={`scanner-extended-badge ext-${data.extended_status}`}>
+          {extendedLabel} {data.ema9_dist_atr != null ? `(${data.ema9_dist_atr.toFixed(1)}× ATR)` : ""}
+        </div>
+      )}
+
+      <div className="scanner-metas">
+        {data.atr != null && (
+          <span className="scanner-meta">ATR <b className="num">{data.atr.toFixed(4)}</b></span>
+        )}
+        {data.ema9_dist_atr != null && (
+          <span className="scanner-meta" title="Distancia al EMA9 en multiplos de ATR">EMA9 <b className={`num ${data.extended_status !== "normal" ? "warn" : ""}`}>{data.ema9_dist_atr.toFixed(1)}×</b></span>
+        )}
+        {data.rsi != null && (
+          <span className="scanner-meta">RSI <b className="num">{data.rsi.toFixed(0)}</b></span>
+        )}
+        <span className="scanner-meta">Rango <b className="num">{(data.range_pos * 100).toFixed(0)}%</b></span>
+        <span className="scanner-meta">Bias <b className={data.bias > 0 ? "good" : data.bias < 0 ? "bad" : ""}>{data.bias > 0 ? "+" : ""}{data.bias}</b></span>
+      </div>
+
       <div className="scanner-score-row">
         <div className="scanner-score-big">
           <span className="scanner-score-num">{data.confluence}</span>
@@ -1644,12 +1680,6 @@ function ScannerCard({ data, isTop }: { data: ScannerPair; isTop: boolean }) {
         <div className="scanner-score-track">
           <div className={`scanner-score-fill scanner-fill-${strength}`} style={{ width: `${pct}%` }} />
         </div>
-      </div>
-
-      <div className="scanner-micro">
-        {data.rsi != null && <span>RSI <b>{data.rsi.toFixed(0)}</b></span>}
-        <span>Rango <b>{(data.range_pos * 100).toFixed(0)}%</b></span>
-        <span>Bias <b className={data.bias > 0 ? "good" : data.bias < 0 ? "bad" : ""}>{data.bias > 0 ? "+" : ""}{data.bias}</b></span>
       </div>
 
       <div className="scanner-factors">

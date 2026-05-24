@@ -64,9 +64,8 @@ ATR_PERIOD = 14
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Scanner — configuración de pares y scoring
-# ─────────────────────────────────────────────────────────────────────────────
 
-SCANNER_INTERVAL = "15min"
+SCANNER_INTERVAL = "5min"
 SCANNER_OUTPUTSIZE = 200
 SCANNER_MIN_CANDLES = 60
 
@@ -84,8 +83,21 @@ SCANNER_RANGE_EXTREME_HIGH = 0.85  # 85% — extremo alto (reversión potencial 
 SCANNER_RSI_OVERBOUGHT_EXTREME = 72
 SCANNER_RSI_OVERSOLD_EXTREME = 28
 
-# Impulso mínimo detectable (5 velas)
-SCANNER_MOMENTUM_THRESHOLD = 0.001  # 0.1%
+# RSI por zona de pullback / momentum (scalping M5)
+# 40-60 mientras precio está en pullback al EMA9 = entrada válida
+# > 75 con precio extendido = agotamiento — NO entrar
+SCANNER_RSI_PULLBACK_LOW = 40
+SCANNER_RSI_PULLBACK_HIGH = 60
+SCANNER_RSI_EXHAUSTION = 75
+
+# Distancia al EMA9 en múltiplos de ATR — factor EXTENDED
+# >1.5 = pullback esperable (WAIT) · >2.5 = demasiado extendido (SKIP)
+SCANNER_EMA9_ATR_EXTENDED = 1.5
+SCANNER_EMA9_ATR_SKIP = 2.5
+
+# Sobre qué lookback detectar estructura HH/HL/LH/LL (velas M5)
+# 50 velas ≈ 4h de contexto = rango de sesión operativo
+SCANNER_STRUCT_LOOKBACK = 50
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Radar — configuración de reversiones
@@ -192,8 +204,8 @@ ZONES_TOUCH_TOLERANCE_PIPS = 3.0
 # 'median' (Recommended): robusto a outliers · 'mean': promedio simple
 ZONES_LEVEL_SELECTOR_DEFAULT = "median"
 
-# Pares por defecto del módulo de zonas (los que el usuario opera)
-ZONES_DEFAULT_PAIRS = ["AUDUSD", "USDCAD"]
+# Pares por defecto del módulo de zonas (los 6 majors operables)
+ZONES_DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDCAD", "USDCHF", "AUDUSD", "USDJPY"]
 
 # Umbral RANGO: separación EMA50-EMA100 menor a (mult × ATR M30) → RANGO.
 # 0.3 = frontera empírica entre ruido lateral y tendencia incipiente (FX majores).

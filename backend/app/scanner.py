@@ -3,6 +3,8 @@
 No depende de las señales del Pine — hace su propia lectura técnica multi-factor
 y devuelve los pares rankeados por confluencia.
 
+Sobre M5 (configurable) para scalping 0-30 min.
+
 Fuente: api.twelvedata.com (free tier 800 créditos/día, 8 req/min).
 Requiere env var TWELVEDATA_API_KEY.
 """
@@ -31,11 +33,16 @@ from .constants import (
     SCANNER_RANGE_EXTREME_HIGH,
     SCANNER_RSI_OVERBOUGHT_EXTREME,
     SCANNER_RSI_OVERSOLD_EXTREME,
+    SCANNER_RSI_PULLBACK_LOW,
+    SCANNER_RSI_PULLBACK_HIGH,
+    SCANNER_RSI_EXHAUSTION,
+    SCANNER_EMA9_ATR_EXTENDED,
+    SCANNER_EMA9_ATR_SKIP,
+    SCANNER_STRUCT_LOOKBACK,
     SCANNER_MOMENTUM_THRESHOLD,
     EMA_PERIOD_9,
     EMA_PERIOD_21,
     EMA_PERIOD_50,
-    EMA_PERIOD_200,
     RSI_PERIOD,
     ATR_PERIOD,
     TWELVEDATA_CONCURRENT_WORKERS,
@@ -168,7 +175,6 @@ def _ema(values: list[float], period: int) -> list[float]:
     out = [sum(values[:period]) / period]
     for v in values[period:]:
         out.append(v * k + out[-1] * (1 - k))
-    # Prepend None-placeholder para alinear índices: longitud = len(values) - period + 1
     return out
 
 
@@ -214,11 +220,96 @@ def _atr(highs: list[float], lows: list[float], closes: list[float], period: int
 
 
 # ---------------------------------------------------------------------------
+# Estructura de mercado (HH/HL/LH/LL) sobre N últimas velas
+# ---------------------------------------------------------------------------
+
+def _detect_structure(closes: list[float], highs: list[float], lows: list[float], lookback: int = 50) -> dict:
+    """Detecta estructura de mercado tipo Smart Money sobre las últimas `lookback` velas.
+
+    Devuelve:
+        - last_move: "HH" | "HL" | "LH" | "LL" | "RANGE"
+        - description: texto explicativo
+        - bullish: bool|null
+    """
+    n = len(closes)
+    if n < lookback + 5:
+        return {
+            "last_move": "RANGE",
+            "description": "Datos insuficientes para estructura",
+            "bullish": None,
+        }
+
+    c = closes[-lookback:]
+    h = highs[-lookback:]
+    l = lows[-lookback:]
+
+    # Detectar swings: pivot high / pivot low con ventana=2
+    window = 2
+    swing_highs: list[tuple[int, float]] = []
+    swing_lows: list[tuple[int, float]] = []
+
+    for i in range(window, len(c) - window):
+        if h[i] > max(h[i - window:i]) and h[i] > max(h[i + 1:i + window + 1]):
+            swing_highs.append((i, h[i]))
+        if l[i] < min(l[i - window:i]) and l[i] < min(l[i + 1:i + window + 1]):
+            swing_lows.append((i, l[i]))
+
+    if not swing_highs or not swing_lows:
+        return {
+            "last_move": "RANGE",
+            "description": "Sin swings claros — consolidación",
+            "bullish": None,
+        }
+
+    # Ordenar por índice
+    all_swings = sorted([(i, p, "H") for i, p in swing_highs] + [(i, p, "L") for i, p in swing_lows])
+
+    # Extraer últimos 3 swings significativos (evitar duplicados del mismo lado consecutivo)
+    filtered: list[tuple[int, float, str]] = []
+    for i, p, k in all_swings:
+        if not filtered:
+            filtered.append((i, p, k))
+            continue
+        if k != filtered[-1][2]:
+            filtered.append((i, p, k))
+    
+    # Comparar últimos dos del mismo tipo
+    if len(filtered) < 3:
+        return {
+            "last_move": "RANGE",
+            "description": "Swings insuficientes",
+            "bullish": None,
+        }
+
+    # Últimos 2 highs
+    last_highs = [p for _, p, k in filtered if k == "H"][-2:]
+    last_lows = [p for _, p, k in filtered if k == "L"][-2:]
+
+    if len(last_highs) == 2 and len(last_lows) == 2:
+        if last_highs[1] > last_highs[0] and last_lows[1] > last_lows[0]:
+            return {"last_move": "HH", "description": "Highs más altos + lows más altos — tendencia alcista", "bullish": True}
+        if last_highs[1] > last_highs[0] and last_lows[1] < last_lows[0]:
+            return {"last_move": "HL", "description": "High más alto, low más bajo — posible acumulación", "bullish": True}
+        if last_highs[1] < last_highs[0] and last_lows[1] < last_lows[0]:
+            return {"last_move": "LL", "description": "Highs más bajos + lows más bajos — tendencia bajista", "bullish": False}
+        if last_highs[1] < last_highs[0] and last_lows[1] > last_lows[0]:
+            return {"last_move": "LH", "description": "High más bajo, low más alto — posible distribución", "bullish": False}
+
+    return {"last_move": "RANGE", "description": "Sin patrón estructural claro", "bullish": None}
+
+
+# ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
 
 def _score_pair(pair: str, ohlc: dict) -> dict:
-    """Evalúa 7 factores direccionales + salud. Devuelve card completa."""
+    """Evalúa 7 factores direccionales + salud. Devuelve card completa.
+    
+    Diseñado para scalping M5 (0-30 min):
+    - Estructura de mercado (HH/HL/LH/LL) reemplaza a EMA200 como factor macro
+    - RSI optimizado para pullback en tendencia (40-60 cerca del EMA9 = +1)
+    - Factor EXTENDED mide distancia al EMA9 en ×ATR → evita entradas tardías
+    """
     closes = ohlc["close"]
     highs = ohlc["high"]
     lows = ohlc["low"]
@@ -226,25 +317,39 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
     ema9 = _ema(closes, EMA_PERIOD_9)
     ema21 = _ema(closes, EMA_PERIOD_21)
     ema50 = _ema(closes, EMA_PERIOD_50)
-    ema200 = _ema(closes, EMA_PERIOD_200) if len(closes) >= EMA_PERIOD_200 else []
 
     last_close = closes[-1]
     prev_close = closes[-2] if len(closes) > 1 else last_close
-    day_open = closes[-96] if len(closes) >= 96 else closes[0]
+    # Para M5, 288 velas ≈ 24h. Usar primera del día si tenemos suficientes.
+    day_ago_idx = -288 if len(closes) >= 288 else (-96 if len(closes) >= 96 else 0)
+    day_open = closes[day_ago_idx] if day_ago_idx != 0 else closes[0]
     change_pct = ((last_close - day_open) / day_open) * 100 if day_open else 0.0
 
     rsi = _rsi(closes, RSI_PERIOD)
     atr = _atr(highs, lows, closes, ATR_PERIOD)
 
-    # Posición en rango últimas 50 velas
+    # Posición en rango últimas 50 velas (~4h en M5 = contexto de sesión)
     lookback = closes[-50:]
     rng_hi = max(lookback)
     rng_lo = min(lookback)
     range_pos = (last_close - rng_lo) / (rng_hi - rng_lo) if rng_hi > rng_lo else 0.5
 
-    # Impulso 5 velas
+    # Impulso 5 velas (~25 min)
     mom_ret = (last_close - closes[-6]) / closes[-6] if len(closes) >= 6 and closes[-6] else 0.0
     mom_ret_threshold = SCANNER_MOMENTUM_THRESHOLD
+
+    # Estructura de mercado (reemplaza EMA200)
+    struct = _detect_structure(closes, highs, lows, lookback=SCANNER_STRUCT_LOOKBACK)
+
+    # EXTENDED: distancia al EMA9 en multiplicadores de ATR
+    ema9_dist_atr: Optional[float] = None
+    extended_status = "normal"
+    if atr is not None and atr > 0 and ema9:
+        ema9_dist_atr = abs(last_close - ema9[-1]) / atr
+        if ema9_dist_atr >= SCANNER_EMA9_ATR_SKIP:
+            extended_status = "skip"
+        elif ema9_dist_atr >= SCANNER_EMA9_ATR_EXTENDED:
+            extended_status = "extended"
 
     factors = []
 
@@ -278,31 +383,58 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
             "value": val,
         })
 
-    # 4. Precio vs EMA200 (macro)
-    if ema200:
-        val = 1 if last_close > ema200[-1] else -1
+    # 4. Estructura de mercado (HH/HL/LH/LL) — reemplaza EMA200
+    if struct["bullish"] is not None:
+        val = 1 if struct["bullish"] else -1
         factors.append({
-            "key": "macro",
-            "label": "Macro (EMA200)",
-            "desc": "Sesgo macro alcista" if val > 0 else "Sesgo macro bajista",
+            "key": "structure",
+            "label": f"Estructura ({struct['last_move']})",
+            "desc": struct["description"],
             "value": val,
         })
+    else:
+        factors.append({
+            "key": "structure",
+            "label": "Estructura",
+            "desc": struct["description"],
+            "value": 0,
+        })
 
-    # 5. RSI momentum
+    # 5. RSI momentum / pullback — LÓGICA CORREGIDA PARA SCALPING
     if rsi is not None:
-        if 50 <= rsi < RSI_PERIOD:
-            val = 1
-            desc = f"RSI {rsi:.0f} — momentum alcista sano"
-        elif 30 < rsi < 50:
+        # En pullback al EMA9 con precio saludable: RSI 40-60 = zona de entrada
+        in_pullback_zone = SCANNER_RSI_PULLBACK_LOW <= rsi <= SCANNER_RSI_PULLBACK_HIGH
+        # Exhaustion: RSI extremo + precio extendido
+        is_exhausted = rsi >= SCANNER_RSI_EXHAUSTION or rsi <= (100 - SCANNER_RSI_EXHAUSTION)
+        # Agotamiento clásico
+        is_overbought = rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME
+        is_oversold = rsi <= SCANNER_RSI_OVERSOLD_EXTREME
+
+        if in_pullback_zone and extended_status != "skip":
+            # RSI en zona de pullback + precio medio-sano = oportunidad
+            val = 1 if ema9 and last_close > ema9[-1] else (-1 if ema9 and last_close < ema9[-1] else 0)
+            desc = f"RSI {rsi:.0f} — pullback técnico en tendencia"
+        elif is_overbought and extended_status in ("extended", "skip"):
             val = -1
-            desc = f"RSI {rsi:.0f} — momentum bajista sano"
-        elif rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME:
+            desc = f"RSI {rsi:.0f} — sobrecompra + extendido (agotamiento)"
+        elif is_oversold and extended_status in ("extended", "skip"):
+            val = 1
+            desc = f"RSI {rsi:.0f} — sobreventa + extendido (rebote potencial)"
+        elif is_exhausted:
             val = 0
-            desc = f"RSI {rsi:.0f} — sobrecompra (agotamiento)"
+            desc = f"RSI {rsi:.0f} — agotamiento (esperar pullback)"
+        elif rsi > 50:
+            val = 1
+            desc = f"RSI {rsi:.0f} — momentum alcista"
+        elif rsi < 50:
+            val = -1
+            desc = f"RSI {rsi:.0f} — momentum bajista"
         else:
             val = 0
-            desc = f"RSI {rsi:.0f} — sobreventa (agotamiento)"
+            desc = f"RSI {rsi:.0f} — neutral"
         factors.append({"key": "rsi", "label": f"RSI {RSI_PERIOD}", "desc": desc, "value": val})
+    else:
+        factors.append({"key": "rsi", "label": f"RSI {RSI_PERIOD}", "desc": "Sin datos RSI", "value": 0})
 
     # 6. Posición en rango (50 velas)
     if range_pos < SCANNER_RANGE_DISCOUNT:
@@ -331,7 +463,6 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
     bias = sum(f["value"] for f in factors)
     total_weight = sum(abs(f["value"]) or 1 for f in factors) or len(factors)
     confluence = abs(bias)
-    # max confluencia posible: cada factor puede aportar 1 en valor absoluto
     max_confluence = len(factors)
 
     if bias >= 3:
@@ -341,8 +472,8 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
     else:
         side = "NEUTRAL"
 
-    # Sparkline: últimos 60 closes normalizados
-    spark = closes[-60:]
+    # Sparkline: últimos 20 closes (~100 min en M5 = ventana operativa)
+    spark = closes[-20:]
 
     ema_aligned = (
         bool(ema9 and ema21 and ema50) and
@@ -357,6 +488,7 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
         range_pos=range_pos,
         rsi=rsi,
         ema_aligned=ema_aligned,
+        extended_status=extended_status,
     )
 
     return {
@@ -376,6 +508,11 @@ def _score_pair(pair: str, ohlc: dict) -> dict:
         "bloque_reason": bloque_reason,
         "factors": factors,
         "spark": [round(c, 5) for c in spark],
+        # Nuevos campos para scalping
+        "ema9_dist_atr": round(ema9_dist_atr, 2) if ema9_dist_atr is not None else None,
+        "extended_status": extended_status,
+        "structure": struct["last_move"],
+        "struct_bullish": struct["bullish"],
     }
 
 
@@ -385,36 +522,46 @@ def _classify_bloque(
     range_pos: float,
     rsi: Optional[float],
     ema_aligned: bool,
+    extended_status: str,
 ) -> tuple[str, str]:
     """Clasifica un par en uno de tres bloques operativos.
 
-    Bloque 1 — Trend-follow: |bias|≥4, EMAs alineadas monotónicamente, RSI no agotado.
-    Bloque 3 — Reversión en extremo: rango extremo (<15% o >85%) + RSI en zona de exhaustion (<32 o >68).
-    Bloque 2 — Sin edge: resto (lateral, EMAs mixtas, bias bajo).
+    Bloque 1 — Trend-follow: |bias|>=4, EMAs alineadas, RSI no agotado, NO extended.
+    Bloque 3 — Reversión en extremo: rango extremo (<15% o >85%) + RSI en exhaustion + extended.
+    Bloque 2 — Sin edge: resto (lateral, EMAs mixtas, bias bajo, extended sin confirmación).
+    
+    extended_status: "normal" | "extended" | "skip"
+      - "skip" fuerza Bloque 2 siempre (precio demasiado extendido)
     """
     at_extreme = range_pos <= SCANNER_RANGE_EXTREME_LOW or range_pos >= SCANNER_RANGE_EXTREME_HIGH
     rsi_exhausted = rsi is not None and (rsi <= SCANNER_RSI_OVERSOLD_EXTREME or rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME)
 
-    # Bloque 3 — reversión: precio en extremo + RSI agotado (señal de reversión)
-    # El sentido de la reversión viene dado por qué extremo: low+oversold = LONG, high+overbought = SHORT
-    if at_extreme and rsi_exhausted:
-        if range_pos <= SCANNER_RANGE_EXTREME_LOW and rsi is not None and rsi <= SCANNER_RSI_OVERSOLD_EXTREME:
-            return "3", "Reversión potencial LONG — rango bajo + RSI sobrevendido"
-        if range_pos >= SCANNER_RANGE_EXTREME_HIGH and rsi is not None and rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME:
-            return "3", "Reversión potencial SHORT — rango alto + RSI sobrecomprado"
+    # Si está majormente extendido (>2.5×ATR del EMA9) → Bloque 2, el pullback no es accionable
+    if extended_status == "skip":
+        return "2", "Precio muy extendido del EMA9 — esperar pullback antes de entrar"
 
-    # Bloque 1 — tendencia limpia: bias alto, EMAs alineadas, RSI sano
-    if confluence >= SCANNER_CONFLUENCE_THRESHOLD_TREND and ema_aligned:
-        # excluir si precio está pegado al extremo contrario al bias (riesgo de agotamiento)
+    # Bloque 3 — reversión: precio en extremo + RSI agotado + extendido
+    # Requiere sweep de extremo + RSI exhaustion para ser válido en scalping
+    if at_extreme and rsi_exhausted and extended_status == "extended":
+        if range_pos <= SCANNER_RANGE_EXTREME_LOW and rsi is not None and rsi <= SCANNER_RSI_OVERSOLD_EXTREME:
+            return "3", "Reversión potencial LONG — sweep low + RSI sobrevendido + extendido"
+        if range_pos >= SCANNER_RANGE_EXTREME_HIGH and rsi is not None and rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME:
+            return "3", "Reversión potencial SHORT — sweep high + RSI sobrecomprado + extendido"
+
+    # Bloque 1 — tendencia limpia: bias alto, EMAs alineadas, RSI sano, NO extended
+    if confluence >= SCANNER_CONFLUENCE_THRESHOLD_TREND and ema_aligned and extended_status == "normal":
+        # excluir si precio está pegado al extremo contrario al bias
         exhausted_against = (
             (bias > 0 and range_pos >= 0.9 and rsi is not None and rsi >= SCANNER_RSI_OVERBOUGHT_EXTREME) or
             (bias < 0 and range_pos <= 0.1 and rsi is not None and rsi <= SCANNER_RSI_OVERSOLD_EXTREME)
         )
         if not exhausted_against:
             direction = "alcista" if bias > 0 else "bajista"
-            return "1", f"Tendencia {direction} limpia — EMAs alineadas, confluencia {confluence}/7"
+            return "1", f"Tendencia {direction} limpia — EMAs alineadas, estructura {direction}, confluencia {confluence}/7"
 
     # Bloque 2 — excluido: razón más específica posible
+    if extended_status == "extended":
+        return "2", "Precio extendido del EMA9 — esperar pullback al nivel antes de entrar"
     if confluence < SCANNER_CONFLUENCE_THRESHOLD_NEUTRAL:
         return "2", "Sin dirección clara — bias bajo"
     if not ema_aligned:
@@ -493,7 +640,7 @@ def _sesgo_dia(items: list[dict]) -> str:
     else:
         tone = "mercado mixto sin sesgo único"
 
-    hc_note = f", {n_hc} par{'es' if n_hc != 1 else ''} con confluencia ≥5/7" if n_hc else ""
+    hc_note = f", {n_hc} par{'es' if n_hc != 1 else ''} con confluencia >=5/7" if n_hc else ""
     return f"{tone} ({longs} LONG · {shorts} SHORT · {neutrals} neutral){hc_note}"
 
 
@@ -506,7 +653,7 @@ def _mejor_setup(operables: list[dict]) -> str:
     side = top["side"] if top["side"] != "NEUTRAL" else ("LONG" if top["bias"] > 0 else "SHORT")
     bloq = top["bloque"]
     razon = top["bloque_reason"]
-    # Compact: "EURUSD LONG [B1] bias 5, macro alcista, conf 5/7"
+    # Compact: "EURUSD LONG [B1] bias 5, estructura HH, conf 5/7"
     return f"{pair} {side} [B{bloq}] — {razon.split(' — ')[-1] if ' — ' in razon else razon}"[:140]
 
 

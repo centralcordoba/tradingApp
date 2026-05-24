@@ -6,7 +6,7 @@ import type { ZonesResponse, ZonesPairResponse, ZoneLevel } from "@/lib/types";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
-const DEFAULT_PAIRS = ["AUDUSD", "USDCAD"];
+const DEFAULT_PAIRS = ["EURUSD", "GBPUSD", "USDCAD", "USDCHF", "AUDUSD", "USDJPY"];
 
 type Params = {
   window: number;
@@ -165,6 +165,7 @@ function LevelRow({ level, price }: { level: ZoneLevel; price: number }) {
     ? "zsr-state-range"
     : "zsr-state-far";
   const incoherent = level.within_range && !level.coherent_with_bias;
+  const wick = level.last_touch_wick;
 
   return (
     <article
@@ -210,6 +211,17 @@ function LevelRow({ level, price }: { level: ZoneLevel; price: number }) {
                 title="Nivel cercano, pero no coherente con el bias M30"
               >
                 ⚠ contra bias
+              </span>
+            </>
+          )}
+          {wick && wick.ratio >= 1.5 && (
+            <>
+              <span className="zsr-level-meta-sep" aria-hidden="true">·</span>
+              <span
+                className={`zsr-level-wick zsr-wick-${wick.direction}`}
+                title={`Wick ${wick.direction === "bull" ? "inferior" : "superior"} ${wick.ratio.toFixed(1)}× body · rechazo detectado`}
+              >
+                🕯 rechazo {wick.direction === "bull" ? "alcista" : "bajista"} {wick.ratio.toFixed(1)}×
               </span>
             </>
           )}

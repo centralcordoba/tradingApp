@@ -1591,6 +1591,56 @@ html[data-theme="light"] .session-card.session-warn {
 .scanner-micro b.good { color: #4ade80; }
 .scanner-micro b.bad  { color: #f87171; }
 
+/* Nuevos estilos para scalping M5 — EXTENDED badge, estructura, metas */
+.scanner-metas {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text-muted);
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.scanner-metas .scanner-meta b { color: var(--text); font-weight: 700; }
+.scanner-metas .scanner-meta b.warn { color: #fb923c; }
+.scanner-metas .scanner-meta b.good { color: #4ade80; }
+.scanner-metas .scanner-meta b.bad  { color: #f87171; }
+
+.scanner-extended-badge {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 4px 8px; border-radius: 4px;
+  margin-bottom: 8px; display: inline-block;
+}
+.scanner-extended-badge.ext-skip {
+  background: #2d0d0d; color: #f87171;
+  border: 1px solid #dc2626;
+}
+.scanner-extended-badge.ext-extended {
+  background: #3b2e0d; color: #facc15;
+  border: 1px solid #ca8a04;
+}
+
+.scanner-skip {
+  border-top: 2px solid #dc2626 !important;
+  opacity: 0.75;
+}
+.scanner-extended {
+  border-top: 2px solid #ca8a04 !important;
+}
+
+.struct-badge {
+  font-size: 11.7px; font-weight: 800; letter-spacing: .5px;
+  padding: 2px 6px; border-radius: 3px;
+  cursor: help;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.struct-bull {
+  background: #052e16; color: #4ade80; border: 1px solid #166534;
+}
+.struct-bear {
+  background: #450a0a; color: #f87171; border: 1px solid #991b1b;
+}
+.struct-neutral {
+  background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border-2);
+}
+
 .scanner-factors {
   display: flex; flex-wrap: wrap; gap: 3px;
 }

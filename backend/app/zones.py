@@ -1,16 +1,19 @@
 """Detector de Zonas S/R activas para scalp M5/M15 con bias M30.
 
 Tercera capa de análisis (independiente del scanner y del radar). Lee las 200
-velas M15 ya cacheadas por scanner._fetch_chart, las resamplea a M30 para
-calcular el bias direccional (EMA50 vs EMA100 — 100 es la EMA larga máxima
-viable con 200 velas M15 ≈ 100 velas M30) y detecta niveles de soporte/
+velas M5 ya cacheadas por scanner._fetch_chart, las resamplea a M30 para
+calcular el bias direccional (EMA50 vs EMA100) y detecta niveles de soporte/
 resistencia por pivots + clustering aglomerativo single-linkage.
+
+Además incluye datos de acción del precio (wick ratio de últimas 3 velas) para
+que el scalper vea si hay rechazo activo en los niveles.
 
 Cada nivel se etiqueta con:
 - precio, tipo (soporte/resistencia relativo al precio actual)
 - fuerza (toques + antigüedad) sin opiniones
 - distancia al precio en pips
 - estado ACTIVO/LEJANO según rango operativo y coherencia con bias M30
+- wick_ratio de la última vela que tocó el nivel (si aplica)
 
 La salida es estrictamente descriptiva — el lenguaje es neutro, sin
 "comprar/vender". La app marca el terreno; la decisión es del trader.
@@ -84,16 +87,11 @@ def _parse_candle_ts(raw: Optional[str]) -> Optional[datetime]:
 
 
 # ---------------------------------------------------------------------------
-# Resample M15 → M30
+# Resample M5 → M30
 # ---------------------------------------------------------------------------
 
-def _resample_m15_to_m30(ohlc: dict) -> Optional[pd.DataFrame]:
-    """Agrupa las velas M15 en velas M30 alineadas a :00 y :30.
-
-    pandas resample con label='right' y closed='right' coloca la vela final
-    en el timestamp del último M15 incluido. Para nuestras EMAs lo único que
-    importa es la secuencia ordenada por tiempo.
-    """
+def _resample_m5_to_m30(ohlc: dict) -> Optional[pd.DataFrame]:
+    """Agrupa las velas M5 en velas M30 alineadas a :00 y :30."""
     if not ohlc.get("ts") or not ohlc.get("close"):
         return None
     try:
@@ -157,20 +155,7 @@ def _compute_m30_bias(
     pip: float,
     atr_mult: float = ZONES_RANGO_ATR_MULT_DEFAULT,
 ) -> dict:
-    """Bias direccional M30: EMA50 vs EMA100 con tercer estado RANGO.
-
-    200 velas M15 ≈ 100 velas M30, así que la EMA larga máxima viable sin
-    pedir más datos a Twelve Data es EMA100 (~50h de contexto = 2 días).
-
-    Estados:
-      - BULL: EMA50 > EMA100 Y separación ≥ atr_mult × ATR(M30)
-      - BEAR: EMA50 < EMA100 Y separación ≥ atr_mult × ATR(M30)
-      - RANGO: separación < atr_mult × ATR(M30) — sin sesgo direccional fiable
-
-    Devuelve siempre el dict completo. Si no se puede calcular, `available`
-    queda False y `reason` indica el motivo (no_ohlc, insufficient_m30_bars,
-    ema_failed, atr_failed).
-    """
+    """Bias direccional M30: EMA50 vs EMA100 con tercer estado RANGO."""
     out: dict = {
         "label": "NEUTRAL",
         "ema50": None,
@@ -228,6 +213,47 @@ def _compute_m30_bias(
         "reason": None,
         "m30_bars": int(len(m30)),
         "m30_bars_required": EMA_PERIOD_100,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Wick ratio de última vela
+# ---------------------------------------------------------------------------
+
+def _wick_ratio(ohlc: dict, idx: int = -1) -> dict:
+    """Calcula wick ratio de la vela en índice `idx`."""
+    i = idx if idx >= 0 else len(ohlc["close"]) + idx
+    if i < 0 or i >= len(ohlc["close"]):
+        return {"top": 0.0, "bottom": 0.0, "body": 0.0, "ratio": 0.0, "direction": "neutral"}
+    o = ohlc["open"][i]
+    c = ohlc["close"][i]
+    h = ohlc["high"][i]
+    l = ohlc["low"][i]
+
+    body = abs(c - o)
+    rng = h - l
+    if rng == 0:
+        return {"top": 0.0, "bottom": 0.0, "body": 0.0, "ratio": 0.0, "direction": "neutral"}
+
+    if c >= o:
+        top_wick = h - c
+        bot_wick = o - l
+        direction = "bull"
+    else:
+        top_wick = h - o
+        bot_wick = c - l
+        direction = "bear"
+
+    # Wick ratio: wick mayor / body (0 si doji)
+    max_wick = max(top_wick, bot_wick)
+    ratio = max_wick / body if body > 0 else (max_wick / rng * 10.0)  # doji: usar escala relativa
+
+    return {
+        "top": round(top_wick, 5),
+        "bottom": round(bot_wick, 5),
+        "body": round(body, 5),
+        "ratio": round(ratio, 2),
+        "direction": direction,
     }
 
 
@@ -300,10 +326,7 @@ def _cluster_single_linkage(
     pivots: list[tuple[int, float]], merge_distance: float
 ) -> list[list[tuple[int, float]]]:
     """Cluster aglomerativo 1D: dos puntos pertenecen al mismo cluster si el
-    gap entre vecinos consecutivos (ordenados por precio) es ≤ merge_distance.
-
-    Equivalente a single-linkage con corte por umbral — pero en O(N log N)
-    sin construir matriz de distancias. Para 200 velas → ≤ 40 pivots → trivial.
+    gap entre vecinos consecutivos (ordenados por precio) es <= merge_distance.
     """
     if not pivots:
         return []
@@ -331,11 +354,9 @@ def _level_price(cluster: list[tuple[int, float]], selector: str) -> float:
 def _count_touches(
     level_price: float, highs: list[float], lows: list[float], tolerance: float
 ) -> int:
-    """Cuenta cuántas veces el precio ENTRÓ en la zona ± tolerance.
+    """Cuenta cuántas veces el precio ENTRÓ en la zona +- tolerance.
 
-    No cuenta cada vela dentro de la zona — eso sobrevaloraría niveles
-    visitados largo rato. Cuenta transiciones fuera→dentro (cada nuevo
-    "test" del nivel).
+    Cuenta transiciones fuera->dentro (cada nuevo "test" del nivel).
     """
     h = np.asarray(highs, dtype=float)
     l = np.asarray(lows, dtype=float)
@@ -347,12 +368,7 @@ def _count_touches(
 
 
 def _strength_score(touches: int, age_bars: int, n_bars: int) -> int:
-    """Score 1-5. Más toques + más antigüedad = más fuerte.
-
-    Antigüedad mide HACE CUÁNTO tiempo se formó por primera vez el nivel
-    (no cuánto lleva activo). Un nivel respetado 4 veces durante 100 velas
-    tiene más peso que uno respetado 4 veces en las últimas 10 velas.
-    """
+    """Score 1-5. Más toques + más antigüedad = más fuerte."""
     age_frac = age_bars / max(n_bars, 1)
     if touches >= 4 and age_frac >= 0.5:
         return 5
@@ -400,9 +416,15 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
 
     last_ts = ohlc["ts"][-1] if ohlc["ts"] else None
 
-    # Bias M30 (resample de las propias M15)
-    m30 = _resample_m15_to_m30(ohlc)
+    # Bias M30 (resample de las propias M5)
+    m30 = _resample_m5_to_m30(ohlc)
     bias = _compute_m30_bias(m30, pip, atr_mult=rango_atr_mult)
+
+    # Wick ratio de las últimas 3 velas (acción del precio inmediata)
+    recent_wicks = []
+    for off in range(-3, 0):
+        if abs(off) <= n_bars:
+            recent_wicks.append(_wick_ratio(ohlc, off))
 
     # Pivots
     p_highs, p_lows = _detect_pivots(highs, lows, window)
@@ -413,9 +435,6 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
     touch_tolerance_price = touch_tol_pips * pip
 
     # Cluster combinado: todos los pivots (highs + lows) en un único set.
-    # Un cluster que mezcla highs y lows es un nivel con confluencia
-    # bidireccional ("flip zone") — más relevante aún. La etiqueta final
-    # support/resistance se decide por la posición vs precio actual.
     all_pivots = p_highs + p_lows
     clusters = _cluster_single_linkage(all_pivots, merge_distance_price)
 
@@ -432,13 +451,18 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
         distance_pips = round(abs(price - last_close) / pip, 1)
         within_range = distance_pips <= active_range_pips
 
-        # Coherencia con bias M30 (filtro híbrido):
-        # BULL → priorizamos SOPORTES (potencial rebote a favor del bias)
-        # BEAR → priorizamos RESISTENCIAS
-        # RANGO / NEUTRAL / sin bias → DESACTIVAMOS el filtro direccional:
-        #   en rango el scalper opera ambos lados (fade desde extremos), así que
-        #   todos los niveles cercanos pasan a ACTIVO. La UI muestra el banner
-        #   de "sin sesgo direccional" para que el trader cambie el modo mental.
+        # Wick ratio de la última vela que tocó este nivel (si está activo)
+        last_touch_wick: dict | None = None
+        # Buscar la vela más reciente cuyo rango incluya el nivel
+        for i in range(n_bars - 1, max(-1, n_bars - 20), -1):
+            if i < 0:
+                break
+            if lows[i] <= price <= highs[i]:
+                last_touch_wick = _wick_ratio(ohlc, i)
+                last_touch_wick["at_bar"] = i
+                break
+
+        # Coherencia con bias M30
         if bias["label"] == "BULL":
             coherent = (kind == "support")
         elif bias["label"] == "BEAR":
@@ -459,10 +483,11 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
             "within_range": within_range,
             "coherent_with_bias": coherent,
             "active": active,
+            "last_touch_wick": last_touch_wick,
         })
 
     # Orden: activos primero (por distancia asc), luego dentro de rango pero
-    # incoherentes con bias (informativos), luego lejanos (ordenados por fuerza desc).
+    # incoherentes con bias, luego lejanos.
     def _sort_key(lv: dict) -> tuple:
         if lv["active"]:
             return (0, lv["distance_pips"])
@@ -472,7 +497,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
 
     levels.sort(key=_sort_key)
 
-    # Mercado cerrado (mismo criterio que radar/scanner)
+    # Mercado cerrado
     market_closed = False
     data_age_minutes: Optional[float] = None
     if last_ts:
@@ -486,6 +511,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
         "price": round(last_close, 5),
         "pip_size": pip,
         "bias_m30": bias,
+        "recent_wicks": recent_wicks,
         "params": {
             "window": window,
             "merge_distance_pips": merge_distance_pips,

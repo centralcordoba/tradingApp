@@ -35,6 +35,14 @@ export type ZoneLevel = {
   within_range: boolean;
   coherent_with_bias: boolean;
   active: boolean;
+  last_touch_wick?: {
+    top: number;
+    bottom: number;
+    body: number;
+    ratio: number;
+    direction: "bull" | "bear" | "neutral";
+    at_bar: number;
+  } | null;
 };
 
 export type ZonesPairResponse = {
@@ -42,6 +50,13 @@ export type ZonesPairResponse = {
   price: number;
   pip_size: number;
   bias_m30: ZoneBiasM30;
+  recent_wicks: Array<{
+    top: number;
+    bottom: number;
+    body: number;
+    ratio: number;
+    direction: "bull" | "bear" | "neutral";
+  }>;
   params: {
     window: number;
     merge_distance_pips: number;
@@ -206,6 +221,11 @@ export type ScannerPair = {
   bloque_reason?: string;
   factors: ScannerFactor[];
   spark: number[];
+  // Nuevos campos para scalping M5
+  ema9_dist_atr: number | null;
+  extended_status: "normal" | "extended" | "skip";
+  structure: string;
+  struct_bullish: boolean | null;
 };
 
 export type DailyBrief = {
