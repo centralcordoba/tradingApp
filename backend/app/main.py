@@ -338,12 +338,12 @@ def get_news(symbol: str = "EURUSD", hours: int = 24):
 
 
 @app.get("/news/calendar")
-def get_news_calendar(date: str | None = None, impact: str = "high"):
+def get_news_calendar(date: str | None = None, impact: str = "high,medium"):
     """Eventos del calendario económico para un día específico (filtrados por zona Madrid).
 
     Query:
       - `?date=2026-04-10` (default: hoy en Madrid)
-      - `?impact=high|medium|low|all` (default: high)
+      - `?impact=high|medium|low|all` o lista separada por comas (`high,medium`). Default: `high,medium`
     """
     from zoneinfo import ZoneInfo
     madrid_tz = ZoneInfo("Europe/Madrid")
@@ -356,10 +356,13 @@ def get_news_calendar(date: str | None = None, impact: str = "high"):
     else:
         target = datetime.now(madrid_tz).date()
 
+    wanted = {p.strip().lower() for p in impact.split(",") if p.strip()}
+    allow_all = "all" in wanted
+
     events = []
     for ev in news_client.get_calendar():
         ev_impact = (ev.get("impact") or "").lower()
-        if impact != "all" and ev_impact != impact.lower():
+        if not allow_all and ev_impact not in wanted:
             continue
         when = news_client._parse_event_date(ev.get("date", ""))
         if when is None:

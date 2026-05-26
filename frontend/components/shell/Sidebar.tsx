@@ -49,9 +49,9 @@ export function Sidebar({
     const fetchEvents = async () => {
       try {
         const today = todayMadrid();
-        const r = await fetch(`${API}/news/calendar?date=${today}&impact=high`, { cache: "no-store" });
+        const r = await fetch(`${API}/news/calendar?date=${today}&impact=high,medium`, { cache: "no-store" });
         const j = await r.json();
-        if (alive) setEvents((j.events || []).slice(0, 6));
+        if (alive) setEvents((j.events || []).slice(0, 8));
       } catch {
         if (alive) setEvents([]);
       } finally {
@@ -135,7 +135,7 @@ export function Sidebar({
       <div className="sb-events">
         {loading && <div className="sb-events-empty">Cargando…</div>}
         {!loading && events.length === 0 && (
-          <div className="sb-events-empty">Sin eventos high-impact hoy</div>
+          <div className="sb-events-empty">Sin eventos relevantes hoy</div>
         )}
         {!loading && events.map((e, i) => {
           const flag = COUNTRY_FLAG[e.country] || "🏳";
