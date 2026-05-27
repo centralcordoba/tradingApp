@@ -10,8 +10,8 @@ y /api/zones) llaman a `build_cross_map()`, así que el veredicto sale idéntico
 en las dos pantallas sin duplicar el cálculo.
 
 Estados:
-- A  "A FAVOR"          BULL+LONG | BEAR+SHORT          tendencia alineada (verde)
-- B  "FADE EN RANGO"    RANGO + (LONG|SHORT)            mean-reversion (ámbar)
+- A  "A FAVOR"          BULL+LONG | BEAR+SHORT          tendencia alineada (verde si LONG / rojo si SHORT)
+- B  "FADE EN RANGO"    RANGO + (LONG|SHORT)            mean-reversion (verde si LONG / rojo si SHORT)
 - C  "CONFLICTO M30/M5" BULL+SHORT | BEAR+LONG          contra-tendencia (rojo)
 - D  "SIN SETUP"        scanner NEUTRAL (cualquier bias)                  (gris)
 - NA "no reconciliable" bias M30 no disponible                           (gris)
@@ -73,10 +73,11 @@ def reconcile(
             "o no calculable). No se asume dirección.",
         )
 
-    # A — tendencia alineada.
+    # A — tendencia alineada. Color por dirección: LONG verde, SHORT rojo.
     if (bias_label == "BULL" and scanner_side == "LONG") or (bias_label == "BEAR" and scanner_side == "SHORT"):
+        tone = "green" if scanner_side == "LONG" else "red"
         return _verdict(
-            "A", "green", f"A FAVOR M30 · {scanner_side} de tendencia",
+            "A", tone, f"A FAVOR M30 · {scanner_side} de tendencia",
             "El M5 va en la misma dirección que el bias director M30. Setup de tendencia "
             "alineado — la confluencia del scanner cuenta completa.",
         )
@@ -97,8 +98,9 @@ def reconcile(
         objetivo = f"hacia el {tipo} activo más cercano ({opposite_price})"
     else:
         objetivo = f"hacia el extremo opuesto del rango ({tipo}, sin nivel S/R activo localizado)"
+    tone = "green" if scanner_side == "LONG" else "red"
     return _verdict(
-        "B", "amber", "FADE EN RANGO · objetivo extremo opuesto",
+        "B", tone, "FADE EN RANGO · objetivo extremo opuesto",
         f"Sin tendencia M30: el movimiento M5 ocurre dentro de un rango. No es trade de "
         f"tendencia sino fade (mean-reversion) {objetivo}. Caducidad: salir en ese extremo, "
         f"no dejar correr esperando tendencia.",
