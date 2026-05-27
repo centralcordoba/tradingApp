@@ -97,7 +97,7 @@ export function SessionsTimeline({ now: nowOverride }: Props) {
         {aplusBands.map((b, i) => (
           <div
             key={`overlap-${i}`}
-            className="session-overlap"
+            className="timeline-overlap-band"
             style={{ left: `${b.left}%`, width: `${b.width}%` }}
             aria-hidden="true"
           />

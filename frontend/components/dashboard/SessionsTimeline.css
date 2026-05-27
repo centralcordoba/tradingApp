@@ -64,7 +64,7 @@
 .session-ldn  { background: rgba(34, 197, 94, 0.10);  color: #86EFAC; }
 .session-ny   { background: rgba(245, 158, 11, 0.10); color: #FCD34D; }
 
-.session-overlap {
+.timeline-overlap-band {
   position: absolute;
   top: 0; bottom: 0;
   background: linear-gradient(90deg, var(--aplus) 0%, var(--accent) 100%);
