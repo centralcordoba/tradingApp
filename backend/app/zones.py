@@ -429,6 +429,9 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
         if abs(off) <= n_bars:
             recent_wicks.append(_wick_ratio(ohlc, off))
 
+    # ATR sobre M15 (para que el motor de señales calcule el buffer del SL)
+    atr_m15 = scanner._atr(highs, lows, closes, ATR_PERIOD)
+
     # Pivots
     p_highs, p_lows = _detect_pivots(highs, lows, window)
     p_highs = _filter_min_bars(p_highs, min_bars_between, "high")
@@ -529,6 +532,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
         "last_candle_ts": _normalize_ts(last_ts),
         "data_age_minutes": round(data_age_minutes, 1) if data_age_minutes is not None else None,
         "market_closed": market_closed,
+        "atr_m15": round(atr_m15, 5) if atr_m15 is not None else None,
     }
 
 

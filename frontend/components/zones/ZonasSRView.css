@@ -761,3 +761,320 @@
     letter-spacing: 1.5px;
   }
 }
+
+/* ── Botón de notificaciones ─────────────────────────────────────────── */
+
+.zsr-notif-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.zsr-notif-btn:hover { opacity: 0.8; }
+
+.zsr-notif-on {
+  background: rgba(34,197,94,0.12);
+  border-color: rgba(34,197,94,0.3);
+  color: #4ade80;
+}
+.zsr-notif-off {
+  background: rgba(148,163,184,0.1);
+  border-color: rgba(148,163,184,0.2);
+  color: var(--text-muted);
+  cursor: default;
+}
+.zsr-notif-pending {
+  background: rgba(249,115,22,0.12);
+  border-color: rgba(249,115,22,0.3);
+  color: #fb923c;
+  animation: zsr-pulse 2s ease-in-out infinite;
+}
+
+/* ── SignalCard ────────────────────────────────────────────────────────── */
+
+.zsr-signal-section {
+  margin: 2px 0 8px;
+}
+
+.zsig-card {
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+}
+
+/* Variantes por tipo */
+.zsig-card.zsig-strong-buy  { border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.05); }
+.zsig-card.zsig-buy         { border-color: rgba(34,197,94,0.20); background: rgba(34,197,94,0.03); }
+.zsig-card.zsig-neutral     { border-color: rgba(148,163,184,0.25); }
+.zsig-card.zsig-sell        { border-color: rgba(239,68,68,0.20); background: rgba(239,68,68,0.03); }
+.zsig-card.zsig-strong-sell { border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.05); }
+.zsig-card.zsig-card-none   { border-color: rgba(148,163,184,0.15); background: transparent; }
+
+/* Header row */
+.zsig-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.zsig-badge-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zsig-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.zsig-badge-zsig-strong-buy,
+.zsig-badge-zsig-buy    { background: rgba(34,197,94,0.18); color: #4ade80; }
+.zsig-badge-zsig-neutral { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+.zsig-badge-zsig-sell,
+.zsig-badge-zsig-strong-sell { background: rgba(239,68,68,0.18); color: #f87171; }
+.zsig-badge-zsig-none   { background: rgba(148,163,184,0.10); color: var(--text-muted); }
+
+.zsig-neutral-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.zsig-confidence-block {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.zsig-confidence-pct {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent, #f59e0b);
+}
+
+.zsig-confidence-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Score bar */
+.zsig-score-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.zsig-bar-track {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.zsig-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.zsig-bar-fill-strong { background: #22c55e; }
+.zsig-bar-fill-normal { background: var(--accent, #f59e0b); }
+.zsig-bar-fill-weak   { background: rgba(148,163,184,0.5); }
+
+.zsig-score-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Precios */
+.zsig-prices {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.zsig-price-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.zsig-price-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.zsig-price-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.zsig-price-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.zsig-price-sl .zsig-price-value { color: #f87171; }
+.zsig-price-tp .zsig-price-value { color: #4ade80; }
+.zsig-rrr { color: var(--accent, #f59e0b); }
+
+/* Riesgo en cuenta */
+.zsig-risk-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+}
+
+.zsig-risk-row.zsig-risk-blocked {
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.3);
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.zsig-risk-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.zsig-risk-row.zsig-risk-blocked .zsig-risk-label {
+  color: #f87171;
+}
+
+.zsig-risk-detail {
+  color: var(--text-muted);
+}
+
+.zsig-block-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.zsig-block-reason {
+  font-size: 11px;
+  color: #f87171;
+  opacity: 0.85;
+}
+
+/* Sesión + nivel base */
+.zsig-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.zsig-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.zsig-session-fire  { background: rgba(249,115,22,0.15); color: #fb923c; }
+.zsig-session-ok    { background: rgba(34,197,94,0.12);  color: #4ade80; }
+.zsig-session-avoid { background: rgba(148,163,184,0.12); color: var(--text-muted); }
+
+/* Rechazo */
+.zsig-rejection {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  opacity: 0.75;
+}
+
+/* Toggle detalle */
+.zsig-detail-toggle {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+  font-family: var(--font-ui);
+}
+.zsig-detail-toggle:hover { opacity: 1; }
+
+/* Criterios */
+.zsig-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.zsig-criteria-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.zsig-criteria-heading {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.zsig-criteria-met-head  { color: #4ade80; }
+.zsig-criteria-fail-head { color: rgba(148,163,184,0.6); }
+
+.zsig-criterion {
+  font-size: 12px;
+  line-height: 1.5;
+  padding-left: 4px;
+}
+
+.zsig-criterion-met  { color: rgba(74,222,128,0.85); }
+.zsig-criterion-fail { color: rgba(148,163,184,0.55); }
+
+/* Responsive: en pantallas pequeñas, el grid de precios pasa a 2 cols */
+@media (max-width: 480px) {
+  .zsig-prices {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

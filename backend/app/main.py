@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones, cross_verdict
+from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones, cross_verdict, zone_signal_engine
 from .correlations import CorrelationsAIDisabled
 from .stocks_client import StocksUpstreamError
 from .constants import (
@@ -215,8 +215,17 @@ def zones_sr(
     # Mismo veredicto cruzado que /scanner/pairs. Propaga params para que el
     # bias del cruce coincida con el chip M30 que se renderiza en esta vista.
     cross = cross_verdict.build_cross_map([it["pair"] for it in response.get("items", [])], zones_params=params)
+    # Scanner M5 para el motor de señales (usa caché compartida con cross_verdict)
+    from .constants import ZONES_DEFAULT_PAIRS as _zdp
+    zone_pairs = selected or list(_zdp)
+    try:
+        scan_map = {x["pair"]: x for x in scanner.scan_pairs(zone_pairs)}
+    except Exception:
+        scan_map = {}
     for it in response.get("items", []):
         it["cross"] = cross.get(it["pair"])
+        scanner_item = scan_map.get(it["pair"])
+        it["signal"] = zone_signal_engine.generate_zone_signal(it, scanner_item)
     return response
 
 

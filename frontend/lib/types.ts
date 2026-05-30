@@ -57,6 +57,45 @@ export type ZoneLevel = {
   } | null;
 };
 
+export type ZoneSignal = {
+  has_signal: boolean;
+  signal: "FUERTE_COMPRA" | "COMPRA" | "NEUTRAL" | "VENTA" | "FUERTE_VENTA" | "SIN_SEÑAL";
+  confidence: number;        // 0-1
+  score: number;             // 0-MAX_SCORE
+  max_score: number;
+  side: "LONG" | "SHORT" | null;
+  entry_price: number | null;
+  sl_price: number | null;
+  tp_price: number | null;
+  risk_pips: number | null;
+  reward_pips: number | null;
+  rrr: number | null;
+  tp_source: string | null;
+  session_status: "fire" | "ok" | "avoid" | "unknown";
+  session_hour_madrid: number;
+  level_used: {
+    price: number;
+    type: "support" | "resistance";
+    strength: number;
+    touches: number;
+    distance_pips: number;
+  } | null;
+  criteria_met: string[];
+  criteria_failed: string[];
+  rejection_reason: string | null;
+  account_check: {
+    risk_usd: number;
+    lot_size: number;
+    pip_value: number;
+    daily_loss_usd: number;
+    total_loss_usd: number;
+    max_daily_loss_usd: number;
+    max_total_loss_usd: number;
+    blocked: boolean;
+    block_reasons: string[];
+  } | null;
+};
+
 export type ZonesPairResponse = {
   pair: string;
   price: number;
@@ -83,7 +122,9 @@ export type ZonesPairResponse = {
   last_candle_ts: string | null;
   data_age_minutes: number | null;
   market_closed: boolean;
+  atr_m15: number | null;
   cross?: CrossVerdict | null;
+  signal?: ZoneSignal | null;
 };
 
 export type ZonesResponse = {
