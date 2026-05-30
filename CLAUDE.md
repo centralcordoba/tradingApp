@@ -215,6 +215,7 @@ Tercera capa: niveles soporte/resistencia operables (scalp M5/M15) + **bias dire
 - **Niveles**: pivots fractales (ventana 3) + clustering single-linkage por pips. Cada nivel: precio, tipo (support/resistance), fuerza 1-5, toques, antigüedad, distancia, `active` (dentro de rango + coherente con bias), wick ratio del último toque.
 - **Endpoint** `/api/zones`: `{items, count, market_closed}`. Cada item: `bias_m30`, `levels[]`, `recent_wicks`, `cross`, `params`. Params override vía query (window, merge_distance_pips, active_range_pips, min_bars_between, touch_tolerance_pips, level_selector, rango_atr_mult). Cache `_zones_cache` por (pairs, params), TTL 15min.
 - **Pares default** (`ZONES_DEFAULT_PAIRS`): AUDUSD, USDCAD. Frontend `ZonasSRView` poll 5min, pausa si `market_closed`.
+- **Alertas de señal** (`ZonasSRView`): sonido Web Audio API + `Notification` browser al detectar cambio de señal accionable en el loop de datos. Botón de toggle en el header: pide permiso al browser (solo desde clic, no auto-request al montar), luego alterna ON/OFF. Estado muted persistido en `localStorage` clave `tradingapp:zones_notif_muted`. **Gotcha**: `Notification.requestPermission()` debe llamarse desde gesto de usuario — llamarlo automáticamente en `useEffect` hace que Chrome lo ignore y el botón quede sin efecto.
 
 ## Veredicto cruzado M30+M5 (`cross_verdict.py`)
 

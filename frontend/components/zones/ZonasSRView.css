@@ -791,6 +791,11 @@
   color: var(--text-muted);
   cursor: default;
 }
+.zsr-notif-muted {
+  background: rgba(148,163,184,0.1);
+  border-color: rgba(148,163,184,0.2);
+  color: var(--text-muted);
+}
 .zsr-notif-pending {
   background: rgba(249,115,22,0.12);
   border-color: rgba(249,115,22,0.3);

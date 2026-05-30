@@ -7,6 +7,7 @@ import { CrossBadge } from "@/components/cross/CrossBadge";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+const NOTIF_MUTED_KEY = "tradingapp:zones_notif_muted";
 
 // ─── Sonido estilo TradingView ────────────────────────────────────────────
 
@@ -742,6 +743,9 @@ export function ZonasSRView() {
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [notifPerm, setNotifPerm] = useState<NotificationPermission | "unsupported">("default");
+  const [notifMuted, setNotifMuted] = useState<boolean>(() => {
+    try { return localStorage.getItem(NOTIF_MUTED_KEY) === "1"; } catch { return false; }
+  });
   const abortRef = useRef<AbortController | null>(null);
   // Guarda el último signal.signal por par para detectar cambios
   const prevSignalsRef = useRef<Map<string, string>>(new Map());
@@ -767,9 +771,6 @@ export function ZonasSRView() {
       return;
     }
     setNotifPerm(Notification.permission);
-    if (Notification.permission === "default") {
-      Notification.requestPermission().then(p => setNotifPerm(p));
-    }
   }, []);
 
   // Detectar señales nuevas y disparar sonido + notificación
@@ -791,14 +792,14 @@ export function ZonasSRView() {
       }
 
       // Señal cambió y es accionable (no era la misma antes)
-      if (currentSig !== lastSig && ALERT_SIGNALS.has(currentSig)) {
+      if (currentSig !== lastSig && ALERT_SIGNALS.has(currentSig) && !notifMuted) {
         playAlertSound(soundForSignal(currentSig));
         sendBrowserNotification(item.pair, sig);
       }
 
       prev.set(item.pair, currentSig);
     }
-  }, [data]);
+  }, [data, notifMuted]);
 
   const fetchZones = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
@@ -850,17 +851,15 @@ export function ZonasSRView() {
           {notifPerm === "granted" ? (
             <button
               type="button"
-              className="zsr-notif-btn zsr-notif-on"
-              title="Notificaciones activas — haz clic para probar sonido"
+              className={`zsr-notif-btn ${notifMuted ? "zsr-notif-muted" : "zsr-notif-on"}`}
+              title={notifMuted ? "Alertas silenciadas — haz clic para activar" : "Alertas activas — haz clic para silenciar"}
               onClick={() => {
-                playAlertSound("strong_buy");
-                new Notification("🔔 Zonas Activas", {
-                  body: "Las alertas funcionan correctamente",
-                  tag: "zsig-test",
-                });
+                const next = !notifMuted;
+                setNotifMuted(next);
+                try { localStorage.setItem(NOTIF_MUTED_KEY, next ? "1" : "0"); } catch {}
               }}
             >
-              🔔 Alertas ON
+              {notifMuted ? "🔕 Alertas OFF" : "🔔 Alertas ON"}
             </button>
           ) : notifPerm === "denied" ? (
             <span className="zsr-notif-btn zsr-notif-off" title="Notificaciones bloqueadas en el navegador">
