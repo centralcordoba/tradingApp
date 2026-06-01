@@ -656,7 +656,7 @@ ngrok.exe http 8000
 
 Frontend http://localhost:3001 · Docs API http://127.0.0.1:8000/docs.
 
-**Lanzador 1-clic**: `Iniciar App.cmd` en la raíz (+ acceso directo "Trading App" en el Escritorio). Verifica/instala deps, corre `npm run dev` (frontend → Render) y abre el navegador en `http://localhost:3001` cuando el server responde. Para el flujo normal del usuario (frontend local contra backend en Render) no hace falta levantar backend ni tocar `.env.local`.
+**Lanzador 1-clic**: `Iniciar App.cmd` en la raíz (+ acceso directo "Trading App" en el Escritorio). Verifica/instala deps, corre `npm run dev` (frontend → Render) y abre el navegador en `http://localhost:3002` cuando el server responde. Para el flujo normal del usuario (frontend local contra backend en Render) no hace falta levantar backend ni tocar `.env.local`.
 
 ## Próximos pasos posibles (no hechos)
 

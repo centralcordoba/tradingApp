@@ -26,14 +26,14 @@ if not exist node_modules\ (
 echo.
 echo  ===============================================
 echo   Trading Assistant - frontend (backend: Render)
-echo   URL: http://localhost:3001
+echo   URL: http://localhost:3002
 echo   El navegador se abrira solo cuando este listo.
 echo   Cierra esta ventana (o Ctrl+C) para detenerlo.
 echo  ===============================================
 echo.
 
 REM Abre el navegador cuando el servidor responda (hasta ~120s, sin bloquear los logs)
-start "" powershell -NoProfile -WindowStyle Hidden -Command "for($i=0;$i -lt 120;$i++){try{$null=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:3001' -TimeoutSec 3; Start-Process 'http://localhost:3001'; break}catch{Start-Sleep 1}}"
+start "" powershell -NoProfile -WindowStyle Hidden -Command "for($i=0;$i -lt 120;$i++){try{$null=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:3002' -TimeoutSec 3; Start-Process 'http://localhost:3002'; break}catch{Start-Sleep 1}}"
 
 call npm run dev
 
