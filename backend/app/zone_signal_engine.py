@@ -549,20 +549,33 @@ def _account_risk_check(
     }
 
 
-# ─── API pública ──────────────────────────────────────────────────────────
+# ─── Marco teórico (gates + confluencia → OPERAR / ESPERAR / NO OPERAR) ─────
+#
+# El marco reusa las dos capas del motor: los gates son los vetos duros de la
+# CAPA 1 reencuadrados como checklist; la confluencia es el scoring de la CAPA 2.
+# El M30 manda, el M5 ejecuta; la decisión final es del usuario.
 
-def generate_zone_signal(
+def _gate(key: str, label: str, passed: bool, hard: bool, detail: str = "") -> dict:
+    return {"key": key, "label": label, "passed": passed, "hard": hard, "detail": detail}
+
+
+def generate_zone_marco(
     zone_item: dict,
     scanner_item: Optional[dict],
     *,
+    news_active: bool = False,
+    news_event: Optional[dict] = None,
     daily_loss_usd: float = 0.0,
     total_loss_usd: float = 0.0,
 ) -> dict:
     """
-    Genera señal para el par. zone_item debe tener 'cross' ya inyectado.
+    Evalúa el par bajo el marco teórico. zone_item debe tener 'cross' inyectado.
 
-    Retorna dict con has_signal, signal, confidence, entry/sl/tp,
-    criteria_met/failed, rejection_reason, account_check, session_status.
+    Devuelve un veredicto OPERAR / ESPERAR / NO_OPERAR con:
+      - gates[]: checklist de filtros (duros → NO_OPERAR si fallan; blandos → degradan)
+      - confluence: score 0..MAX_SCORE cuando los gates duros pasan
+      - entry/sl/tp/rrr/level_used cuando hay setup
+      - news_warning: si hay high-impact en ventana (degrada OPERAR→ESPERAR, nunca veta)
     """
     pair = zone_item.get("pair", "")
     pip_size = zone_item.get("pip_size", 0.0001)
@@ -577,17 +590,16 @@ def generate_zone_signal(
     session_status = _session_status(cfg, hour)
     atr_m15_pips_val = _atr_pips(atr_m15, pip_size)
 
-    # Datos del scanner
-    scanner_side     = "NEUTRAL"
+    # Datos del scanner M5
+    scanner_side       = "NEUTRAL"
     scanner_confluence = 0
-    extended_status  = "normal"
+    extended_status    = "normal"
     rsi: Optional[float] = None
-    structure        = "RANGE"
+    structure          = "RANGE"
     struct_bullish: Optional[bool] = None
-    scanner_bloque   = "2"
-    range_pos        = 0.5
-    change_pct       = 0.0
-    atr_m5: Optional[float] = None
+    scanner_bloque     = "2"
+    range_pos          = 0.5
+    change_pct         = 0.0
 
     if scanner_item:
         scanner_side       = scanner_item.get("side", "NEUTRAL")
@@ -599,86 +611,86 @@ def generate_zone_signal(
         scanner_bloque     = scanner_item.get("bloque", "2")
         range_pos          = scanner_item.get("range_pos", 0.5)
         change_pct         = scanner_item.get("change_pct", 0.0)
-        atr_m5             = scanner_item.get("atr")
 
-    # ═══════════════════════════════════════════════════════════════
-    # CAPA 1: VETOS DUROS — orden de bloqueo más grave a menos
-    # ═══════════════════════════════════════════════════════════════
+    gates: list[dict] = []
 
-    # V1. Mercado cerrado (datos > 30 min)
-    if market_closed:
-        return _no_signal("Mercado cerrado — ultima vela demasiado antigua para scalping")
+    # GATE 1 — Mercado abierto (duro)
+    gates.append(_gate(
+        "mercado_abierto", "Mercado abierto", not market_closed, True,
+        "" if not market_closed else "Última vela demasiado antigua (>30 min) para scalping",
+    ))
 
-    # V2. Scanner sin dirección (NEUTRAL = confluencia < 3/7)
+    # GATE 2 — Coherencia MTF M30/M5 (duro): ni NEUTRAL ni CONFLICTO
     if scanner_side == "NEUTRAL":
-        return _no_signal(
-            f"Scanner M5 NEUTRAL (confluencia {scanner_confluence}/7) — "
-            "sin direccion clara para entrada. Se necesita bias minimo 3/7."
+        mtf_ok, mtf_detail = False, f"Scanner M5 sin dirección (NEUTRAL, confluencia {scanner_confluence}/7)"
+    elif cross_state == "C":
+        mtf_ok, mtf_detail = False, "CONFLICTO M30/M5 — el M5 va contra el bias director M30"
+    else:
+        mtf_ok, mtf_detail = True, (
+            "A FAVOR del M30" if cross_state == "A"
+            else "Fade en rango M30" if cross_state == "B"
+            else "M5 con dirección"
         )
+    gates.append(_gate("mtf_coherente", "Coherencia MTF M30/M5", mtf_ok, True, mtf_detail))
 
-    # V3. Conflicto M30/M5 (el M5 va contra el bias director M30)
-    if cross_state == "C":
-        return _no_signal(
-            "CONFLICTO M30/M5 — el M5 va en contra del bias director M30. "
-            "No operar contra tendencia superior sin setup de alta probabilidad."
-        )
+    # GATE 3 — Sesión operable (duro solo si el par lo exige, p.ej. USDCAD)
+    session_hard = bool(cfg.get("veto_avoid_session", False))
+    session_ok = session_status != "avoid"
+    gates.append(_gate(
+        "sesion_operable", "Sesión operable", session_ok, session_hard,
+        f"{session_status.upper()} · {hour:02d}h Madrid" +
+        ("" if session_ok else f" — fuera de la ventana de liquidez de {pair}"),
+    ))
 
-    # V4. Sesión desfavorable (solo para pares que lo requieren — USDCAD)
-    if session_status == "avoid" and cfg.get("veto_avoid_session", False):
-        return _no_signal(
-            f"Sesion desfavorable para {pair} a las {hour:02d}h Madrid — "
-            "liquidez insuficiente fuera de la ventana NY. Esperar apertura NY (14h Madrid)."
-        )
+    # GATE 4 — Precio no extendido del EMA9 (duro)
+    gates.append(_gate(
+        "no_extendido", "Precio no extendido", extended_status != "skip", True,
+        {"normal": "Cerca del EMA9", "extended": "Extendido 1–2.5×ATR — pullback esperado",
+         "skip": "Muy extendido >2.5×ATR — entrada tardía"}.get(extended_status, extended_status),
+    ))
 
-    # V5. Precio muy extendido del EMA9 (entrada tardía)
-    if extended_status == "skip":
-        return _no_signal(
-            "Precio demasiado extendido del EMA9 (>2.5xATR) — entrada tardia. "
-            "Esperar retroceso al EMA9 o al nivel S/R."
-        )
-
-    # V6. Volatilidad fuera del rango útil para scalping
+    # GATE 5 — Volatilidad útil para scalp (duro)
     atr_min = cfg.get("atr_min_pips", 3.0)
     atr_max = cfg.get("atr_max_pips", 22.0)
-    if atr_m15_pips_val is not None:
-        if atr_m15_pips_val < atr_min:
-            return _no_signal(
-                f"ATR M15 {atr_m15_pips_val:.1f} pips < {atr_min} minimo — mercado demasiado tranquilo. "
-                "Spread relativo alto; scalping no viable en este contexto."
-            )
-        if atr_m15_pips_val > atr_max:
-            return _no_signal(
-                f"ATR M15 {atr_m15_pips_val:.1f} pips > {atr_max} maximo — mercado demasiado volatil. "
-                "Riesgo de slippage y gapping alto para scalp de 0-30 min."
-            )
+    if atr_m15_pips_val is None:
+        vol_ok, vol_detail = True, "ATR M15 no disponible"
+    elif atr_m15_pips_val < atr_min:
+        vol_ok, vol_detail = False, f"ATR M15 {atr_m15_pips_val:.1f}p < {atr_min}p — mercado muerto"
+    elif atr_m15_pips_val > atr_max:
+        vol_ok, vol_detail = False, f"ATR M15 {atr_m15_pips_val:.1f}p > {atr_max}p — demasiado volátil"
+    else:
+        vol_ok, vol_detail = True, f"ATR M15 {atr_m15_pips_val:.1f}p — útil para scalp"
+    gates.append(_gate("volatilidad_util", "Volatilidad útil", vol_ok, True, vol_detail))
 
-    # V7. Mercado lateral con setup de tendencia (cross A + structure RANGE)
+    # GATE 6 — Estructura con impulso (duro, solo relevante en tendencia cross A)
     if cross_state == "A" and structure == "RANGE" and cfg.get("veto_range_in_trend", True):
-        return _no_signal(
-            "Conflicto tendencia/estructura — M30 marca tendencia (A FAVOR) pero M5 muestra "
-            "estructura RANGE (sin HH/HL ni LL/LH claros). Tendencia sin impulso = trampa frecuente."
-        )
+        struct_ok, struct_detail = False, "M30 marca tendencia pero M5 está en RANGE — trampa frecuente"
+    elif cross_state == "A" and scanner_bloque == "2" and cfg.get("veto_bloque2_in_trend", True):
+        struct_ok, struct_detail = False, "Scanner Bloque 2 (sin edge) bajo cross A FAVOR"
+    else:
+        struct_ok, struct_detail = True, f"Estructura M5 {structure}"
+    gates.append(_gate("estructura_impulso", "Estructura con impulso", struct_ok, True, struct_detail))
 
-    # V8. Scanner Bloque 2 en setup de tendencia (sin edge en M5)
-    if cross_state == "A" and scanner_bloque == "2" and cfg.get("veto_bloque2_in_trend", True):
-        return _no_signal(
-            "Scanner Bloque 2 con cross A FAVOR — el M5 clasifica como 'sin edge' "
-            "(EMAs mixtas, bias bajo, o precio extendido). No operar tendencia sin impulso limpio."
+    # GATE 7 — Nivel S/R operable en la dirección del trade (duro)
+    best_level = (
+        _best_level_for_side(levels, scanner_side, cfg)
+        if scanner_side in ("LONG", "SHORT") else None
+    )
+    if best_level is not None:
+        level_ok, level_detail = True, (
+            f"{best_level['type']} {best_level['price']} · {best_level['strength']}★ · "
+            f"{best_level['distance_pips']}p"
         )
-
-    # V9. Buscar el mejor nivel activo en la dirección del scanner
-    best_level = _best_level_for_side(levels, scanner_side, cfg)
-    if best_level is None:
-        max_dist = cfg["max_entry_distance_pips"]
-        min_str  = cfg["min_level_strength"]
-        dir_str  = "soporte" if scanner_side == "LONG" else "resistencia"
-        return _no_signal(
-            f"Sin {dir_str} activo a <= {max_dist} pips con fuerza >= {min_str}. "
-            f"El precio no esta sobre una zona S/R operable para {scanner_side} en {pair} ahora."
+    else:
+        dir_str = "soporte" if scanner_side == "LONG" else "resistencia" if scanner_side == "SHORT" else "nivel"
+        level_ok, level_detail = False, (
+            f"Sin {dir_str} activo a ≤{cfg['max_entry_distance_pips']}p con fuerza "
+            f"≥{cfg['min_level_strength']}★"
         )
+    gates.append(_gate("nivel_operable", "Nivel S/R operable", level_ok, True, level_detail))
 
-    # V10. Wick requerido para USDCAD (siempre) y para señal FUERTE en AUDUSD
-    wick = best_level.get("last_touch_wick") or {}
+    # GATE 8 — Rechazo confirmado en el nivel (duro solo si el par lo exige)
+    wick = (best_level or {}).get("last_touch_wick") or {}
     wick_ratio = wick.get("ratio", 0.0)
     wick_dir = wick.get("direction", "neutral")
     wick_aligned = (
@@ -686,171 +698,149 @@ def generate_zone_signal(
         (scanner_side == "SHORT" and wick_dir == "bear")
     )
     wick_normal_min = cfg.get("wick_min_for_normal", 1.2)
-    if cfg.get("require_wick_for_normal", False) and not (wick_ratio >= wick_normal_min and wick_aligned):
-        return _no_signal(
-            f"Sin rechazo claro en el nivel (wick {wick_ratio:.1f}x, se necesita >= {wick_normal_min}x "
-            f"alineado con {scanner_side}). {pair} requiere confirmacion de price action en el nivel."
+    wick_required = bool(cfg.get("require_wick_for_normal", False))
+    wick_present = best_level is not None and wick_ratio >= wick_normal_min and wick_aligned
+    gates.append(_gate(
+        "rechazo_confirmado", "Rechazo en el nivel",
+        wick_present or not wick_required, wick_required,
+        f"Wick {wick_ratio:.1f}× {'alineado' if wick_aligned else 'sin alinear'}"
+        if best_level is not None else "—",
+    ))
+
+    # GATE 9 — SL dentro del cap + RRR ≥ mínimo (duro). Requiere nivel.
+    sl_tp: Optional[dict] = None
+    account_check: Optional[dict] = None
+    if best_level is not None:
+        opp_level = _opposite_level(levels, scanner_side)
+        entry_price = zone_item.get("price", best_level["price"])
+        sl_tp = _calculate_sl_tp(
+            pair=pair, pip_size=pip_size, scanner_side=scanner_side,
+            entry_price=entry_price, best_level=best_level,
+            opposite_level=opp_level, atr_m15=atr_m15, cfg=cfg,
         )
-
-    # V11. Nivel opuesto para TP
-    opp_level = _opposite_level(levels, scanner_side)
-
-    # V12. SL / TP
-    entry_price = zone_item.get("price", best_level["price"])
-    sl_tp = _calculate_sl_tp(
-        pair=pair,
-        pip_size=pip_size,
-        scanner_side=scanner_side,
-        entry_price=entry_price,
-        best_level=best_level,
-        opposite_level=opp_level,
-        atr_m15=atr_m15,
-        cfg=cfg,
-    )
-
-    if not sl_tp["sl_within_cap"]:
-        max_sl = cfg.get("sl_max_pips", 20.0)
-        return _no_signal(
-            f"SL {sl_tp['risk_pips']:.1f} pips excede el cap de {max_sl:.0f} pips para {pair}. "
-            "Nivel demasiado alejado del precio para scalp de 0-30 min."
-        )
-
-    if not sl_tp["rrr_ok"]:
-        rrr_val = sl_tp.get("rrr")
-        rrr_str = f"{rrr_val:.2f}" if rrr_val is not None else "N/A"
-        return _no_signal(
-            f"RRR {rrr_str} insuficiente (minimo {MIN_RRR:.1f}:1). "
-            "Sin nivel opuesto suficientemente alejado para justificar el riesgo."
-        )
-
-    # V13. Gestión de cuenta
-    account_check = _account_risk_check(
-        pair=pair,
-        risk_pips=sl_tp["risk_pips"],
-        daily_loss_usd=daily_loss_usd,
-        total_loss_usd=total_loss_usd,
-    )
-    if account_check["blocked"]:
-        return _no_signal(
-            "Sistema bloqueado — limite de perdida alcanzado. " +
-            " | ".join(account_check["block_reasons"]),
-            account_check=account_check,
-            session_status=session_status,
-        )
-
-    # ═══════════════════════════════════════════════════════════════
-    # CAPA 2: SCORING DE CONFIRMACIÓN
-    # ═══════════════════════════════════════════════════════════════
-
-    score, met, failed = _score_signal(
-        cross_state=cross_state,
-        scanner_side=scanner_side,
-        scanner_confluence=scanner_confluence,
-        extended_status=extended_status,
-        rsi=rsi,
-        level=best_level,
-        structure=structure,
-        struct_bullish=struct_bullish,
-        scanner_bloque=scanner_bloque,
-        range_pos=range_pos,
-        change_pct=change_pct,
-        session_status=session_status,
-        atr_m15_pips=atr_m15_pips_val,
-        cfg=cfg,
-    )
-
-    # ── Veto adicional para señal FUERTE: wick mínimo ────────────────
-    if cfg.get("require_wick_for_strong", True):
-        wick_strong_min = cfg.get("wick_min_for_strong", 2.0)
-        strong_threshold = cfg["min_score_strong"]
-        if score >= strong_threshold and not (wick_ratio >= wick_strong_min and wick_aligned):
-            # Degradar a NORMAL si no hay wick fuerte suficiente
-            score = min(score, cfg["min_score_normal"] + 1)
-            failed.append(
-                f"Señal degradada a COMPRA/VENTA — wick {wick_ratio:.1f}x no alcanza "
-                f"{wick_strong_min}x requerido para FUERTE en {pair}"
-            )
-
-    # ═══════════════════════════════════════════════════════════════
-    # CLASIFICACIÓN FINAL
-    # ═══════════════════════════════════════════════════════════════
-
-    is_long = scanner_side == "LONG"
-    min_strong  = cfg["min_score_strong"]
-    min_normal  = cfg["min_score_normal"]
-    min_neutral = cfg["min_score_neutral"]
-
-    if score >= min_strong:
-        signal = "FUERTE_COMPRA" if is_long else "FUERTE_VENTA"
-        confidence = round(min(0.95, 0.74 + (score - min_strong) * 0.04), 2)
-    elif score >= min_normal:
-        signal = "COMPRA" if is_long else "VENTA"
-        confidence = round(0.56 + (score - min_normal) * 0.04, 2)
-    elif score >= min_neutral:
-        signal = "NEUTRAL"
-        confidence = round(0.30 + (score - min_neutral) * 0.05, 2)
+        rrr_ok = sl_tp["sl_within_cap"] and sl_tp["rrr_ok"]
+        if not sl_tp["sl_within_cap"]:
+            rrr_detail = f"SL {sl_tp['risk_pips']:.1f}p excede cap {cfg.get('sl_max_pips', 20.0):.0f}p"
+        elif not sl_tp["rrr_ok"]:
+            rv = sl_tp.get("rrr")
+            rrr_detail = f"RRR {rv:.2f}:1 < {MIN_RRR:.1f}:1" if rv is not None else "RRR no calculable"
+        else:
+            rrr_detail = f"RRR {sl_tp['rrr']:.2f}:1 · SL {sl_tp['risk_pips']:.1f}p"
     else:
-        top_fail = ", ".join(failed[:2]) if failed else "confirmaciones insuficientes"
-        return _no_signal(
-            f"Score {score}/{MAX_SCORE} — umbral minimo {min_neutral} no alcanzado. {top_fail}.",
-            account_check=account_check,
-            session_status=session_status,
-        )
+        rrr_ok, rrr_detail = False, "Sin nivel para calcular SL/TP"
+    gates.append(_gate("rrr_minimo", f"RRR ≥ {MIN_RRR:.0f}:1 y SL en cap", rrr_ok, True, rrr_detail))
 
-    return {
-        "has_signal": True,
-        "signal": signal,
-        "confidence": confidence,
-        "score": score,
-        "max_score": MAX_SCORE,
-        "side": scanner_side,
-        "entry_price": round(entry_price, 5),
-        "sl_price": sl_tp["sl_price"],
-        "tp_price": sl_tp["tp_price"],
-        "risk_pips": sl_tp["risk_pips"],
-        "reward_pips": sl_tp["reward_pips"],
-        "rrr": sl_tp["rrr"],
-        "tp_source": sl_tp["tp_source"],
+    # GATE 10 — Riesgo de cuenta dentro de límite (duro). Hoy inerte (losses=0).
+    if sl_tp is not None:
+        account_check = _account_risk_check(
+            pair=pair, risk_pips=sl_tp["risk_pips"],
+            daily_loss_usd=daily_loss_usd, total_loss_usd=total_loss_usd,
+        )
+        acc_ok = not account_check["blocked"]
+        acc_detail = (
+            f"{account_check['lot_size']} lotes · ${account_check['risk_usd']:.0f} USD"
+            if acc_ok else " | ".join(account_check["block_reasons"])
+        )
+        gates.append(_gate("cuenta", "Riesgo de cuenta", acc_ok, True, acc_detail))
+
+    # GATE 11 — Sin noticia high-impact en ventana (blando — degrada, no veta)
+    if news_active:
+        ev = news_event or {}
+        mins = ev.get("minutes_until")
+        news_detail = (
+            f"{ev.get('title', 'Evento high-impact')}"
+            + (f" · ~{mins}min" if isinstance(mins, int) else "")
+        )
+    else:
+        news_detail = "Sin eventos high-impact en ventana"
+    gates.append(_gate("noticia", "Sin noticia en ventana", not news_active, False, news_detail))
+
+    # ── Decisión ────────────────────────────────────────────────────
+    hard_failed = [g for g in gates if g["hard"] and not g["passed"]]
+    side = scanner_side if scanner_side in ("LONG", "SHORT") else None
+
+    base = {
+        "side": side,
+        "gates": gates,
         "session_status": session_status,
         "session_hour_madrid": hour,
+        "news_warning": (
+            {"title": (news_event or {}).get("title"),
+             "minutes_until": (news_event or {}).get("minutes_until")}
+            if news_active else None
+        ),
+    }
+
+    if hard_failed:
+        return {
+            **base,
+            "decision": "NO_OPERAR",
+            "confluence": {"score": 0, "max": MAX_SCORE, "pct": 0},
+            "criteria_met": [],
+            "criteria_failed": [],
+            "entry_price": None, "sl_price": None, "tp_price": None,
+            "rrr": None, "risk_pips": None, "reward_pips": None,
+            "level_used": None,
+            "account_check": account_check,
+            "reason": hard_failed[0]["detail"] or f"No pasa el filtro '{hard_failed[0]['label']}'",
+        }
+
+    # Todos los gates duros pasan → confluencia (CAPA 2)
+    score, met, failed = _score_signal(
+        cross_state=cross_state, scanner_side=scanner_side,
+        scanner_confluence=scanner_confluence, extended_status=extended_status,
+        rsi=rsi, level=best_level, structure=structure, struct_bullish=struct_bullish,
+        scanner_bloque=scanner_bloque, range_pos=range_pos, change_pct=change_pct,
+        session_status=session_status, atr_m15_pips=atr_m15_pips_val, cfg=cfg,
+    )
+
+    min_strong = cfg["min_score_strong"]
+    min_normal = cfg["min_score_normal"]
+    if score >= min_normal:
+        decision = "OPERAR"
+        strength = "fuerte" if score >= min_strong else "normal"
+        reason = (
+            f"Setup {strength} {scanner_side} — {score}/{MAX_SCORE} de confluencia, "
+            "gates superados."
+        )
+    else:
+        decision = "ESPERAR"
+        strength = None
+        reason = (
+            f"Dirección {scanner_side} válida pero confluencia floja ({score}/{MAX_SCORE}). "
+            "Esperar mejor confirmación o precio en el nivel."
+        )
+
+    # Degradación blanda por noticia
+    if news_active and decision == "OPERAR":
+        decision = "ESPERAR"
+        strength = None
+        reason = "Noticia high-impact en ventana — esperar a que pase antes de entrar."
+
+    return {
+        **base,
+        "decision": decision,
+        "strength": strength,
+        "confluence": {
+            "score": score, "max": MAX_SCORE,
+            "pct": round(score / MAX_SCORE * 100) if MAX_SCORE else 0,
+        },
+        "criteria_met": met,
+        "criteria_failed": failed,
+        "entry_price": round(zone_item.get("price", best_level["price"]), 5),
+        "sl_price": sl_tp["sl_price"] if sl_tp else None,
+        "tp_price": sl_tp["tp_price"] if sl_tp else None,
+        "rrr": sl_tp["rrr"] if sl_tp else None,
+        "risk_pips": sl_tp["risk_pips"] if sl_tp else None,
+        "reward_pips": sl_tp["reward_pips"] if sl_tp else None,
+        "tp_source": sl_tp["tp_source"] if sl_tp else None,
         "level_used": {
             "price": best_level["price"],
             "type": best_level["type"],
             "strength": best_level["strength"],
             "touches": best_level["touches"],
             "distance_pips": best_level["distance_pips"],
-        },
-        "criteria_met": met,
-        "criteria_failed": failed,
-        "rejection_reason": None,
+        } if best_level else None,
         "account_check": account_check,
-    }
-
-
-def _no_signal(
-    reason: str,
-    account_check: Optional[dict] = None,
-    session_status: str = "unknown",
-) -> dict:
-    return {
-        "has_signal": False,
-        "signal": "SIN_SEÑAL",
-        "confidence": 0.0,
-        "score": 0,
-        "max_score": MAX_SCORE,
-        "side": None,
-        "entry_price": None,
-        "sl_price": None,
-        "tp_price": None,
-        "risk_pips": None,
-        "reward_pips": None,
-        "rrr": None,
-        "tp_source": None,
-        "session_status": session_status,
-        "session_hour_madrid": _madrid_hour(),
-        "level_used": None,
-        "criteria_met": [],
-        "criteria_failed": [],
-        "rejection_reason": reason,
-        "account_check": account_check,
+        "reason": reason,
     }

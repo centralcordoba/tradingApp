@@ -222,10 +222,16 @@ def zones_sr(
         scan_map = {x["pair"]: x for x in scanner.scan_pairs(zone_pairs)}
     except Exception:
         scan_map = {}
+    news_enabled = news_client.is_enabled()
     for it in response.get("items", []):
         it["cross"] = cross.get(it["pair"])
         scanner_item = scan_map.get(it["pair"])
-        it["signal"] = zone_signal_engine.generate_zone_signal(it, scanner_item)
+        active = news_client.get_active_warnings(news_client.symbol_to_currencies(it["pair"])) if news_enabled else []
+        it["marco"] = zone_signal_engine.generate_zone_marco(
+            it, scanner_item,
+            news_active=bool(active),
+            news_event=(active[0] if active else None),
+        )
     return response
 
 

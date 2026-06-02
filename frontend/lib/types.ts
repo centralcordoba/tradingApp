@@ -57,22 +57,32 @@ export type ZoneLevel = {
   } | null;
 };
 
-export type ZoneSignal = {
-  has_signal: boolean;
-  signal: "FUERTE_COMPRA" | "COMPRA" | "NEUTRAL" | "VENTA" | "FUERTE_VENTA" | "SIN_SEÑAL";
-  confidence: number;        // 0-1
-  score: number;             // 0-MAX_SCORE
-  max_score: number;
+// ─── Marco teórico (gates + confluencia → OPERAR/ESPERAR/NO_OPERAR) ──────
+// Reemplaza la antigua ZoneSignal. Lo calcula zone_signal_engine.generate_zone_marco.
+
+export type MarcoGate = {
+  key: string;
+  label: string;
+  passed: boolean;
+  hard: boolean;
+  detail: string;
+};
+
+export type ZoneMarco = {
+  decision: "OPERAR" | "ESPERAR" | "NO_OPERAR";
   side: "LONG" | "SHORT" | null;
+  strength?: "fuerte" | "normal" | null;
+  gates: MarcoGate[];
+  confluence: { score: number; max: number; pct: number };
+  criteria_met: string[];
+  criteria_failed: string[];
   entry_price: number | null;
   sl_price: number | null;
   tp_price: number | null;
+  rrr: number | null;
   risk_pips: number | null;
   reward_pips: number | null;
-  rrr: number | null;
-  tp_source: string | null;
-  session_status: "fire" | "ok" | "avoid" | "unknown";
-  session_hour_madrid: number;
+  tp_source?: string | null;
   level_used: {
     price: number;
     type: "support" | "resistance";
@@ -80,9 +90,9 @@ export type ZoneSignal = {
     touches: number;
     distance_pips: number;
   } | null;
-  criteria_met: string[];
-  criteria_failed: string[];
-  rejection_reason: string | null;
+  session_status: "fire" | "ok" | "avoid" | "unknown";
+  session_hour_madrid: number;
+  news_warning: { title: string | null; minutes_until: number | null } | null;
   account_check: {
     risk_usd: number;
     lot_size: number;
@@ -94,6 +104,7 @@ export type ZoneSignal = {
     blocked: boolean;
     block_reasons: string[];
   } | null;
+  reason: string;
 };
 
 export type ZonesPairResponse = {
@@ -124,7 +135,7 @@ export type ZonesPairResponse = {
   market_closed: boolean;
   atr_m15: number | null;
   cross?: CrossVerdict | null;
-  signal?: ZoneSignal | null;
+  marco?: ZoneMarco | null;
 };
 
 export type ZonesResponse = {

@@ -2,116 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API } from "@/lib/api";
-import type { ZonesResponse, ZonesPairResponse, ZoneLevel, ZoneSignal } from "@/lib/types";
+import type { ZonesResponse, ZonesPairResponse, ZoneLevel, ZoneMarco, MarcoGate } from "@/lib/types";
 import { CrossBadge } from "@/components/cross/CrossBadge";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
-const NOTIF_MUTED_KEY = "tradingapp:zones_notif_muted";
-
-// ─── Sonido estilo TradingView ────────────────────────────────────────────
-
-type SoundType = "strong_buy" | "strong_sell" | "buy" | "sell";
-
-function playAlertSound(type: SoundType) {
-  try {
-    const AudioCtx = window.AudioContext ?? (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx() as AudioContext;
-
-    const note = (freq: number, start: number, dur = 0.18) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0, start);
-      gain.gain.linearRampToValueAtTime(0.28, start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-      osc.start(start);
-      osc.stop(start + dur + 0.05);
-    };
-
-    const t = ctx.currentTime;
-    if (type === "strong_buy") {
-      // Dos notas ascendentes — chime alcista
-      note(523.25, t);          // C5
-      note(783.99, t + 0.20);   // G5
-      note(1046.5, t + 0.40);   // C6
-    } else if (type === "strong_sell") {
-      // Dos notas descendentes — alerta bajista
-      note(1046.5, t);          // C6
-      note(783.99, t + 0.20);   // G5
-      note(523.25, t + 0.40);   // C5
-    } else if (type === "buy") {
-      note(659.25, t);          // E5 — nota única suave
-      note(880.0, t + 0.22);    // A5
-    } else {
-      note(880.0, t);           // A5 — nota única suave
-      note(659.25, t + 0.22);   // E5
-    }
-
-    // Cerrar contexto tras reproducir para liberar recursos
-    setTimeout(() => ctx.close().catch(() => {}), 1500);
-  } catch {
-    // AudioContext no disponible o bloqueado por política del navegador
-  }
-}
-
-// ─── Notificaciones del navegador ────────────────────────────────────────
-
-const SIGNAL_LABELS: Record<string, string> = {
-  FUERTE_COMPRA: "FUERTE COMPRA",
-  FUERTE_VENTA:  "FUERTE VENTA",
-  COMPRA:        "COMPRA",
-  VENTA:         "VENTA",
-};
-
-const SIGNAL_ICONS: Record<string, string> = {
-  FUERTE_COMPRA: "📈",
-  FUERTE_VENTA:  "📉",
-  COMPRA:        "▲",
-  VENTA:         "▼",
-};
-
-function sendBrowserNotification(pair: string, sig: ZoneSignal) {
-  if (typeof window === "undefined") return;
-  if (!("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
-
-  const label = SIGNAL_LABELS[sig.signal] ?? sig.signal;
-  const icon  = SIGNAL_ICONS[sig.signal] ?? "●";
-  const title = `${icon} ${label} · ${pair}`;
-
-  const lines: string[] = [];
-  if (sig.entry_price != null) lines.push(`Entrada ${sig.entry_price.toFixed(5)}`);
-  if (sig.sl_price != null)    lines.push(`SL ${sig.sl_price.toFixed(5)} (${sig.risk_pips}p)`);
-  if (sig.tp_price != null)    lines.push(`TP ${sig.tp_price.toFixed(5)} (${sig.reward_pips}p)`);
-  if (sig.rrr != null)         lines.push(`RRR ${sig.rrr.toFixed(2)}:1`);
-  if (sig.session_status === "fire") lines.push("🔥 Sesión FIRE");
-
-  try {
-    new Notification(title, {
-      body: lines.join("  |  "),
-      tag: `zsig-${pair}`,   // reemplaza notif previa del mismo par
-      requireInteraction: false,
-    });
-  } catch {
-    // Silencioso si el navegador no soporta algún campo
-  }
-}
-
-// ─── Señales que activan alerta ───────────────────────────────────────────
-
-const ALERT_SIGNALS = new Set(["FUERTE_COMPRA", "FUERTE_VENTA", "COMPRA", "VENTA"]);
-
-function soundForSignal(sig: string): SoundType {
-  if (sig === "FUERTE_COMPRA") return "strong_buy";
-  if (sig === "FUERTE_VENTA")  return "strong_sell";
-  if (sig === "COMPRA")        return "buy";
-  return "sell";
-}
 
 const DEFAULT_PAIRS = [
   "AUDUSD", "USDCAD",
@@ -341,18 +236,15 @@ function LevelRow({ level, price }: { level: ZoneLevel; price: number }) {
   );
 }
 
-// ─── SignalCard ───────────────────────────────────────────────────────────
+// ─── MarcoCard (marco teórico: gates + confluencia) ─────────────────────────
 
-const SIGNAL_META: Record<
-  ZoneSignal["signal"],
-  { label: string; cls: string; icon: string }
+const DECISION_META: Record<
+  ZoneMarco["decision"],
+  { label: string; cls: string; ico: string }
 > = {
-  FUERTE_COMPRA: { label: "FUERTE COMPRA", cls: "zsig-strong-buy",  icon: "▲▲" },
-  COMPRA:        { label: "COMPRA",         cls: "zsig-buy",         icon: "▲"  },
-  NEUTRAL:       { label: "NEUTRAL",        cls: "zsig-neutral",     icon: "—"  },
-  VENTA:         { label: "VENTA",          cls: "zsig-sell",        icon: "▼"  },
-  FUERTE_VENTA:  { label: "FUERTE VENTA",   cls: "zsig-strong-sell", icon: "▼▼" },
-  SIN_SEÑAL:     { label: "SIN SEÑAL",      cls: "zsig-none",        icon: "○"  },
+  OPERAR:    { label: "OPERAR",    cls: "marco-go",   ico: "✅" },
+  ESPERAR:   { label: "ESPERAR",   cls: "marco-wait", ico: "⏳" },
+  NO_OPERAR: { label: "NO OPERAR", cls: "marco-stop", ico: "⛔" },
 };
 
 function ScoreBar({ score, max }: { score: number; max: number }) {
@@ -368,142 +260,137 @@ function ScoreBar({ score, max }: { score: number; max: number }) {
   );
 }
 
-function SignalCard({ signal: sig }: { signal: ZoneSignal }) {
+function MarcoCard({ marco }: { marco: ZoneMarco }) {
   const [showDetail, setShowDetail] = useState(false);
-  const meta = SIGNAL_META[sig.signal] ?? SIGNAL_META["SIN_SEÑAL"];
-  const hasActionable = sig.has_signal && sig.signal !== "NEUTRAL";
-
-  if (!sig.has_signal) {
-    return (
-      <div className="zsig-card zsig-card-none">
-        <div className="zsig-header-row">
-          <span className="zsig-badge zsig-none">○ SIN SEÑAL</span>
-          <span className="zsig-confidence-label">Score {sig.score}/{sig.max_score}</span>
-        </div>
-        <div className="zsig-rejection">{sig.rejection_reason}</div>
-      </div>
-    );
-  }
-
-  const confPct = Math.round(sig.confidence * 100);
-  const isLong = sig.side === "LONG";
+  const meta = DECISION_META[marco.decision] ?? DECISION_META.NO_OPERAR;
+  const hasSetup = marco.entry_price != null;
+  const hasCriteria = marco.criteria_met.length > 0 || marco.criteria_failed.length > 0;
 
   return (
-    <div className={`zsig-card ${meta.cls}`}>
-      {/* Header */}
-      <div className="zsig-header-row">
-        <div className="zsig-badge-block">
-          <span className={`zsig-badge zsig-badge-${meta.cls}`}>
-            {meta.icon} {meta.label}
+    <div className={`marco-card ${meta.cls}`}>
+      {/* Header: decisión */}
+      <div className="marco-header">
+        <span className={`marco-badge ${meta.cls}`}>
+          {meta.ico} {meta.label}
+          {marco.strength === "fuerte" && <span className="marco-strong">FUERTE</span>}
+        </span>
+        {marco.side && (
+          <span className={`marco-side marco-side-${marco.side.toLowerCase()}`}>{marco.side}</span>
+        )}
+      </div>
+
+      <div className="marco-reason">{marco.reason}</div>
+
+      {/* Aviso de noticia (gate blando) */}
+      {marco.news_warning && (
+        <div className="marco-news" role="status">
+          ⚠ Noticia high-impact{marco.news_warning.title ? `: ${marco.news_warning.title}` : ""}
+          {typeof marco.news_warning.minutes_until === "number"
+            ? ` · ~${marco.news_warning.minutes_until}min`
+            : ""} — esperar a que pase
+        </div>
+      )}
+
+      {/* Confluencia */}
+      {marco.decision !== "NO_OPERAR" && (
+        <div className="marco-confluence">
+          <span className="marco-confluence-label">Confluencia</span>
+          <ScoreBar score={marco.confluence.score} max={marco.confluence.max} />
+          <span className="marco-confluence-text num">
+            {marco.confluence.score}/{marco.confluence.max}
           </span>
-          {sig.signal === "NEUTRAL" && (
-            <span className="zsig-neutral-note">Informacional — no operar</span>
-          )}
         </div>
-        <div className="zsig-confidence-block">
-          <span className="zsig-confidence-pct num">{confPct}%</span>
-          <span className="zsig-confidence-label">confianza</span>
-        </div>
-      </div>
+      )}
 
-      {/* Score bar */}
-      <div className="zsig-score-row">
-        <ScoreBar score={sig.score} max={sig.max_score} />
-        <span className="zsig-score-text num">{sig.score}/{sig.max_score}</span>
-      </div>
-
-      {/* Precios (solo señales accionables) */}
-      {hasActionable && sig.entry_price != null && (
+      {/* Precios del setup */}
+      {hasSetup && (
         <div className="zsig-prices">
           <div className="zsig-price-item">
             <span className="zsig-price-label">Entrada</span>
-            <span className="zsig-price-value num">{sig.entry_price.toFixed(5)}</span>
+            <span className="zsig-price-value num">{marco.entry_price!.toFixed(5)}</span>
           </div>
           <div className="zsig-price-item zsig-price-sl">
             <span className="zsig-price-label">Stop Loss</span>
-            <span className="zsig-price-value num">{sig.sl_price?.toFixed(5)}</span>
-            <span className="zsig-price-sub num">{sig.risk_pips} pips</span>
+            <span className="zsig-price-value num">{marco.sl_price?.toFixed(5)}</span>
+            <span className="zsig-price-sub num">{marco.risk_pips} pips</span>
           </div>
           <div className="zsig-price-item zsig-price-tp">
             <span className="zsig-price-label">Take Profit</span>
-            <span className="zsig-price-value num">{sig.tp_price?.toFixed(5)}</span>
-            <span className="zsig-price-sub num">{sig.reward_pips} pips</span>
+            <span className="zsig-price-value num">{marco.tp_price?.toFixed(5)}</span>
+            <span className="zsig-price-sub num">{marco.reward_pips} pips</span>
           </div>
           <div className="zsig-price-item">
             <span className="zsig-price-label">RRR</span>
-            <span className="zsig-price-value num zsig-rrr">{sig.rrr?.toFixed(2)}:1</span>
+            <span className="zsig-price-value num zsig-rrr">{marco.rrr?.toFixed(2)}:1</span>
           </div>
         </div>
       )}
 
-      {/* Riesgo en cuenta */}
-      {hasActionable && sig.account_check && (
-        <div className={`zsig-risk-row ${sig.account_check.blocked ? "zsig-risk-blocked" : ""}`}>
-          <span className="zsig-risk-label">
-            {sig.account_check.blocked ? "⛔ BLOQUEADO" : "Riesgo en cuenta"}
+      {/* Checklist de gates */}
+      <div className="marco-gates">
+        {marco.gates.map((g: MarcoGate) => (
+          <span
+            key={g.key}
+            className={`marco-gate ${g.passed ? "on" : "off"} ${g.hard ? "" : "soft"}`}
+            title={g.detail || g.label}
+          >
+            {g.passed ? "✓" : "✗"} {g.label}
+            {!g.hard && <span className="marco-gate-tag">blando</span>}
           </span>
-          <span className="zsig-risk-detail num">
-            {sig.account_check.lot_size} lotes · {sig.risk_pips} pips · ${sig.account_check.risk_usd.toFixed(0)} USD
-          </span>
-          {sig.account_check.blocked && (
-            <div className="zsig-block-reasons">
-              {sig.account_check.block_reasons.map((r, i) => (
-                <div key={i} className="zsig-block-reason">{r}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        ))}
+      </div>
 
       {/* Sesión + nivel usado */}
-      {hasActionable && (
-        <div className="zsig-meta-row">
-          {sig.session_status && (
-            <span className={`zsig-session zsig-session-${sig.session_status}`}>
-              {sig.session_status === "fire" ? "🔥 Sesión FIRE"
-               : sig.session_status === "ok" ? "✓ Sesión OK"
-               : "⚠ Sesión AVOID"}
-              {" "}<span className="num">{sig.session_hour_madrid?.toString().padStart(2,"0")}h Madrid</span>
-            </span>
-          )}
-          {sig.level_used && (
-            <span className="zsig-level-used-detail num">
-              {sig.level_used.type === "support" ? "Soporte" : "Resistencia"}{" "}
-              {sig.level_used.price.toFixed(5)} · {sig.level_used.strength}★ · {sig.level_used.touches} toques · {sig.level_used.distance_pips.toFixed(1)} pips
-            </span>
-          )}
-        </div>
-      )}
+      <div className="zsig-meta-row">
+        {marco.session_status && marco.session_status !== "unknown" && (
+          <span className={`zsig-session zsig-session-${marco.session_status}`}>
+            {marco.session_status === "fire" ? "🔥 Sesión FIRE"
+             : marco.session_status === "ok" ? "✓ Sesión OK"
+             : "⚠ Sesión AVOID"}
+            {" "}<span className="num">{marco.session_hour_madrid?.toString().padStart(2,"0")}h Madrid</span>
+          </span>
+        )}
+        {marco.level_used && (
+          <span className="zsig-level-used-detail num">
+            {marco.level_used.type === "support" ? "Soporte" : "Resistencia"}{" "}
+            {marco.level_used.price.toFixed(5)} · {marco.level_used.strength}★ · {marco.level_used.touches} toques · {marco.level_used.distance_pips.toFixed(1)} pips
+          </span>
+        )}
+      </div>
 
-      {/* Toggle detalle */}
-      <button
-        type="button"
-        className="zsig-detail-toggle"
-        onClick={() => setShowDetail(v => !v)}
-        aria-expanded={showDetail}
-      >
-        {showDetail ? "Ocultar" : "Ver"} criterios ({sig.criteria_met.length} cumplidos, {sig.criteria_failed.length} fallidos)
-      </button>
+      {/* Detalle de confluencia */}
+      {hasCriteria && (
+        <>
+          <button
+            type="button"
+            className="zsig-detail-toggle"
+            onClick={() => setShowDetail(v => !v)}
+            aria-expanded={showDetail}
+          >
+            {showDetail ? "Ocultar" : "Ver"} factores ({marco.criteria_met.length} a favor, {marco.criteria_failed.length} en contra)
+          </button>
 
-      {showDetail && (
-        <div className="zsig-criteria">
-          {sig.criteria_met.length > 0 && (
-            <div className="zsig-criteria-group">
-              <div className="zsig-criteria-heading zsig-criteria-met-head">Criterios cumplidos</div>
-              {sig.criteria_met.map((c, i) => (
-                <div key={i} className="zsig-criterion zsig-criterion-met">✓ {c}</div>
-              ))}
+          {showDetail && (
+            <div className="zsig-criteria">
+              {marco.criteria_met.length > 0 && (
+                <div className="zsig-criteria-group">
+                  <div className="zsig-criteria-heading zsig-criteria-met-head">A favor</div>
+                  {marco.criteria_met.map((c, i) => (
+                    <div key={i} className="zsig-criterion zsig-criterion-met">✓ {c}</div>
+                  ))}
+                </div>
+              )}
+              {marco.criteria_failed.length > 0 && (
+                <div className="zsig-criteria-group">
+                  <div className="zsig-criteria-heading zsig-criteria-fail-head">En contra</div>
+                  {marco.criteria_failed.map((c, i) => (
+                    <div key={i} className="zsig-criterion zsig-criterion-fail">✗ {c}</div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-          {sig.criteria_failed.length > 0 && (
-            <div className="zsig-criteria-group">
-              <div className="zsig-criteria-heading zsig-criteria-fail-head">Criterios no cumplidos</div>
-              {sig.criteria_failed.map((c, i) => (
-                <div key={i} className="zsig-criterion zsig-criterion-fail">✗ {c}</div>
-              ))}
-            </div>
-          )}
-        </div>
+        </>
       )}
     </div>
   );
@@ -537,9 +424,9 @@ function PairCard({ data }: { data: ZonesPairResponse }) {
         </div>
       )}
 
-      {data.signal && (
+      {data.marco && (
         <div className="zsr-signal-section">
-          <SignalCard signal={data.signal} />
+          <MarcoCard marco={data.marco} />
         </div>
       )}
 
@@ -742,13 +629,7 @@ export function ZonasSRView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
-  const [notifPerm, setNotifPerm] = useState<NotificationPermission | "unsupported">("default");
-  const [notifMuted, setNotifMuted] = useState<boolean>(() => {
-    try { return localStorage.getItem(NOTIF_MUTED_KEY) === "1"; } catch { return false; }
-  });
   const abortRef = useRef<AbortController | null>(null);
-  // Guarda el último signal.signal por par para detectar cambios
-  const prevSignalsRef = useRef<Map<string, string>>(new Map());
 
   // Cargar parámetros persistidos en el primer render
   useEffect(() => {
@@ -763,43 +644,6 @@ export function ZonasSRView() {
       // ignore
     }
   }, [params]);
-
-  // Solicitar permiso de notificaciones al montar (solo una vez)
-  useEffect(() => {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      setNotifPerm("unsupported");
-      return;
-    }
-    setNotifPerm(Notification.permission);
-  }, []);
-
-  // Detectar señales nuevas y disparar sonido + notificación
-  useEffect(() => {
-    if (!data?.items) return;
-    const prev = prevSignalsRef.current;
-    const isFirstLoad = prev.size === 0;
-
-    for (const item of data.items) {
-      const sig = item.signal;
-      if (!sig) continue;
-      const currentSig = sig.signal;
-      const lastSig = prev.get(item.pair);
-
-      // Primer ciclo: registrar estado sin alertar
-      if (isFirstLoad || lastSig === undefined) {
-        prev.set(item.pair, currentSig);
-        continue;
-      }
-
-      // Señal cambió y es accionable (no era la misma antes)
-      if (currentSig !== lastSig && ALERT_SIGNALS.has(currentSig) && !notifMuted) {
-        playAlertSound(soundForSignal(currentSig));
-        sendBrowserNotification(item.pair, sig);
-      }
-
-      prev.set(item.pair, currentSig);
-    }
-  }, [data, notifMuted]);
 
   const fetchZones = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
@@ -846,37 +690,6 @@ export function ZonasSRView() {
             <span className="zsr-meta-label">Última actualización</span>
             <span className="zsr-meta-value num">{formatLastUpdate(lastFetchedAt)}</span>
           </div>
-
-          {/* Estado de notificaciones */}
-          {notifPerm === "granted" ? (
-            <button
-              type="button"
-              className={`zsr-notif-btn ${notifMuted ? "zsr-notif-muted" : "zsr-notif-on"}`}
-              title={notifMuted ? "Alertas silenciadas — haz clic para activar" : "Alertas activas — haz clic para silenciar"}
-              onClick={() => {
-                const next = !notifMuted;
-                setNotifMuted(next);
-                try { localStorage.setItem(NOTIF_MUTED_KEY, next ? "1" : "0"); } catch {}
-              }}
-            >
-              {notifMuted ? "🔕 Alertas OFF" : "🔔 Alertas ON"}
-            </button>
-          ) : notifPerm === "denied" ? (
-            <span className="zsr-notif-btn zsr-notif-off" title="Notificaciones bloqueadas en el navegador">
-              🔕 Alertas OFF
-            </span>
-          ) : notifPerm === "default" ? (
-            <button
-              type="button"
-              className="zsr-notif-btn zsr-notif-pending"
-              onClick={() =>
-                Notification.requestPermission().then(p => setNotifPerm(p))
-              }
-              title="Haz clic para activar notificaciones"
-            >
-              🔔 Activar alertas
-            </button>
-          ) : null}
 
           <button
             type="button"
