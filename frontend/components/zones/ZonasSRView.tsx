@@ -7,6 +7,74 @@ import { CrossBadge } from "@/components/cross/CrossBadge";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+const ALERTS_ON_KEY = "tradingapp:zones_alerts_on";
+
+// ─── Alertas de señal FUERTE (estilo TradingView) ──────────────────────────
+// Solo se disparan cuando un par pasa a OPERAR + strength "fuerte". El audio se
+// desbloquea en el clic del botón (los navegadores bloquean el AudioContext sin
+// un gesto de usuario — ese era el motivo de que la versión anterior no sonara).
+
+function playStrongSound(ctx: AudioContext, side: "LONG" | "SHORT") {
+  try {
+    const note = (freq: number, start: number, dur = 0.18) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0, start);
+      gain.gain.linearRampToValueAtTime(0.28, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+      osc.start(start);
+      osc.stop(start + dur + 0.05);
+    };
+    const t = ctx.currentTime;
+    if (side === "LONG") {
+      // Chime ascendente — compra fuerte
+      note(523.25, t);          // C5
+      note(783.99, t + 0.20);   // G5
+      note(1046.5, t + 0.40);   // C6
+    } else {
+      // Chime descendente — venta fuerte
+      note(1046.5, t);          // C6
+      note(783.99, t + 0.20);   // G5
+      note(523.25, t + 0.40);   // C5
+    }
+  } catch {
+    // AudioContext suspendido o no disponible
+  }
+}
+
+function sendStrongNotification(pair: string, marco: ZoneMarco) {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  const isLong = marco.side === "LONG";
+  const title = `${isLong ? "📈 FUERTE COMPRA" : "📉 FUERTE VENTA"} · ${pair}`;
+  const lines: string[] = [];
+  if (marco.entry_price != null) lines.push(`Entrada ${marco.entry_price.toFixed(5)}`);
+  if (marco.sl_price != null)    lines.push(`SL ${marco.sl_price.toFixed(5)} (${marco.risk_pips}p)`);
+  if (marco.tp_price != null)    lines.push(`TP ${marco.tp_price.toFixed(5)} (${marco.reward_pips}p)`);
+  if (marco.rrr != null)         lines.push(`RRR ${marco.rrr.toFixed(2)}:1`);
+  try {
+    new Notification(title, {
+      body: lines.join("  |  "),
+      tag: `marco-${pair}`,   // reemplaza notif previa del mismo par
+      requireInteraction: false,
+    });
+  } catch {
+    // Silencioso si el navegador no soporta algún campo
+  }
+}
+
+// Devuelve el lado si el marco es una señal FUERTE accionable, si no null.
+function strongSide(m?: ZoneMarco | null): "LONG" | "SHORT" | null {
+  if (!m) return null;
+  if (m.decision === "OPERAR" && m.strength === "fuerte" && (m.side === "LONG" || m.side === "SHORT")) {
+    return m.side;
+  }
+  return null;
+}
 
 const DEFAULT_PAIRS = [
   "AUDUSD", "USDCAD",
@@ -629,7 +697,13 @@ export function ZonasSRView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
+  const [alertsOn, setAlertsOn] = useState<boolean>(() => {
+    try { return localStorage.getItem(ALERTS_ON_KEY) === "1"; } catch { return false; }
+  });
   const abortRef = useRef<AbortController | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  // Último lado FUERTE por par para detectar transiciones a OPERAR fuerte.
+  const prevStrongRef = useRef<Map<string, "LONG" | "SHORT" | null>>(new Map());
 
   // Cargar parámetros persistidos en el primer render
   useEffect(() => {
@@ -644,6 +718,65 @@ export function ZonasSRView() {
       // ignore
     }
   }, [params]);
+
+  // Activar alertas — DEBE venir de un clic (gesto) para desbloquear audio +
+  // permiso de notificación. Llamarlo en useEffect haría que el navegador lo ignore.
+  const enableAlerts = useCallback(() => {
+    try {
+      const AC = window.AudioContext ?? (window as any).webkitAudioContext;
+      if (AC) {
+        if (!audioCtxRef.current) audioCtxRef.current = new AC();
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    } catch { /* audio no disponible */ }
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+    setAlertsOn(true);
+    try { localStorage.setItem(ALERTS_ON_KEY, "1"); } catch {}
+  }, []);
+
+  const muteAlerts = useCallback(() => {
+    setAlertsOn(false);
+    try { localStorage.setItem(ALERTS_ON_KEY, "0"); } catch {}
+  }, []);
+
+  // Si las alertas quedaron activas de una sesión previa, el AudioContext aún no
+  // existe (necesita un gesto). Lo desbloqueamos en el primer clic de la página.
+  useEffect(() => {
+    if (!alertsOn || audioCtxRef.current) return;
+    const unlock = () => {
+      try {
+        const AC = window.AudioContext ?? (window as any).webkitAudioContext;
+        if (AC && !audioCtxRef.current) {
+          audioCtxRef.current = new AC();
+          audioCtxRef.current.resume().catch(() => {});
+        }
+      } catch { /* ignore */ }
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, [alertsOn]);
+
+  // Detectar transición a señal FUERTE y disparar sonido + notificación.
+  useEffect(() => {
+    if (!data?.items) return;
+    const prev = prevStrongRef.current;
+    const isFirst = prev.size === 0;
+    for (const item of data.items) {
+      const cur = strongSide(item.marco);
+      const last = prev.get(item.pair) ?? null;
+      prev.set(item.pair, cur);
+      if (isFirst) continue;            // baseline al montar, sin alertar
+      if (!alertsOn) continue;
+      // Nueva señal fuerte (aparece o cambia de dirección)
+      if (cur && cur !== last) {
+        const ctx = audioCtxRef.current;
+        if (ctx) { ctx.resume().catch(() => {}); playStrongSound(ctx, cur); }
+        if (item.marco) sendStrongNotification(item.pair, item.marco);
+      }
+    }
+  }, [data, alertsOn]);
 
   const fetchZones = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort();
@@ -690,6 +823,27 @@ export function ZonasSRView() {
             <span className="zsr-meta-label">Última actualización</span>
             <span className="zsr-meta-value num">{formatLastUpdate(lastFetchedAt)}</span>
           </div>
+
+          {/* Alertas de señal FUERTE (sonido + notificación) */}
+          {alertsOn ? (
+            <button
+              type="button"
+              className="zsr-notif-btn zsr-notif-on"
+              title="Alertas de señal FUERTE activas — clic para silenciar"
+              onClick={muteAlerts}
+            >
+              🔔 Alertas ON
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="zsr-notif-btn zsr-notif-pending"
+              title="Activar sonido + notificación cuando haya OPERAR fuerte (compra/venta)"
+              onClick={enableAlerts}
+            >
+              🔕 Activar alertas
+            </button>
+          )}
 
           <button
             type="button"
