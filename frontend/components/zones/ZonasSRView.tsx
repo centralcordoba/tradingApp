@@ -697,9 +697,7 @@ export function ZonasSRView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
-  const [alertsOn, setAlertsOn] = useState<boolean>(() => {
-    try { return localStorage.getItem(ALERTS_ON_KEY) === "1"; } catch { return false; }
-  });
+  const [alertsOn, setAlertsOn] = useState<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Último lado FUERTE por par para detectar transiciones a OPERAR fuerte.
@@ -739,6 +737,11 @@ export function ZonasSRView() {
   const muteAlerts = useCallback(() => {
     setAlertsOn(false);
     try { localStorage.setItem(ALERTS_ON_KEY, "0"); } catch {}
+  }, []);
+
+  // Leer localStorage solo en el cliente para evitar mismatch de hidratación.
+  useEffect(() => {
+    try { setAlertsOn(localStorage.getItem(ALERTS_ON_KEY) === "1"); } catch { /* ignore */ }
   }, []);
 
   // Si las alertas quedaron activas de una sesión previa, el AudioContext aún no
