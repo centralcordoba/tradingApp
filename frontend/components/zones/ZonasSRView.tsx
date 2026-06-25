@@ -16,7 +16,7 @@ const ALERTS_ON_KEY = "tradingapp:zones_alerts_on";
 
 function playStrongSound(ctx: AudioContext, side: "LONG" | "SHORT") {
   try {
-    const note = (freq: number, start: number, dur = 0.18) => {
+    const note = (freq: number, start: number, dur = 0.24) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -30,16 +30,21 @@ function playStrongSound(ctx: AudioContext, side: "LONG" | "SHORT") {
       osc.stop(start + dur + 0.05);
     };
     const t = ctx.currentTime;
-    if (side === "LONG") {
-      // Chime ascendente — compra fuerte
-      note(523.25, t);          // C5
-      note(783.99, t + 0.20);   // G5
-      note(1046.5, t + 0.40);   // C6
-    } else {
-      // Chime descendente — venta fuerte
-      note(1046.5, t);          // C6
-      note(783.99, t + 0.20);   // G5
-      note(523.25, t + 0.40);   // C5
+    // Motif de 3 notas (ascendente=compra / descendente=venta) repetido para que
+    // la alerta dure ~3 segundos.
+    const motif = side === "LONG"
+      ? [523.25, 783.99, 1046.5]   // C5 → G5 → C6
+      : [1046.5, 783.99, 523.25];  // C6 → G5 → C5
+    const REPEATS = 3;
+    const NOTE_GAP = 0.26;    // separación entre notas dentro del motif
+    const MOTIF_GAP = 1.0;    // separación entre repeticiones
+    for (let r = 0; r < REPEATS; r++) {
+      const base = t + r * MOTIF_GAP;
+      motif.forEach((freq, i) => {
+        // La última nota se sostiene para cerrar en ~3s.
+        const isLast = r === REPEATS - 1 && i === motif.length - 1;
+        note(freq, base + i * NOTE_GAP, isLast ? 0.55 : 0.24);
+      });
     }
   } catch {
     // AudioContext suspendido o no disponible
@@ -60,7 +65,7 @@ function sendStrongNotification(pair: string, marco: ZoneMarco) {
     new Notification(title, {
       body: lines.join("  |  "),
       tag: `marco-${pair}`,   // reemplaza notif previa del mismo par
-      requireInteraction: false,
+      requireInteraction: true,  // queda en el Centro de actividades de Windows hasta cerrarla
     });
   } catch {
     // Silencioso si el navegador no soporta algún campo
@@ -334,13 +339,24 @@ function MarcoCard({ marco }: { marco: ZoneMarco }) {
   const hasSetup = marco.entry_price != null;
   const hasCriteria = marco.criteria_met.length > 0 || marco.criteria_failed.length > 0;
 
+  // Para una señal accionable (OPERAR con dirección), el color sigue al LADO:
+  // LONG = todo verde, SHORT = todo rojo. Evita mezclar verde (decisión) con rojo
+  // (lado) en un OPERAR SHORT. Para ESPERAR / NO OPERAR se mantiene el color de la decisión.
+  const directional =
+    marco.decision === "OPERAR" && (marco.side === "LONG" || marco.side === "SHORT");
+  const toneCls = directional
+    ? (marco.side === "LONG" ? "marco-long" : "marco-short")
+    : meta.cls;
+
   return (
-    <div className={`marco-card ${meta.cls}`}>
+    <div className={`marco-card ${toneCls}`}>
       {/* Header: decisión */}
       <div className="marco-header">
-        <span className={`marco-badge ${meta.cls}`}>
+        <span className={`marco-badge ${toneCls}`}>
           {meta.ico} {meta.label}
-          {marco.strength === "fuerte" && <span className="marco-strong">FUERTE</span>}
+          {marco.strength === "fuerte" && (
+            <span className={`marco-strong ${toneCls}`}>FUERTE</span>
+          )}
         </span>
         {marco.side && (
           <span className={`marco-side marco-side-${marco.side.toLowerCase()}`}>{marco.side}</span>
