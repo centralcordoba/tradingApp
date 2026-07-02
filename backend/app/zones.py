@@ -569,5 +569,9 @@ def get_zones_response(
         "count": len(items),
         "market_closed": any_market_closed,
     }
-    _zones_cache[cache_key] = (now, response)
+    # No cachear una respuesta vacía: si todos los pares fallaron (típicamente un
+    # 429 transitorio de Twelve Data), cachearla congelaría "Sin datos" durante el
+    # TTL entero. Dejándola sin cachear, el siguiente poll (5 min) reintenta.
+    if items:
+        _zones_cache[cache_key] = (now, response)
     return response
