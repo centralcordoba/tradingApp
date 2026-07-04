@@ -128,6 +128,16 @@ export type ZonesPairResponse = {
     level_selector: "median" | "mean";
   };
   levels: ZoneLevel[];
+  asia_range?: {
+    date: string;
+    high: number;
+    low: number;
+    range_pips: number;
+    swept_high: boolean;
+    swept_low: boolean;
+    high_distance_pips: number;
+    low_distance_pips: number;
+  } | null;
   active_count: number;
   n_bars: number;
   last_candle_ts: string | null;

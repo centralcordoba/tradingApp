@@ -9,12 +9,15 @@ Variables de entorno:
   NEWS_WINDOW_BEFORE_MIN minutos antes del evento que el warning aparece (default 30)
   NEWS_WINDOW_AFTER_MIN  minutos después del evento que el warning sigue visible (default 5)
 """
+import logging
 import os
 import json
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from .constants import (
     CACHE_TTL_NEWS_CALENDAR,
@@ -71,7 +74,12 @@ def _fetch() -> list[dict]:
         headers={"User-Agent": "Mozilla/5.0 (AI Trading Assistant)"},
     )
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_NEWS) as r:
-        return json.loads(r.read().decode("utf-8"))
+        data = json.loads(r.read().decode("utf-8"))
+    # Un dict de error de FF cacheado 1h tumbaba /news, /news/warnings y
+    # /news/calendar durante el TTL entero — solo se cachean listas de dicts.
+    if not isinstance(data, list) or any(not isinstance(ev, dict) for ev in data):
+        raise ValueError(f"ForexFactory devolvió un formato inesperado: {type(data).__name__}")
+    return data
 
 
 def get_calendar() -> list[dict]:
@@ -90,8 +98,8 @@ def get_calendar() -> list[dict]:
         _cache["data"] = data
         _cache["fetched_at"] = now
         return data
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as e:
-        print(f"[news_client] fetch error: {e}")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError) as e:
+        logger.warning("news_client fetch error: %s", e)
         # Mantener cache viejo si existe; si no, lista vacía
         return _cache["data"] or []
 

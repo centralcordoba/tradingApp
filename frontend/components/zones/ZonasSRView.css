@@ -1199,6 +1199,47 @@
   white-space: nowrap;
 }
 
+/* Rango asiático */
+.zsr-asia {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.zsr-asia-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.zsr-asia-item { color: var(--text); }
+.zsr-asia-swept { color: #fbbf24; font-weight: 600; }
+
+/* Gestión de riesgo (account_check) */
+.marco-account {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.06);
+  font-size: 12px;
+}
+.marco-account-item { display: inline-flex; align-items: baseline; gap: 5px; color: var(--text-muted); }
+.marco-account-item b { font-size: 14px; color: var(--text); }
+.marco-account-cap { color: var(--text-muted); font-size: 11px; }
+.marco-account-blocked {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.10);
+  color: #f87171;
+  font-weight: 600;
+}
+
 .marco-gates {
   display: flex;
   flex-wrap: wrap;

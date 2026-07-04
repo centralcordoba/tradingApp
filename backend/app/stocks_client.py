@@ -6,16 +6,14 @@ nuevas — solo `urllib` (igual que `scanner.py`).
 """
 from __future__ import annotations
 
-import json
 import math
 import os
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
+from . import td_client
 from .constants import (
     CACHE_TTL_INTRADAY,
     CACHE_TTL_DAILY,
@@ -107,25 +105,27 @@ def _http_get(path: str, params: dict, timeout: int = HTTP_TIMEOUT_DEFAULT) -> d
         raise StocksUpstreamError(500, "TWELVEDATA_API_KEY no configurada")
     full_params = {**params, "apikey": TD_API_KEY}
     url = f"{TD_BASE}{path}?{urllib.parse.urlencode(full_params)}"
-    req = urllib.request.Request(
+    # Vía td_client: rate limit global 8/min compartido con el scanner forex
+    # (antes eran dos clientes ciegos gastando la misma cuota) + contador de
+    # créditos. symbol_search es gratis (credits=0, solo cuenta el request).
+    credits = 0 if "symbol_search" in path else 1
+    data, err = td_client.get_json(
         url,
         headers={
             "Accept": "application/json",
             "User-Agent": "Mozilla/5.0 (AI Trading Assistant Stocks)",
         },
+        timeout=timeout,
+        credits=credits,
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="replace")[:250]
-        except Exception:
-            pass
-        raise StocksUpstreamError(e.code, f"HTTP {e.code} — {body or e.reason}")
-    except Exception as e:
-        raise StocksUpstreamError(0, f"{type(e).__name__}: {e}")
+    if err is not None:
+        if err.startswith("HTTP "):
+            try:
+                code = int(err.split()[1])
+            except (ValueError, IndexError):
+                code = 0
+            raise StocksUpstreamError(code, err)
+        raise StocksUpstreamError(0, err)
 
     if isinstance(data, dict) and data.get("status") == "error":
         msg = data.get("message", "error desconocido")
@@ -271,53 +271,19 @@ def _safe_float(v, default):
 
 
 # ---------------------------------------------------------------------------
-# Indicadores (Python puro, alineados con el frontend signalEngine)
+# Indicadores — implementación única en indicators.py (alineados con el
+# frontend signalEngine). Aliases con defaults propios de stocks.
 # ---------------------------------------------------------------------------
 
-def _sma(values: list[float], period: int) -> Optional[float]:
-    if len(values) < period:
-        return None
-    return sum(values[-period:]) / period
-
-
-def _ema_series(values: list[float], period: int) -> list[float]:
-    if len(values) < period:
-        return []
-    k = 2 / (period + 1)
-    seed = sum(values[:period]) / period
-    out = [seed]
-    for v in values[period:]:
-        out.append(v * k + out[-1] * (1 - k))
-    return out
-
-
-def _ema_last(values: list[float], period: int) -> Optional[float]:
-    s = _ema_series(values, period)
-    return s[-1] if s else None
-
-
-def _rsi_last(values: list[float], period: int = RSI_PERIOD) -> Optional[float]:
-    if len(values) < period + 1:
-        return None
-    gains = losses = 0.0
-    for i in range(1, period + 1):
-        diff = values[i] - values[i - 1]
-        if diff >= 0:
-            gains += diff
-        else:
-            losses -= diff
-    avg_gain = gains / period
-    avg_loss = losses / period
-    for i in range(period + 1, len(values)):
-        diff = values[i] - values[i - 1]
-        gain = diff if diff > 0 else 0.0
-        loss = -diff if diff < 0 else 0.0
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+from .indicators import (  # noqa: E402
+    adx as _indicators_adx,
+    bbands as _indicators_bbands,
+    ema_last as _ema_last,
+    ema_series as _ema_series,
+    macd_hist as _indicators_macd_hist,
+    rsi_last as _rsi_last,
+    sma_last as _sma,
+)
 
 
 def _macd_hist(
@@ -327,26 +293,7 @@ def _macd_hist(
     signal: int = MACD_SIGNAL,
     n_last: int = MACD_HIST_LOOKBACK,
 ) -> list[float]:
-    """Histograma MACD = MACD - señal. Devuelve los últimos `n_last` puntos."""
-    if len(values) < slow + signal:
-        return []
-    ema_fast = _ema_series(values, fast)
-    ema_slow = _ema_series(values, slow)
-    # ema_fast indexa desde fast-1, ema_slow desde slow-1; alineamos al inicio
-    # común recortando ema_fast por (slow - fast) puntos del frente.
-    offset = slow - fast
-    ema_fast_aligned = ema_fast[offset:]
-    n = min(len(ema_fast_aligned), len(ema_slow))
-    macd = [ema_fast_aligned[i] - ema_slow[i] for i in range(n)]
-    if len(macd) < signal:
-        return []
-    signal_line = _ema_series(macd, signal)
-    macd_aligned = macd[signal - 1:]
-    m = min(len(signal_line), len(macd_aligned))
-    if m == 0:
-        return []
-    hist = [macd_aligned[-m + i] - signal_line[-m + i] for i in range(m)]
-    return hist[-n_last:] if hist else []
+    return _indicators_macd_hist(values, fast=fast, slow=slow, signal=signal, n_last=n_last)
 
 
 def _bbands(
@@ -354,13 +301,7 @@ def _bbands(
     period: int = BBANDS_PERIOD,
     mult: float = BBANDS_MULT,
 ) -> tuple[Optional[float], Optional[float]]:
-    if len(values) < period:
-        return None, None
-    seg = values[-period:]
-    mean = sum(seg) / period
-    variance = sum((v - mean) ** 2 for v in seg) / period
-    std = variance ** 0.5
-    return mean + mult * std, mean - mult * std
+    return _indicators_bbands(values, period=period, mult=mult)
 
 
 def _adx(
@@ -369,49 +310,7 @@ def _adx(
     closes: list[float],
     period: int = ADX_PERIOD,
 ) -> tuple[Optional[float], Optional[float], Optional[float]]:
-    """Devuelve (adx, +DI, -DI). None si no hay datos suficientes."""
-    n = len(closes)
-    if n < period * 2 + 1:
-        return None, None, None
-    plus_dm, minus_dm, tr = [], [], []
-    for i in range(1, n):
-        up_move = highs[i] - highs[i - 1]
-        down_move = lows[i - 1] - lows[i]
-        plus_dm.append(up_move if up_move > down_move and up_move > 0 else 0.0)
-        minus_dm.append(down_move if down_move > up_move and down_move > 0 else 0.0)
-        tr.append(
-            max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i - 1]),
-                abs(lows[i] - closes[i - 1]),
-            )
-        )
-    if len(tr) < period:
-        return None, None, None
-
-    def wilder(arr: list[float]) -> list[float]:
-        seed = sum(arr[:period])
-        out = [seed]
-        for v in arr[period:]:
-            out.append(out[-1] - (out[-1] / period) + v)
-        return out
-
-    s_plus_dm = wilder(plus_dm)
-    s_minus_dm = wilder(minus_dm)
-    s_tr = wilder(tr)
-
-    plus_di = [100 * pdm / t if t else 0.0 for pdm, t in zip(s_plus_dm, s_tr)]
-    minus_di = [100 * mdm / t if t else 0.0 for mdm, t in zip(s_minus_dm, s_tr)]
-    dx = []
-    for pdi, mdi in zip(plus_di, minus_di):
-        denom = pdi + mdi
-        dx.append(100 * abs(pdi - mdi) / denom if denom else 0.0)
-    if len(dx) < period:
-        return None, plus_di[-1] if plus_di else None, minus_di[-1] if minus_di else None
-    adx_val = sum(dx[:period]) / period
-    for v in dx[period:]:
-        adx_val = (adx_val * (period - 1) + v) / period
-    return adx_val, plus_di[-1], minus_di[-1]
+    return _indicators_adx(highs, lows, closes, period=period)
 
 
 # ---------------------------------------------------------------------------

@@ -452,43 +452,39 @@ def _calculate_sl_tp(
     cfg: dict,
 ) -> dict:
     """
-    SL: más allá del nivel ± max(0.5×ATR_M15, 3 pips).
-    TP: nivel opuesto si RRR ≥ 2.0; sino automático a 2×risk.
+    SL: más allá del nivel ± max(0.5×ATR_M15, 3 pips) — estructural, SIN recortar
+    al cap: si el SL que protege el nivel excede el cap, el gate 9 debe FALLAR
+    (recortarlo lo dejaba dentro del nivel = stop-out garantizado en el retest).
+    TP: nivel opuesto si existe (aunque dé RRR<2 — es el techo real del trade);
+    2×risk solo cuando no hay nivel opuesto que obstruya.
     """
     atr_buffer = (atr_m15 * 0.5) if atr_m15 else (3 * pip_size)
     buffer = max(atr_buffer, 3 * pip_size)
     level_price = best_level["price"]
     max_sl_pips = cfg.get("sl_max_pips", 20.0)
-    max_sl_price = max_sl_pips * pip_size
 
     if scanner_side == "LONG":
         sl_price = level_price - buffer
-        if entry_price - sl_price > max_sl_price:
-            sl_price = entry_price - max_sl_price
     else:
         sl_price = level_price + buffer
-        if sl_price - entry_price > max_sl_price:
-            sl_price = entry_price + max_sl_price
 
     risk_price = abs(entry_price - sl_price)
     risk_pips = round(risk_price / pip_size, 1)
 
-    reward_pips = round(risk_pips * 2.0, 1)
-    tp_source = "2:1_calculado"
-    tp_price = (
-        entry_price + risk_price * 2.0 if scanner_side == "LONG"
-        else entry_price - risk_price * 2.0
-    )
-
     if opposite_level:
-        opp_price = opposite_level["price"]
-        opp_reward = abs(opp_price - entry_price) / pip_size
-        if opp_reward >= risk_pips * MIN_RRR:
-            tp_price = opp_price
-            reward_pips = round(opp_reward, 1)
-            tp_source = "nivel_sr"
-        else:
-            tp_source = "2:1_fallback"
+        # El nivel opuesto es el techo/suelo real: el TP honesto es ese nivel,
+        # no un 2×risk fabricado que lo atraviese. Si no alcanza RRR≥2, el
+        # gate falla — exactamente la filosofía del RRR floor.
+        tp_price = opposite_level["price"]
+        reward_pips = round(abs(tp_price - entry_price) / pip_size, 1)
+        tp_source = "nivel_sr"
+    else:
+        tp_price = (
+            entry_price + risk_price * MIN_RRR if scanner_side == "LONG"
+            else entry_price - risk_price * MIN_RRR
+        )
+        reward_pips = round(risk_pips * MIN_RRR, 1)
+        tp_source = "2:1_sin_nivel_opuesto"
 
     rrr = round(reward_pips / risk_pips, 2) if risk_pips > 0 else None
     return {

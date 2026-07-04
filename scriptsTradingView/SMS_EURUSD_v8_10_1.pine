@@ -980,7 +980,10 @@ longMessage = '{"signal":"LONG","symbol":"' + syminfo.ticker + '","timeframe":"'
      ',"swing_high":' + str.tostring(nz(lastSH, high), "#.#####") +
      ',"swing_low":' + str.tostring(nz(lastSL, low), "#.#####") +
      ',"high":' + str.tostring(high, "#.#####") +
-     ',"low":' + str.tostring(low, "#.#####") + '}'
+     ',"low":' + str.tostring(low, "#.#####") +
+     ',"time":' + str.tostring(time_close) +
+     ',"sweep_low":' + (sweepLow ? "true" : "false") +
+     ',"sweep_high":' + (sweepHigh ? "true" : "false") + '}'
 
 shortMessage = '{"signal":"SHORT","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period +
      '","price":' + str.tostring(close, "#.#####") +
@@ -1006,7 +1009,10 @@ shortMessage = '{"signal":"SHORT","symbol":"' + syminfo.ticker + '","timeframe":
      ',"swing_high":' + str.tostring(nz(lastSH, high), "#.#####") +
      ',"swing_low":' + str.tostring(nz(lastSL, low), "#.#####") +
      ',"high":' + str.tostring(high, "#.#####") +
-     ',"low":' + str.tostring(low, "#.#####") + '}'
+     ',"low":' + str.tostring(low, "#.#####") +
+     ',"time":' + str.tostring(time_close) +
+     ',"sweep_low":' + (sweepLow ? "true" : "false") +
+     ',"sweep_high":' + (sweepHigh ? "true" : "false") + '}'
 
 alertConfLong  = confLong >= alertMinConf
 alertConfShort = confShort >= alertMinConf

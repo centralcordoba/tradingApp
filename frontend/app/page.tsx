@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState, useCallback, useRef, useId } from "react";
-import { drawRadarChart } from "./radarChart";
 import { AppShell } from "@/components/shell/AppShell";
 import { Topbar } from "@/components/shell/Topbar";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -15,8 +14,23 @@ import { ZonasSRView } from "@/components/zones/ZonasSRView";
 import { CrossBadge } from "@/components/cross/CrossBadge";
 import type { CrossVerdict } from "@/lib/types";
 import { useTick } from "@/hooks/useTick";
+import { playChime, sendNotification, createAudioContext } from "@/lib/alerts";
+import {
+  SESSIONS,
+  type SessionInfo,
+  formatTime,
+  isSessionOpen,
+  sessionProgress,
+  sessionCountdown,
+  getOverlapLabel,
+} from "@/lib/sessions";
+import { KILL_ZONES, type KillZone, isInKillZone, kzProgress } from "@/lib/killZones";
+import { WATCHLIST } from "@/lib/config";
+import { VerdictStrip } from "@/components/shell/VerdictStrip";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const SIGNAL_ALERTS_KEY = "tradingapp:signal_alerts_on";
 
 const NEWS_ALERT_THRESHOLD_MIN = 20;
 const NEWS_ALERT_LINGER_MIN = 5;
@@ -38,7 +52,7 @@ type Signal = {
     conf: number;
     quality: string;
     mtf: string;
-    zona: string;
+    zona: string | null;
     pattern: string;
     rsi: number;
     fvg?: boolean;
@@ -59,6 +73,7 @@ type Signal = {
       trigger_price: number;
       invalidation: number;
       instructions: string;
+      expires_after?: number | null;
     } | null;
   };
   result: "WIN" | "LOSS" | "BE" | null;
@@ -68,16 +83,6 @@ type Signal = {
   journal_respected_plan?: string | null;
   journal_closed_early?: string | null;
   journal_emotion?: string | null;
-};
-
-type Emotion = "confianza" | "miedo" | "fomo" | "venganza";
-type JournalDraft = {
-  signalId: number;
-  result: "WIN" | "LOSS" | "BE";
-  taken: "yes" | "no" | null;
-  respected_plan: "yes" | "no" | null;
-  closed_early: "yes" | "no" | null;
-  emotion: Emotion | null;
 };
 
 type ConfirmDialogState = {
@@ -116,144 +121,9 @@ type Stats = {
 const EMPTY_AGG: Agg = { n: 0, wins: 0, losses: 0, be: 0, win_rate: 0, pnl: 0 };
 
 /* ── Market Sessions Panel ── */
-type SessionInfo = {
-  name: string;
-  timezone: string;
-  openHourUTC: number;
-  closeHourUTC: number;
-  abbr: string;
-};
-
-const SESSIONS: SessionInfo[] = [
-  { name: "Asia · Tokyo", timezone: "Asia/Tokyo", openHourUTC: 0, closeHourUTC: 9, abbr: "TYO" },
-  { name: "Londres", timezone: "Europe/London", openHourUTC: 7, closeHourUTC: 16, abbr: "LDN" },
-  { name: "New York", timezone: "America/New_York", openHourUTC: 12, closeHourUTC: 21, abbr: "NYC" },
-];
-
-function useClockTick(intervalMs = 1000): Date | null {
-  // null en SSR para evitar hydration mismatch — el tiempo real se setea tras
-  // montar en cliente. Los consumers renderizan placeholder mientras es null.
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-    const id = setInterval(() => setNow(new Date()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
-}
-
-function formatTime(date: Date, tz: string): string {
-  return date.toLocaleTimeString("es-ES", {
-    timeZone: tz,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-function isSessionOpen(now: Date, session: SessionInfo): boolean {
-  const h = now.getUTCHours();
-  const m = now.getUTCMinutes();
-  const current = h + m / 60;
-  return current >= session.openHourUTC && current < session.closeHourUTC;
-}
-
-function sessionProgress(now: Date, session: SessionInfo): number {
-  const h = now.getUTCHours();
-  const m = now.getUTCMinutes();
-  const current = h + m / 60;
-  if (current < session.openHourUTC || current >= session.closeHourUTC) return 0;
-  const duration = session.closeHourUTC - session.openHourUTC;
-  return ((current - session.openHourUTC) / duration) * 100;
-}
-
-function sessionCountdown(now: Date, session: SessionInfo): { label: string; minutes: number } {
-  const h = now.getUTCHours();
-  const m = now.getUTCMinutes();
-  const s = now.getUTCSeconds();
-  const currentMin = h * 60 + m + s / 60;
-  const openMin = session.openHourUTC * 60;
-  const closeMin = session.closeHourUTC * 60;
-  const open = currentMin >= openMin && currentMin < closeMin;
-
-  let diffMin: number;
-  if (open) {
-    diffMin = closeMin - currentMin;
-  } else {
-    diffMin = currentMin < openMin ? openMin - currentMin : (24 * 60 - currentMin) + openMin;
-  }
-
-  const totalSec = Math.max(0, Math.floor(diffMin * 60));
-  const hh = Math.floor(totalSec / 3600);
-  const mm = Math.floor((totalSec % 3600) / 60);
-  const ss = totalSec % 60;
-
-  const prefix = open ? "Cierra en" : "Abre en";
-  const time = hh > 0
-    ? `${hh}h ${String(mm).padStart(2, "0")}m`
-    : `${mm}m ${String(ss).padStart(2, "0")}s`;
-
-  return { label: `${prefix} ${time}`, minutes: diffMin };
-}
-
-function getOverlapLabel(now: Date): string | null {
-  const ldn = isSessionOpen(now, SESSIONS[1]);
-  const nyc = isSessionOpen(now, SESSIONS[2]);
-  const asia = isSessionOpen(now, SESSIONS[0]);
-  if (ldn && nyc) return "LDN + NYC";
-  if (asia && ldn) return "ASIA + LDN";
-  return null;
-}
-
-/* ── Kill Zones Panel ── */
-type KillZone = {
-  label: string;
-  startH: number; startM: number;
-  endH: number;   endM: number;
-  icon: string;
-  status: "fire" | "ok" | "warn" | "avoid";
-  note: string;
-};
-
-const KILL_ZONES: KillZone[] = [
-  { label: "Asia",               startH: 2,  startM: 0,  endH: 5,  endM: 0,  icon: "🔴", status: "avoid", note: "No operar (solo análisis de rango)" },
-  { label: "Pre-London",         startH: 5,  startM: 0,  endH: 9,  endM: 0,  icon: "🔴", status: "avoid", note: "No operar (identificar liquidez)" },
-  { label: "London Open",        startH: 9,  startM: 0,  endH: 10, endM: 30, icon: "🔥", status: "fire",  note: "Setup principal (breakout / liquidity sweep)" },
-  { label: "London Continuation",startH: 10, startM: 30, endH: 12, endM: 0,  icon: "✅", status: "ok",    note: "Solo continuación (no forzar trades)" },
-  { label: "Pre-NY",             startH: 12, startM: 0,  endH: 14, endM: 0,  icon: "⚠️", status: "warn",  note: "Pullbacks / manipulación (avanzado)" },
-  { label: "Overlap LDN-NY",     startH: 14, startM: 0,  endH: 17, endM: 0,  icon: "🏆", status: "fire",  note: "MEJOR VENTANA (A+ setups)" },
-  { label: "NY Mid",             startH: 17, startM: 0,  endH: 19, endM: 0,  icon: "⚠️", status: "warn",  note: "Selectivo (reversals / rangos)" },
-  { label: "NY Close",           startH: 19, startM: 0,  endH: 22, endM: 0,  icon: "🔴", status: "avoid", note: "Evitar" },
-];
-
-function getMadridHourMin(now: Date): { h: number; m: number } {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Madrid",
-    hour: "2-digit", minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const h = parseInt(parts.find(p => p.type === "hour")!.value, 10);
-  const m = parseInt(parts.find(p => p.type === "minute")!.value, 10);
-  return { h, m };
-}
-
-function isInKillZone(now: Date, kz: KillZone): boolean {
-  const { h, m } = getMadridHourMin(now);
-  const cur = h * 60 + m;
-  const start = kz.startH * 60 + kz.startM;
-  const end = kz.endH * 60 + kz.endM;
-  return cur >= start && cur < end;
-}
-
-function kzProgress(now: Date, kz: KillZone): number {
-  const { h, m } = getMadridHourMin(now);
-  const cur = h * 60 + m;
-  const start = kz.startH * 60 + kz.startM;
-  const end = kz.endH * 60 + kz.endM;
-  if (cur < start || cur >= end) return 0;
-  return ((cur - start) / (end - start)) * 100;
-}
+// Sessions + kill zones: importados de lib/sessions y lib/killZones — antes
+// estaban duplicados línea por línea aquí (dos fuentes de verdad con drift).
+const useClockTick = useTick;
 
 function pad2(n: number) { return String(n).padStart(2, "0"); }
 
@@ -433,136 +303,6 @@ function zonaTooltip(zona: string, side: string): string {
 
 type View = "dashboard" | "zones" | "radar" | "stocks" | "correlations" | "playbook" | "sr";
 
-// Pares operativos del usuario — usados por el radar para filtrar ruido.
-const WATCHLIST = ["EURUSD"];
-
-type RadarSetup = {
-  symbol: string;
-  price: number;
-  bloque: 1 | 2 | 3 | 4;
-  side: "LONG" | "SHORT" | "TRAP_LONG" | "TRAP_SHORT";
-  strength: "STRONG" | "NORMAL" | "WARN" | null;
-  quality: number;
-  range_pos: number;
-  rsi: number | null;
-  atr: number | null;
-  key_levels: {
-    support: number | null;
-    resistance: number | null;
-    dist_support: number | null;
-    dist_resistance: number | null;
-    near_support: boolean;
-    near_resistance: boolean;
-  };
-  rejection: {
-    rejection: boolean;
-    type: string | null;
-    wick_ratio: number;
-    direction: string | null;
-    candle_age: number | null;
-    candle_ts: string | null;
-    expired: boolean;
-  };
-  divergence: {
-    divergence: boolean;
-    type: string | null;
-    direction: string | null;
-  };
-  sl: {
-    price: number;
-    distance_pips: number;
-    cap_pips: number;
-    too_wide: boolean;
-    tp_price: number | null;
-    reward_pips: number | null;
-    rrr: number | null;
-    rrr_below_min: boolean;
-    rrr_min: number;
-  } | null;
-  alignment: {
-    status: "aligned" | "conflict" | "neutral" | "unknown";
-    scanner_bias: string | null;
-    scanner_confluence: number | null;
-    scanner_bias_value?: number | null;
-    mtf_lock_passed: boolean | null;
-    mtf_lock_failed: boolean;
-    reclassified: boolean;
-    original_bloque?: number;
-  } | null;
-  candles?: Array<{
-    ts: string;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-  }>;
-  smc?: SmcAnalysis | null;
-  geometria?: GeometryAnalysis | null;
-};
-
-type GeometryAnalysis = {
-  canal: {
-    detectado: boolean;
-    tipo: "ALCISTA" | "BAJISTA" | "LATERAL" | "NINGUNO";
-    estado:
-      | "DENTRO"
-      | "RUPTURA_ALCISTA"
-      | "RUPTURA_BAJISTA"
-      | "RETESTEO_SUPERIOR"
-      | "RETESTEO_INFERIOR"
-      | "NINGUNO";
-    linea_superior: number | null;
-    linea_inferior: number | null;
-    confianza: "ALTA" | "MEDIA" | "BAJA";
-    r_squared_sup: number;
-    r_squared_inf: number;
-  };
-  triangulo: {
-    detectado: boolean;
-    tipo: "SIMETRICO" | "ASCENDENTE" | "DESCENDENTE" | "NINGUNO";
-    estado: "FORMANDO" | "EN_VERTICE" | "RUPTURA_ALCISTA" | "RUPTURA_BAJISTA" | "NINGUNO";
-    vertice_estimado: number | null;
-    confianza: "ALTA" | "MEDIA" | "BAJA";
-  };
-  ruptura: {
-    confirmada: boolean;
-    direccion: "BULLISH" | "BEARISH" | "NINGUNA";
-    figura: "TRIANGULO" | "CANAL" | "NINGUNA";
-  };
-};
-
-type SmcAnalysis = {
-  sesgo: "LONG_ONLY" | "SHORT_ONLY" | "NO_TRADE";
-  estructura: {
-    ultimo_movimiento: "HH" | "HL" | "LH" | "LL";
-    descripcion: string;
-  };
-  nivel_activo: {
-    precio: number;
-    tipo: "SOPORTE" | "RESISTENCIA";
-    frescura: "FRESCO" | "TESTEADO" | "AGOTADO";
-    fuerza: "FUERTE" | "NORMAL" | "DEBIL";
-    proximidad_pips: number;
-    operable: boolean;
-  };
-  alerta: {
-    activa: boolean;
-    motivo: string;
-  };
-  resumen: string;
-};
-
-type RadarResponse = {
-  timestamp: string;
-  active_setups: RadarSetup[];
-  expired_setups: RadarSetup[];
-  total_setups: number;
-  strong_setups: number;
-  total_expired: number;
-  market_closed?: boolean;
-  data_age_minutes?: number | null;
-  last_candle_ts?: string | null;
-};
 
 const PRESET_SYMBOLS = [
   "EURUSD", "GBPUSD", "USDCAD", "USDCHF", "AUDUSD", "USDJPY",
@@ -855,40 +595,6 @@ function ZoneAnalysisView() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Radar de setups — reversiones en soporte/resistencia (M15)
-// ─────────────────────────────────────────────────────────────────────────
-
-const REJECTION_LABELS: Record<string, string> = {
-  pin_bar_bull: "Pin bar alcista",
-  pin_bar_bear: "Pin bar bajista",
-  engulf_bull: "Envolvente alcista",
-  engulf_bear: "Envolvente bajista",
-};
-
-function parseCandleDate(iso: string | null): Date | null {
-  if (!iso) return null;
-  try {
-    let s = iso.replace(" ", "T");
-    if (!s.endsWith("Z") && !s.includes("+")) s += "Z";
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? null : d;
-  } catch { return null; }
-}
-
-function formatCandleTime(iso: string | null): string {
-  const d = parseCandleDate(iso);
-  if (!d) return "";
-  const tz = { timeZone: "Europe/Madrid" };
-  const todayMadrid = new Date().toLocaleDateString("es-ES", tz);
-  const candleDate = d.toLocaleDateString("es-ES", tz);
-  const hhmm = d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", ...tz });
-  if (todayMadrid === candleDate) return hhmm;
-  // Día distinto → prefijar fecha corta (DD/MM)
-  const short = d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", ...tz });
-  return `${short} ${hhmm}`;
-}
-
 function formatDataAge(min: number): string {
   const v = Math.max(0, min);
   if (v < 60) return `${Math.round(v)} min`;
@@ -898,671 +604,6 @@ function formatDataAge(min: number): string {
   return `${d}d ${h % 24}h`;
 }
 
-function ageText(age: number | null, ts: string | null): string {
-  if (age == null) return "";
-  const hhmm = formatCandleTime(ts);
-  const suffix = hhmm ? ` (${hhmm})` : "";
-  if (age === 1) return `vela recién cerrada${suffix}`;
-  return `hace ${age} velas${suffix}`;
-}
-
-function blockMeta(bloque: number, strength: string | null) {
-  switch (bloque) {
-    case 1: return {
-      label: strength === "STRONG" ? "B1 ★ STRONG" : "B1",
-      cls: strength === "STRONG" ? "radar-b1-strong" : "radar-b1",
-      tone: "Compra válida",
-    };
-    case 3: return {
-      label: strength === "STRONG" ? "B3 ★ STRONG" : "B3",
-      cls: strength === "STRONG" ? "radar-b3-strong" : "radar-b3",
-      tone: "Venta válida",
-    };
-    case 2: return { label: "B2 ⚠ TRAMPA", cls: "radar-trap", tone: "Trampa long" };
-    case 4: return { label: "B4 ⚠ TRAMPA", cls: "radar-trap", tone: "Trampa short" };
-    default: return { label: "—", cls: "", tone: "" };
-  }
-}
-
-function trapCopy(bloque: number): { title: string; detail: string } {
-  if (bloque === 2) return {
-    title: "Trampa long — no comprar aquí",
-    detail: "El soporte parece válido pero el rechazo es bajista. Esperar ruptura del soporte confirmada.",
-  };
-  if (bloque === 4) return {
-    title: "Trampa short — no vender aquí",
-    detail: "La resistencia parece válida pero el rechazo es alcista. Esperar ruptura confirmada.",
-  };
-  return { title: "", detail: "" };
-}
-
-// A+ filters por setup. Cada filtro vale 1 punto. 5/5 = operar, 3-4 = esperar,
-// <3 = evitar. La evaluación es determinista y visible al usuario — no hay que
-// valorar mentalmente.
-type AplusCheck = { key: string; label: string; passed: boolean; detail?: string };
-
-function evalSetup(
-  s: RadarSetup,
-  killZoneStatus: "fire" | "ok" | "warn" | "avoid" | null,
-): { checks: AplusCheck[]; passed: number; total: number } {
-  const checks: AplusCheck[] = [];
-
-  const kz = killZoneStatus;
-  checks.push({
-    key: "killzone",
-    label: "Kill zone activa",
-    passed: kz === "fire" || kz === "ok",
-    detail: kz ? `Actual: ${kz}` : "fuera de ventana operable",
-  });
-
-  const mtfPassed = s.alignment?.mtf_lock_passed === true;
-  const mtfFailed = s.alignment?.mtf_lock_failed === true;
-  checks.push({
-    key: "mtf",
-    label: "MTF LOCK (alineado con escáner)",
-    passed: mtfPassed,
-    detail: mtfFailed
-      ? `Escáner dice ${s.alignment?.scanner_bias}, setup va en contra`
-      : s.alignment?.status === "neutral"
-      ? "Escáner neutral"
-      : s.alignment?.status === "unknown"
-      ? "Sin data del escáner"
-      : undefined,
-  });
-
-  checks.push({
-    key: "strength",
-    label: "Fuerza STRONG (con divergencia)",
-    passed: s.strength === "STRONG",
-    detail: s.strength === "NORMAL" ? "Solo rechazo, sin divergencia" : undefined,
-  });
-
-  const rrr = s.sl?.rrr;
-  const rrrMin = s.sl?.rrr_min ?? 2.0;
-  checks.push({
-    key: "rrr",
-    label: `RRR ≥ ${rrrMin}:1`,
-    passed: !!s.sl && rrr != null && rrr >= rrrMin,
-    detail: rrr != null ? `Actual: ${rrr.toFixed(2)}:1` : "Sin TP calculable",
-  });
-
-  checks.push({
-    key: "sl",
-    label: "SL dentro del cap",
-    passed: !!s.sl && !s.sl.too_wide,
-    detail: s.sl?.too_wide ? `${s.sl.distance_pips} pips > cap ${s.sl.cap_pips}` : undefined,
-  });
-
-  const passed = checks.filter(c => c.passed).length;
-  return { checks, passed, total: checks.length };
-}
-
-function aplusDecision(passed: number): {
-  label: "OPERAR" | "ESPERAR" | "EVITAR";
-  cls: string;
-  ico: string;
-} {
-  if (passed >= 5) return { label: "OPERAR", cls: "sem-go", ico: "✅" };
-  if (passed >= 3) return { label: "ESPERAR", cls: "sem-wait", ico: "⏳" };
-  return { label: "EVITAR", cls: "sem-stop", ico: "❌" };
-}
-
-function RadarSemaforo({
-  setups,
-  marketClosed,
-  killZone,
-}: {
-  setups: RadarSetup[];
-  marketClosed: boolean;
-  killZone: KillZone | null;
-}) {
-  if (marketClosed) {
-    return (
-      <div className="radar-sem radar-sem-stop">
-        <div className="radar-sem-ico">🌙</div>
-        <div className="radar-sem-body">
-          <div className="radar-sem-label">EVITAR</div>
-          <div className="radar-sem-reason">Mercado cerrado — sin feed M15 activo</div>
-        </div>
-      </div>
-    );
-  }
-
-  const kzStatus = killZone?.status ?? null;
-  const operable = setups.filter(s => !(s.sl?.too_wide));
-  const evaluated = operable.map(s => ({ setup: s, eval: evalSetup(s, kzStatus) }));
-  evaluated.sort((a, b) => b.eval.passed - a.eval.passed);
-
-  const best = evaluated[0];
-  const bestPassed = best?.eval.passed ?? 0;
-  const decision = aplusDecision(bestPassed);
-
-  const goN = evaluated.filter(e => e.eval.passed >= 5).length;
-  const waitN = evaluated.filter(e => e.eval.passed >= 3 && e.eval.passed < 5).length;
-
-  let reason = "";
-  if (evaluated.length === 0) {
-    reason = "Sin setups activos — no hay nada que evaluar";
-  } else if (decision.label === "OPERAR") {
-    reason = `${goN} setup${goN === 1 ? "" : "s"} A+ · mejor: ${best!.setup.symbol} (${bestPassed}/${best!.eval.total})`;
-  } else if (decision.label === "ESPERAR") {
-    reason = `0 A+, ${waitN} próximo${waitN === 1 ? "" : "s"} · mejor: ${best!.setup.symbol} (${bestPassed}/${best!.eval.total})`;
-  } else {
-    reason = `Ningún setup cumple filtros mínimos · mejor: ${best!.setup.symbol} (${bestPassed}/${best!.eval.total})`;
-  }
-
-  return (
-    <div className={`radar-sem ${decision.cls}`}>
-      <div className="radar-sem-ico">{decision.ico}</div>
-      <div className="radar-sem-body">
-        <div className="radar-sem-label">{decision.label}</div>
-        <div className="radar-sem-reason">{reason}</div>
-        {best && (
-          <div className="radar-sem-checks">
-            {best.eval.checks.map(c => (
-              <span
-                key={c.key}
-                className={`radar-sem-chk ${c.passed ? "on" : "off"}`}
-                title={c.detail || c.label}
-              >
-                {c.passed ? "✓" : "·"} {c.label}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function RadarChart({ setup }: { setup: RadarSetup }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const parent = canvas.parentElement;
-    const draw = () => drawRadarChart(canvas, setup);
-    draw();
-    if (!parent || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(draw);
-    ro.observe(parent);
-    return () => ro.disconnect();
-  }, [setup]);
-
-  return (
-    <div className="radar-chart-wrap">
-      <canvas ref={ref} className="radar-chart" />
-    </div>
-  );
-}
-
-function RadarCard({ setup }: { setup: RadarSetup }) {
-  const meta = blockMeta(setup.bloque, setup.strength);
-  const isTrap = setup.bloque === 2 || setup.bloque === 4;
-  const expired = setup.rejection?.expired;
-  const tooWide = setup.sl?.too_wide;
-  const rrrBelowMin = setup.sl?.rrr_below_min === true;
-  const mtfLockFailed = setup.alignment?.mtf_lock_failed === true;
-  const inWatchlist = WATCHLIST.includes(setup.symbol);
-  const trap = isTrap ? trapCopy(setup.bloque) : null;
-
-  const cls = [
-    "radar-card",
-    meta.cls,
-    expired ? "radar-expired" : "",
-    tooWide ? "radar-toowide" : "",
-    rrrBelowMin ? "radar-rrr-low" : "",
-    mtfLockFailed ? "radar-mtf-failed" : "",
-  ].filter(Boolean).join(" ");
-
-  return (
-    <article className={cls}>
-      <header className="radar-head">
-        <div>
-          <div className="radar-pair">
-            {setup.symbol}
-            {inWatchlist && <span className="radar-pair-op">● Operativo</span>}
-          </div>
-          <div className="radar-price">{setup.price}</div>
-        </div>
-        <div className="radar-badges">
-          <span className={`radar-badge ${meta.cls}`}>{meta.label}</span>
-          {mtfLockFailed && (
-            <span className="radar-badge radar-badge-mtf">⛔ NO CUMPLE MTF LOCK</span>
-          )}
-          {rrrBelowMin && (
-            <span className="radar-badge radar-badge-rrr-low">RRR &lt; {setup.sl?.rrr_min ?? 2}</span>
-          )}
-          {expired && <span className="radar-badge radar-badge-expired">EXPIRADO</span>}
-          {tooWide && <span className="radar-badge radar-badge-toowide">SL EXCEDE</span>}
-        </div>
-      </header>
-
-      <div className="radar-meta-row">
-        <span>{setup.side.replace("_", " ")}</span>
-        {setup.rsi != null && <span>· RSI {setup.rsi}</span>}
-        <span>· Rango {Math.round(setup.range_pos * 100)}%</span>
-      </div>
-
-      <div className="radar-levels">
-        {setup.key_levels.support != null && (
-          <div className={`radar-level ${setup.key_levels.near_support ? "near" : ""}`}>
-            <span className="radar-level-label">Soporte</span>
-            <span className="radar-level-value">{setup.key_levels.support}</span>
-            <span className="radar-level-dist">
-              {setup.key_levels.dist_support?.toFixed(2)}%
-              {setup.key_levels.near_support && " ◉ cerca"}
-            </span>
-          </div>
-        )}
-        {setup.key_levels.resistance != null && (
-          <div className={`radar-level ${setup.key_levels.near_resistance ? "near" : ""}`}>
-            <span className="radar-level-label">Resistencia</span>
-            <span className="radar-level-value">{setup.key_levels.resistance}</span>
-            <span className="radar-level-dist">
-              {setup.key_levels.dist_resistance?.toFixed(2)}%
-              {setup.key_levels.near_resistance && " ◉ cerca"}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {setup.candles && setup.candles.length > 0 && !expired && (
-        <RadarChart setup={setup} />
-      )}
-
-      {setup.sl && !isTrap && (
-        <>
-          <div className={`radar-sl ${tooWide ? "radar-sl-wide" : ""}`}>
-            <span className="radar-sl-label">SL estimado</span>
-            <span className="radar-sl-value">{setup.sl.price}</span>
-            <span className="radar-sl-pips">
-              {setup.sl.distance_pips} pips (cap {setup.sl.cap_pips})
-            </span>
-          </div>
-          {setup.sl.tp_price != null && setup.sl.rrr != null && (
-            <div className={`radar-rrr ${rrrBelowMin ? "radar-rrr-bad" : "radar-rrr-ok"}`}>
-              <span className="radar-rrr-label">TP / RRR</span>
-              <span className="radar-rrr-value">{setup.sl.tp_price}</span>
-              <span className="radar-rrr-ratio">
-                {setup.sl.rrr.toFixed(2)}:1
-                {setup.sl.reward_pips != null && ` · ${setup.sl.reward_pips} pips`}
-                {rrrBelowMin && ` · < ${setup.sl.rrr_min}`}
-              </span>
-            </div>
-          )}
-        </>
-      )}
-
-      {setup.rejection.rejection && (
-        <div className="radar-signal">
-          <span className="radar-signal-ico">🕯</span>
-          {REJECTION_LABELS[setup.rejection.type || ""] || setup.rejection.type}
-          {setup.rejection.wick_ratio ? ` · ratio ${setup.rejection.wick_ratio}` : ""}
-          <span className="radar-signal-age">· {ageText(setup.rejection.candle_age, setup.rejection.candle_ts)}</span>
-        </div>
-      )}
-
-      {setup.divergence.divergence && (
-        <div className="radar-signal">
-          <span className="radar-signal-ico">📈</span>
-          Divergencia {setup.divergence.type === "bullish" ? "alcista" : "bajista"} activa
-        </div>
-      )}
-
-      {trap && (
-        <div className="radar-trap-copy">
-          <div className="radar-trap-title">⚠ {trap.title}</div>
-          <div className="radar-trap-detail">{trap.detail}</div>
-        </div>
-      )}
-
-      {setup.geometria && <RadarGeometry g={setup.geometria} />}
-      {setup.smc && <RadarSmc smc={setup.smc} />}
-      {setup.alignment && <RadarAlignment a={setup.alignment} />}
-    </article>
-  );
-}
-
-const GEOM_BREAK_DIR_CLS: Record<GeometryAnalysis["ruptura"]["direccion"], string> = {
-  BULLISH: "geom-break-bull",
-  BEARISH: "geom-break-bear",
-  NINGUNA: "",
-};
-
-function geomChannelEstadoLabel(estado: GeometryAnalysis["canal"]["estado"]): string {
-  switch (estado) {
-    case "RUPTURA_ALCISTA":   return "ruptura alcista";
-    case "RUPTURA_BAJISTA":   return "ruptura bajista";
-    case "RETESTEO_SUPERIOR": return "retesteando techo";
-    case "RETESTEO_INFERIOR": return "retesteando piso";
-    case "DENTRO":            return "dentro del canal";
-    default:                  return "";
-  }
-}
-
-function geomTriangleEstadoLabel(estado: GeometryAnalysis["triangulo"]["estado"]): string {
-  switch (estado) {
-    case "RUPTURA_ALCISTA": return "ruptura alcista";
-    case "RUPTURA_BAJISTA": return "ruptura bajista";
-    case "EN_VERTICE":      return "ruptura inminente";
-    case "FORMANDO":        return "formando";
-    default:                return "";
-  }
-}
-
-function RadarGeometry({ g }: { g: GeometryAnalysis }) {
-  const hasCanal = g.canal.detectado;
-  const hasTri = g.triangulo.detectado;
-
-  if (!hasCanal && !hasTri && !g.ruptura.confirmada) return null;
-
-  return (
-    <div className="radar-geom">
-      <div className="radar-geom-head">
-        <span className="radar-geom-tag">GEO</span>
-        {g.ruptura.confirmada && (
-          <span className={`radar-geom-break ${GEOM_BREAK_DIR_CLS[g.ruptura.direccion]}`}>
-            ⚡ {g.ruptura.figura.toLowerCase()} · ruptura {g.ruptura.direccion === "BULLISH" ? "alcista" : "bajista"}
-          </span>
-        )}
-      </div>
-
-      {hasCanal && (
-        <div className="radar-geom-row">
-          <span className={`radar-geom-pill geom-${g.canal.tipo.toLowerCase()}`}>
-            canal {g.canal.tipo.toLowerCase()}
-          </span>
-          <span className="radar-geom-state">{geomChannelEstadoLabel(g.canal.estado)}</span>
-          {g.canal.linea_superior != null && g.canal.linea_inferior != null && (
-            <span className="radar-geom-range">
-              {g.canal.linea_inferior} – {g.canal.linea_superior}
-            </span>
-          )}
-          <span className={`radar-geom-conf geom-conf-${g.canal.confianza.toLowerCase()}`}>
-            R² {((g.canal.r_squared_sup + g.canal.r_squared_inf) / 2).toFixed(2)} · {g.canal.confianza.toLowerCase()}
-          </span>
-        </div>
-      )}
-
-      {hasTri && (
-        <div className="radar-geom-row">
-          <span className="radar-geom-pill geom-triangle">
-            triángulo {g.triangulo.tipo.toLowerCase()}
-          </span>
-          <span className="radar-geom-state">{geomTriangleEstadoLabel(g.triangulo.estado)}</span>
-          {g.triangulo.vertice_estimado != null && (
-            <span className="radar-geom-range">vértice ≈ {g.triangulo.vertice_estimado}</span>
-          )}
-          <span className={`radar-geom-conf geom-conf-${g.triangulo.confianza.toLowerCase()}`}>
-            {g.triangulo.confianza.toLowerCase()}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const SMC_SESGO_LABEL: Record<SmcAnalysis["sesgo"], string> = {
-  LONG_ONLY: "LONG ONLY",
-  SHORT_ONLY: "SHORT ONLY",
-  NO_TRADE: "NO TRADE",
-};
-
-const SMC_FRESCURA_CLS: Record<SmcAnalysis["nivel_activo"]["frescura"], string> = {
-  FRESCO: "smc-fresco",
-  TESTEADO: "smc-testeado",
-  AGOTADO: "smc-agotado",
-};
-
-function RadarSmc({ smc }: { smc: SmcAnalysis }) {
-  const sesgoCls =
-    smc.sesgo === "LONG_ONLY" ? "smc-long" :
-    smc.sesgo === "SHORT_ONLY" ? "smc-short" :
-    "smc-no-trade";
-
-  const nivel = smc.nivel_activo;
-  const frescuraCls = SMC_FRESCURA_CLS[nivel.frescura];
-
-  return (
-    <div className="radar-smc">
-      <div className="radar-smc-head">
-        <span className="radar-smc-tag">SMC · IA</span>
-        <span className={`radar-smc-sesgo ${sesgoCls}`}>{SMC_SESGO_LABEL[smc.sesgo]}</span>
-        <span className="radar-smc-mov">{smc.estructura.ultimo_movimiento}</span>
-        {smc.alerta.activa && (
-          <span className="radar-smc-alert">⚡ {smc.alerta.motivo || "alerta activa"}</span>
-        )}
-      </div>
-
-      <div className="radar-smc-resumen">{smc.resumen}</div>
-
-      <div className="radar-smc-meta">
-        <span className={`radar-smc-pill ${frescuraCls}`}>
-          {nivel.tipo} {nivel.frescura}
-        </span>
-        <span className="radar-smc-pill smc-pill-fuerza">
-          fuerza {nivel.fuerza.toLowerCase()}
-        </span>
-        <span className="radar-smc-pill">
-          @ {nivel.precio} · {nivel.proximidad_pips.toFixed(1)} pips
-        </span>
-        {!nivel.operable && (
-          <span className="radar-smc-pill smc-pill-skip">no operable</span>
-        )}
-      </div>
-
-      {smc.estructura.descripcion && (
-        <div className="radar-smc-desc">{smc.estructura.descripcion}</div>
-      )}
-    </div>
-  );
-}
-
-function RadarAlignment({ a }: { a: NonNullable<RadarSetup["alignment"]> }) {
-  const conf = a.scanner_confluence;
-  const bias = a.scanner_bias;
-  if (a.status === "aligned") {
-    return (
-      <div className="radar-align radar-align-ok">
-        ✓ MTF LOCK — alineado con sesgo {bias} del escáner{conf != null ? ` (${conf}/7)` : ""}
-      </div>
-    );
-  }
-  if (a.status === "conflict") {
-    return (
-      <div className="radar-align radar-align-warn">
-        ⛔ NO CUMPLE MTF LOCK — escáner dice {bias}{conf != null ? ` (${conf}/7)` : ""}, setup va en contra
-      </div>
-    );
-  }
-  if (a.status === "neutral") {
-    return (
-      <div className="radar-align radar-align-neutral">
-        · Escáner sin sesgo claro — MTF LOCK indeterminado
-      </div>
-    );
-  }
-  return null;
-}
-
-function RadarView() {
-  const [data, setData] = useState<RadarResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [showLegend, setShowLegend] = useState(false);
-  const [showExpired, setShowExpired] = useState(false);
-
-  // Tick lento — la kill zone cambia cada N minutos, no hace falta refrescar 1s.
-  const tick = useClockTick(30000);
-  const activeKillZone = tick
-    ? KILL_ZONES.find(kz => isInKillZone(tick, kz)) ?? null
-    : null;
-
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch(`${API}/api/radar`, { cache: "no-store" });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j: RadarResponse = await r.json();
-      setData(j);
-      setError(null);
-      setLastUpdate(new Date());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error de red");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Carga inicial (una sola vez al montar).
-  useEffect(() => { load(); }, [load]);
-
-  // Polling condicional: solo si el mercado está abierto. En fin de semana o
-  // con el feed detenido el backend devuelve market_closed=true y no programamos
-  // el setInterval — así no quemamos créditos de Twelve Data sin razón.
-  const marketClosed = data?.market_closed === true;
-  useEffect(() => {
-    if (marketClosed) return;
-    const id = setInterval(load, 300000);
-    return () => clearInterval(id);
-  }, [load, marketClosed]);
-
-  const active = data?.active_setups || [];
-  const expired = data?.expired_setups || [];
-
-  const strongN = active.filter(s => s.strength === "STRONG" && !s.sl?.too_wide).length;
-  const trapN = active.filter(s => s.bloque === 2 || s.bloque === 4).length;
-  const totalValid = active.filter(s => !s.sl?.too_wide).length;
-
-  const emptyActiveWithExpired = active.length === 0 && expired.length > 0;
-
-  return (
-    <div className="radar-view">
-      <RadarSemaforo
-        setups={active}
-        marketClosed={marketClosed}
-        killZone={activeKillZone}
-      />
-      <div className="radar-intro">
-        <div>
-          <div className="radar-intro-title">📡 Radar de setups · reversiones en S/R</div>
-          <div className="radar-intro-sub">
-            Pin bar / envolventes sobre soporte o resistencia, cruzado con el sesgo macro del escáner.
-            Un conflicto marca el setup con <b>NO CUMPLE MTF LOCK</b> (no reclasifica a trampa).
-          </div>
-        </div>
-        <div className="radar-intro-meta">
-          <div className="radar-meta-kpis">
-            <span className="radar-kpi">{totalValid} activos</span>
-            <span className="radar-kpi radar-kpi-strong">{strongN} STRONG</span>
-            <span className="radar-kpi radar-kpi-trap">{trapN} trampas</span>
-          </div>
-          {lastUpdate && (
-            <div className="radar-meta-time">
-              Actualizado: {lastUpdate.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {marketClosed && (
-        <div className="radar-market-closed">
-          <span className="radar-market-closed-ico">🌙</span>
-          <div>
-            <div className="radar-market-closed-title">Mercado cerrado</div>
-            <div className="radar-market-closed-sub">
-              {data?.last_candle_ts ? (
-                <>Última vela M15: <b>{formatCandleTime(data.last_candle_ts)}</b></>
-              ) : null}
-              {data?.data_age_minutes != null && (
-                <> · hace {formatDataAge(data.data_age_minutes)}</>
-              )}
-              {" · los setups detectados no son accionables hasta que reabra el feed."}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="radar-controls">
-        <button
-          className={`tab block-info-btn ${showLegend ? "active" : ""}`}
-          onClick={() => setShowLegend(s => !s)}
-          title="¿Qué son los bloques?"
-        >ⓘ Bloques</button>
-        <button className="refresh" onClick={load}>↻ Refrescar ahora</button>
-      </div>
-
-      {showLegend && (
-        <div className="radar-legend">
-          <div className="radar-legend-row"><span className="radar-legend-badge radar-b1">B1</span> Compra válida — precio en soporte + rechazo alcista</div>
-          <div className="radar-legend-row"><span className="radar-legend-badge radar-b1-strong">B1 ★</span> Compra STRONG — B1 + divergencia alcista</div>
-          <div className="radar-legend-row"><span className="radar-legend-badge radar-b3">B3</span> Venta válida — precio en resistencia + rechazo bajista</div>
-          <div className="radar-legend-row"><span className="radar-legend-badge radar-b3-strong">B3 ★</span> Venta STRONG — B3 + divergencia bajista</div>
-          <div className="radar-legend-row"><span className="radar-legend-badge radar-trap">B2/B4</span> Trampas — no operar, esperar ruptura confirmada</div>
-        </div>
-      )}
-
-      {loading && !data ? (
-        <div className="zone-empty">Analizando mercados… (primera llamada puede tardar 5-10s)</div>
-      ) : error ? (
-        <div className="zone-empty" style={{ color: "#f87171" }}>
-          No se pudo cargar el radar: {error}
-        </div>
-      ) : marketClosed && active.length === 0 ? (
-        <div className="zone-empty">
-          🌙 Sin setups accionables — mercado cerrado.
-          {expired.length > 0 && (
-            <>
-              {" "}Hay {expired.length} setup{expired.length === 1 ? "" : "s"} del último feed activo abajo.
-              <button
-                className="radar-inline-link"
-                onClick={() => setShowExpired(true)}
-              >Ver últimos ↓</button>
-            </>
-          )}
-        </div>
-      ) : emptyActiveWithExpired ? (
-        <div className="zone-empty">
-          No hay setups activos · {expired.length} setup{expired.length === 1 ? "" : "s"} expirado{expired.length === 1 ? "" : "s"} reciente{expired.length === 1 ? "" : "s"}.
-          <button
-            className="radar-inline-link"
-            onClick={() => setShowExpired(true)}
-          >Ver expirados ↓</button>
-        </div>
-      ) : active.length === 0 ? (
-        <div className="zone-empty">
-          No hay setups activos.
-          {" "}El radar busca pin bars / envolventes en soporte o resistencia.
-        </div>
-      ) : (
-        <div className="radar-grid">
-          {active.map(s => <RadarCard key={s.symbol} setup={s} />)}
-        </div>
-      )}
-
-      {expired.length > 0 && (
-        <section className="radar-expired-section">
-          <button
-            className="radar-expired-toggle"
-            onClick={() => setShowExpired(v => !v)}
-            aria-expanded={showExpired}
-          >
-            <span>{showExpired ? "▾" : "▸"}</span>
-            Setups expirados ({expired.length})
-            <span className="radar-expired-hint">· velas ya antiguas, no accionables</span>
-          </button>
-          {showExpired && (
-            <div className="radar-grid">
-              {expired.map(s => <RadarCard key={`exp-${s.symbol}`} setup={s} />)}
-            </div>
-          )}
-        </section>
-      )}
-    </div>
-  );
-}
 
 function DailyBriefPanel({ brief }: { brief: DailyBrief }) {
   return (
@@ -1717,7 +758,6 @@ export default function Home() {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [filter, setFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
-  const [journal, setJournal] = useState<JournalDraft | null>(null);
   const [newsWarnings, setNewsWarnings] = useState<NewsWarning[]>([]);
   const [openSignals, setOpenSignals] = useState<Signal[]>([]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -1728,6 +768,82 @@ export default function Home() {
   const newsAlertedKeysRef = useRef<Set<string>>(new Set());
   const [nyPreopenModalOpen, setNyPreopenModalOpen] = useState(false);
   const nyTick = useClockTick(1000);
+  const [backendDown, setBackendDown] = useState(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  // Alertas de señal nueva (ENTER/WAIT): sonido + Notification, como en Zonas S/R.
+  const [signalAlertsOn, setSignalAlertsOn] = useState(false);
+  const signalAlertsOnRef = useRef(false);
+  const signalAudioRef = useRef<AudioContext | null>(null);
+  const seenSignalIdsRef = useRef<Set<number> | null>(null);
+
+  useEffect(() => {
+    try {
+      const on = localStorage.getItem(SIGNAL_ALERTS_KEY) === "1";
+      setSignalAlertsOn(on);
+      signalAlertsOnRef.current = on;
+    } catch { /* ignore */ }
+  }, []);
+
+  // Si quedaron activas de otra sesión, el AudioContext necesita un gesto:
+  // se desbloquea en el primer clic de la página.
+  useEffect(() => {
+    if (!signalAlertsOn || signalAudioRef.current) return;
+    const unlock = () => {
+      if (!signalAudioRef.current) {
+        signalAudioRef.current = createAudioContext();
+        signalAudioRef.current?.resume().catch(() => {});
+      }
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, [signalAlertsOn]);
+
+  const toggleSignalAlerts = useCallback(() => {
+    setSignalAlertsOn(prev => {
+      const next = !prev;
+      signalAlertsOnRef.current = next;
+      try { localStorage.setItem(SIGNAL_ALERTS_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      if (next) {
+        // Activación = gesto de usuario: desbloquea audio y pide permiso de notificación.
+        if (!signalAudioRef.current) signalAudioRef.current = createAudioContext();
+        signalAudioRef.current?.resume().catch(() => {});
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission().catch(() => {});
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const alertNewSignals = useCallback((all: Signal[]) => {
+    const ids = new Set(all.map(s => s.id));
+    const prev = seenSignalIdsRef.current;
+    seenSignalIdsRef.current = ids;
+    if (prev === null) return; // baseline al montar, sin alertar
+    if (!signalAlertsOnRef.current) return;
+    for (const s of all) {
+      if (prev.has(s.id)) continue;
+      const d = s.response.decision;
+      if (d !== "ENTER" && d !== "WAIT") continue;
+      const side: "LONG" | "SHORT" =
+        (s.signal.signal === "LONG" || s.signal.signal === "BUY") ? "LONG" : "SHORT";
+      const ctx = signalAudioRef.current;
+      if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, side); }
+      const tp = s.response.take_profit?.length
+        ? s.response.take_profit[s.response.take_profit.length - 1]
+        : null;
+      sendNotification(
+        `${d === "ENTER" ? "🚨 ENTER" : "⏳ WAIT"} ${side} · ${s.signal.symbol}`,
+        [
+          `Precio ${s.signal.price}`,
+          s.response.stop_loss != null ? `SL ${s.response.stop_loss}` : null,
+          tp != null ? `TP ${tp}` : null,
+          s.response.plan ? `Plan ${s.response.plan.trigger_type}` : null,
+        ].filter(Boolean).join("  |  "),
+        `signal-${s.id}`,
+      );
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -1816,48 +932,86 @@ export default function Home() {
 
   const totalPages = Math.max(1, Math.ceil(totalSignals / PAGE_SIZE));
 
-  const load = useCallback(async () => {
+  const lastSlowFetchRef = useRef(0);
+
+  const load = useCallback(async (force = false) => {
+    // Pestaña oculta: no quemar red ni re-renders (se reanuda al volver).
+    if (!force && typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    // Un solo load en vuelo: con cold start de Render (30-50s) el interval de
+    // 5s apilaba requests que podían resolver fuera de orden.
+    if (loadAbortRef.current) loadAbortRef.current.abort();
+    const ctrl = new AbortController();
+    loadAbortRef.current = ctrl;
+    const get = async (url: string) => {
+      const r = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    };
     try {
       const offset = (page - 1) * PAGE_SIZE;
       const symParam = filter === "ALL" ? "" : `&symbol=${filter}`;
-      const signalsUrl = `${API}/signals?limit=${PAGE_SIZE}&offset=${offset}${symParam}`;
-      const [sR, stR, syR, nR, oR] = await Promise.all([
-        fetch(signalsUrl, { cache: "no-store" }),
-        fetch(`${API}/stats`, { cache: "no-store" }),
-        fetch(`${API}/symbols`, { cache: "no-store" }),
-        fetch(`${API}/news/warnings`, { cache: "no-store" }),
-        fetch(`${API}/signals?limit=50`, { cache: "no-store" }),
+      // /stats y /symbols cambian lento → cada ~60s (o con force), no cada 5s.
+      const includeSlow = force || Date.now() - lastSlowFetchRef.current > 55_000;
+      const slow = includeSlow
+        ? Promise.all([get(`${API}/stats`), get(`${API}/symbols`)])
+        : null;
+      const [signalsData, nj, oj] = await Promise.all([
+        get(`${API}/signals?limit=${PAGE_SIZE}&offset=${offset}${symParam}`),
+        get(`${API}/news/warnings`),
+        get(`${API}/signals?limit=50`),
       ]);
-      const signalsData = await sR.json();
       setItems(signalsData.items || []);
       setTotalSignals(signalsData.total || 0);
-      setStats(await stR.json());
-      setSymbols(mergeSymbols(await syR.json()));
-      const nj = await nR.json();
       setNewsWarnings(nj.warnings || []);
-      const oj = await oR.json();
       const allItems: Signal[] = oj.items || [];
       setOpenSignals(allItems.filter(s => s.result == null));
-    } catch {
-      setItems([]);
-      setTotalSignals(0);
-      setStats(null);
-      setNewsWarnings([]);
-      setOpenSignals([]);
+      alertNewSignals(allItems);
+      if (slow) {
+        const [statsData, symbolsData] = await slow;
+        setStats(statsData);
+        setSymbols(mergeSymbols(symbolsData));
+        lastSlowFetchRef.current = Date.now();
+      }
+      setBackendDown(false);
+    } catch (e) {
+      if ((e as { name?: string })?.name === "AbortError") return;
+      // Conserva el último estado bueno — un blip de red no debe vaciar el
+      // dashboard ni mostrar "Sin operaciones todavía".
+      setBackendDown(true);
     } finally {
       setLoading(false);
     }
-  }, [filter, page]);
+  }, [filter, page, alertNewSignals]);
 
   useEffect(() => {
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
+    load(true);
+    const id = setInterval(() => load(), 5000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") load(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, [load]);
 
-  const openJournal = (id: number, result: "WIN" | "LOSS" | "BE") => {
-    setJournal({ signalId: id, result, taken: null, respected_plan: null, closed_early: null, emotion: null });
-  };
+  // SSE: una señal nueva dispara load inmediato (latencia ~2s en vez de 0-5s).
+  // Si la conexión cae (cold start, proxy), EventSource reconecta solo y el
+  // polling de 5s sigue siendo la red de seguridad.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`${API}/signals/stream`);
+    } catch {
+      return;
+    }
+    const onSignal = () => loadRef.current(true);
+    es.addEventListener("signal", onSignal);
+    return () => { es?.close(); };
+  }, []);
 
   const deleteSignal = (id: number) => {
     setConfirmDialog({
@@ -1888,32 +1042,17 @@ export default function Home() {
     });
   };
 
-  const submitJournal = async () => {
-    if (!journal || !journal.taken) return;
-    const body: Record<string, unknown> = { result: journal.result, taken: journal.taken };
-    if (journal.taken === "yes") {
-      body.journal_respected_plan = journal.respected_plan;
-      body.journal_closed_early = journal.closed_early;
-      body.journal_emotion = journal.emotion;
-    }
-    await fetch(`${API}/signals/${journal.signalId}/result`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    setJournal(null);
-    load();
-  };
-
   return (
     <AppShell
       topbar={
         <Topbar
           view={view}
           onViewChange={setView}
-          onRefresh={load}
+          onRefresh={() => load(true)}
           theme={theme}
           onThemeToggle={toggleTheme}
+          signalAlertsOn={signalAlertsOn}
+          onToggleSignalAlerts={toggleSignalAlerts}
         />
       }
       sidebar={
@@ -1945,6 +1084,23 @@ export default function Home() {
       }
       main={
         <div className="legacy-main-pad">
+      {view !== "stocks" && <VerdictStrip />}
+      {backendDown && (
+        <div
+          role="alert"
+          style={{
+            padding: "8px 14px",
+            marginBottom: 10,
+            borderRadius: 8,
+            border: "1px solid rgba(245, 158, 11, 0.45)",
+            background: "rgba(245, 158, 11, 0.10)",
+            color: "var(--warn, #fb923c)",
+            fontSize: 13,
+          }}
+        >
+          ⚠ El backend no responde — mostrando los últimos datos conocidos (reintentando cada 5s…)
+        </div>
+      )}
       {view !== "stocks" && view !== "correlations" && view !== "playbook" && view !== "sr" && (
         <NewsAlertBar
           warnings={newsWarnings}
@@ -2068,6 +1224,8 @@ export default function Home() {
               <th>Símbolo</th>
               <th>Lado</th>
               <th className="right">Precio</th>
+              <th className="right">SL</th>
+              <th className="right">TP</th>
               <th className="right">Conf</th>
               <th>Calidad</th>
               <th>MTF</th>
@@ -2096,12 +1254,20 @@ export default function Home() {
                 <td className="num td-symbol"><strong>{it.signal.symbol}</strong></td>
                 <td><span className={`side-pill ${sideClassName}`}>{it.signal.signal}</span></td>
                 <td className="right num">{it.signal.price}</td>
+                <td className="right num" style={{ color: "var(--sell, #ef4444)" }}>
+                  {it.response.stop_loss ?? "—"}
+                </td>
+                <td className="right num" style={{ color: "var(--buy, #22c55e)" }}>
+                  {it.response.take_profit?.length
+                    ? Array.from(new Set(it.response.take_profit)).join(" / ")
+                    : "—"}
+                </td>
                 <td className="right num">{it.signal.conf}/19</td>
                 <td>{it.signal.quality}</td>
                 <td>{it.signal.mtf}</td>
                 <td>
-                  <span className={`zona-chip zona-${zonaClass(it.signal.zona)}`} title={zonaTooltip(it.signal.zona, it.signal.signal)}>
-                    {it.signal.zona}
+                  <span className={`zona-chip zona-${zonaClass(it.signal.zona ?? "")}`} title={zonaTooltip(it.signal.zona ?? "", it.signal.signal)}>
+                    {it.signal.zona ?? "—"}
                   </span>
                 </td>
                 <td><span className={`badge ${it.response.decision}`}>{it.response.decision}</span></td>
@@ -2114,12 +1280,17 @@ export default function Home() {
                         Zona espera: <b>{it.response.plan.wait_zone[0]} – {it.response.plan.wait_zone[1]}</b>
                         {" · "}Trigger: <b className="trigger">{it.response.plan.trigger_price}</b>
                         {" · "}Cancel: <b className="invalid">{it.response.plan.invalidation}</b>
+                        {it.response.plan.expires_after != null && it.response.plan.expires_after > 0 && (
+                          <> · Vigencia: <b>{it.response.plan.expires_after} velas M5</b></>
+                        )}
                       </div>
                       <div className="plan-text">{it.response.plan.instructions}</div>
                     </div>
                   )}
                 </td>
                 <td>
+                  {/* El flujo W/L/BE + journal fue retirado de la UI (el usuario
+                      ya no marca resultados). Los badges históricos se conservan. */}
                   {it.result ? (
                     <div className="result-cell">
                       <span className={`badge ${it.result}`}>
@@ -2129,11 +1300,7 @@ export default function Home() {
                       {it.taken === "no" && <span className="taken-badge rated">CAL</span>}
                     </div>
                   ) : (
-                    <div className="actions">
-                      <button className="btn-win"  onClick={() => openJournal(it.id, "WIN")}>W</button>
-                      <button className="btn-loss" onClick={() => openJournal(it.id, "LOSS")}>L</button>
-                      <button className="btn-be"   onClick={() => openJournal(it.id, "BE")}>BE</button>
-                    </div>
+                    <span className="num" style={{ opacity: 0.4 }}>—</span>
                   )}
                 </td>
                 <td>
@@ -2214,15 +1381,6 @@ export default function Home() {
         </div>
       )}
       </>
-      )}
-
-      {journal && (
-        <JournalModal
-          draft={journal}
-          onChange={setJournal}
-          onSave={submitJournal}
-          onClose={() => setJournal(null)}
-        />
       )}
 
       {confirmDialog && (
@@ -2544,118 +1702,6 @@ function NYPreOpenModal({ onClose }: { onClose: () => void }) {
           >
             Entendido
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function JournalModal({
-  draft, onChange, onSave, onClose,
-}: {
-  draft: JournalDraft;
-  onChange: (d: JournalDraft) => void;
-  onSave: () => void;
-  onClose: () => void;
-}) {
-  const emotions: { key: Emotion; label: string; color: string }[] = [
-    { key: "confianza", label: "Confianza", color: "#4ade80" },
-    { key: "miedo",     label: "Miedo",     color: "#60a5fa" },
-    { key: "fomo",      label: "FOMO",      color: "#facc15" },
-    { key: "venganza",  label: "Venganza",  color: "#f87171" },
-  ];
-
-  const isTaken = draft.taken === "yes";
-  const canSave =
-    draft.taken === "no" ||
-    (isTaken && draft.respected_plan && draft.closed_early && draft.emotion);
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <span className={`badge ${draft.result}`}>{draft.result}</span>
-            <span className="modal-title">
-              {draft.taken === null
-                ? "¿Operaste esta señal?"
-                : isTaken
-                ? "Post-mortem del trade"
-                : "Calificando señal (no operada)"}
-            </span>
-          </div>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
-        <div className="modal-body">
-          <div className="modal-q">
-            <label>¿Operaste esta señal?</label>
-            <div className="modal-options">
-              <button
-                className={`modal-opt ${draft.taken === "yes" ? "selected good" : ""}`}
-                onClick={() => onChange({ ...draft, taken: "yes" })}
-              >Sí, la operé</button>
-              <button
-                className={`modal-opt ${draft.taken === "no" ? "selected accent" : ""}`}
-                onClick={() => onChange({ ...draft, taken: "no", respected_plan: null, closed_early: null, emotion: null })}
-              >No, solo calificar</button>
-            </div>
-            {draft.taken === "no" && (
-              <div className="modal-hint">
-                Calificando: resultado hipotético del setup sin entrar. Sirve para medir el edge del sistema.
-              </div>
-            )}
-          </div>
-
-          {isTaken && (
-            <>
-              <div className="modal-q">
-                <label>¿Respetaste el plan de entrada?</label>
-                <div className="modal-options">
-                  <button
-                    className={`modal-opt ${draft.respected_plan === "yes" ? "selected good" : ""}`}
-                    onClick={() => onChange({ ...draft, respected_plan: "yes" })}
-                  >Sí</button>
-                  <button
-                    className={`modal-opt ${draft.respected_plan === "no" ? "selected bad" : ""}`}
-                    onClick={() => onChange({ ...draft, respected_plan: "no" })}
-                  >No</button>
-                </div>
-              </div>
-
-              <div className="modal-q">
-                <label>¿Cerraste antes del TP/SL?</label>
-                <div className="modal-options">
-                  <button
-                    className={`modal-opt ${draft.closed_early === "no" ? "selected good" : ""}`}
-                    onClick={() => onChange({ ...draft, closed_early: "no" })}
-                  >No, dejé correr</button>
-                  <button
-                    className={`modal-opt ${draft.closed_early === "yes" ? "selected bad" : ""}`}
-                    onClick={() => onChange({ ...draft, closed_early: "yes" })}
-                  >Sí, cerré antes</button>
-                </div>
-              </div>
-
-              <div className="modal-q">
-                <label>Emoción dominante</label>
-                <div className="modal-options">
-                  {emotions.map((e) => (
-                    <button
-                      key={e.key}
-                      className={`modal-opt ${draft.emotion === e.key ? "selected" : ""}`}
-                      style={draft.emotion === e.key ? { borderColor: e.color, color: e.color } : undefined}
-                      onClick={() => onChange({ ...draft, emotion: e.key })}
-                    >{e.label}</button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="modal-foot">
-          <button className="modal-save" onClick={onSave} disabled={!canSave}>Guardar</button>
         </div>
       </div>
     </div>

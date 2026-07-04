@@ -119,7 +119,9 @@ RADAR_REJECTION_WICK_RATIO = 2.0        # wick ≥ 2× body
 RADAR_REJECTION_WICK_PCT = 0.60         # wick ≥ 60% del rango
 
 # Detección de divergencia RSI
-RADAR_DIVERGENCE_LOOKBACK = 10
+# 20 velas M15 = 5h de contexto — con 10 el detector pivot-a-pivot rara vez
+# encuentra dos pivots confirmados dentro de la ventana.
+RADAR_DIVERGENCE_LOOKBACK = 20
 
 # Posición en rango para clasificación
 RADAR_RANGE_SUPPORT_ZONE = 0.35         # < 35% = zona de soporte
@@ -129,9 +131,12 @@ RADAR_RANGE_RESISTANCE_ZONE = 0.65      # > 65% = zona de resistencia
 RADAR_RANGE_EXTREME_LOW = 0.15          # < 15% = extremo bajo
 RADAR_RANGE_EXTREME_HIGH = 0.85         # > 85% = extremo alto
 
-# Edad de vela para considerar mercado cerrado (fin de semana, caída de feed)
+# Edad de vela para considerar mercado cerrado (fin de semana, caída de feed).
+# 45 min = intervalo M15 + TTL de cache 15 min + margen: desde que se excluye
+# la vela en formación, la última vela CERRADA puede tener hasta 30 min de
+# edad legítima con mercado abierto.
 RADAR_CANDLE_INTERVAL_MIN = 15
-RADAR_MARKET_STALE_THRESHOLD_MIN = 30
+RADAR_MARKET_STALE_THRESHOLD_MIN = 45
 
 # RRR mínimo para que un setup sea operable
 RADAR_MIN_RRR = 2.0
@@ -178,6 +183,10 @@ SL_MAX_PIPS = {
     "default": 20,
 }
 
+# Techo del wick ratio (mecha/cuerpo) — evita que dojis con cuerpo de 1 tick
+# produzcan ratios absurdos que pasan cualquier umbral de rechazo.
+WICK_RATIO_CAP = 5.0
+
 # Rango mínimo entre soporte y resistencia (% del precio)
 MIN_RANGE_PCT = {
     "XAUUSD": 0.15,
@@ -188,6 +197,11 @@ MIN_RANGE_PCT = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Zonas S/R — detector de niveles con bias M30 (zones.py)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Velas M15 que pide zones: 600 → ~300 M30, suficiente warm-up para que la
+# EMA100 del bias converja (con 200 quedaba en su seed SMA sin smoothing).
+# Mismo coste TD (1 crédito/request).
+ZONES_OUTPUTSIZE = 600
 
 # Swing window: N velas a cada lado para considerar un pivot
 ZONES_PIVOT_WINDOW = 3

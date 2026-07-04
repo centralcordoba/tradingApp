@@ -4,56 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API } from "@/lib/api";
 import type { ZonesResponse, ZonesPairResponse, ZoneLevel, ZoneMarco, MarcoGate } from "@/lib/types";
 import { CrossBadge } from "@/components/cross/CrossBadge";
+import { playChime, sendNotification, createAudioContext } from "@/lib/alerts";
 import "./ZonasSRView.css";
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+const PARAMS_DEBOUNCE_MS = 600;
 const ALERTS_ON_KEY = "tradingapp:zones_alerts_on";
 
 // ─── Alertas de señal FUERTE (estilo TradingView) ──────────────────────────
 // Solo se disparan cuando un par pasa a OPERAR + strength "fuerte". El audio se
 // desbloquea en el clic del botón (los navegadores bloquean el AudioContext sin
 // un gesto de usuario — ese era el motivo de que la versión anterior no sonara).
-
-function playStrongSound(ctx: AudioContext, side: "LONG" | "SHORT") {
-  try {
-    const note = (freq: number, start: number, dur = 0.24) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0, start);
-      gain.gain.linearRampToValueAtTime(0.28, start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-      osc.start(start);
-      osc.stop(start + dur + 0.05);
-    };
-    const t = ctx.currentTime;
-    // Motif de 3 notas (ascendente=compra / descendente=venta) repetido para que
-    // la alerta dure ~3 segundos.
-    const motif = side === "LONG"
-      ? [523.25, 783.99, 1046.5]   // C5 → G5 → C6
-      : [1046.5, 783.99, 523.25];  // C6 → G5 → C5
-    const REPEATS = 3;
-    const NOTE_GAP = 0.26;    // separación entre notas dentro del motif
-    const MOTIF_GAP = 1.0;    // separación entre repeticiones
-    for (let r = 0; r < REPEATS; r++) {
-      const base = t + r * MOTIF_GAP;
-      motif.forEach((freq, i) => {
-        // La última nota se sostiene para cerrar en ~3s.
-        const isLast = r === REPEATS - 1 && i === motif.length - 1;
-        note(freq, base + i * NOTE_GAP, isLast ? 0.55 : 0.24);
-      });
-    }
-  } catch {
-    // AudioContext suspendido o no disponible
-  }
-}
+// Los helpers de sonido/notificación viven en lib/alerts.ts (compartidos con
+// las alertas de señal del Pine en el Dashboard).
 
 function sendStrongNotification(pair: string, marco: ZoneMarco) {
-  if (typeof window === "undefined" || !("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
   const isLong = marco.side === "LONG";
   const title = `${isLong ? "📈 FUERTE COMPRA" : "📉 FUERTE VENTA"} · ${pair}`;
   const lines: string[] = [];
@@ -61,15 +26,7 @@ function sendStrongNotification(pair: string, marco: ZoneMarco) {
   if (marco.sl_price != null)    lines.push(`SL ${marco.sl_price.toFixed(5)} (${marco.risk_pips}p)`);
   if (marco.tp_price != null)    lines.push(`TP ${marco.tp_price.toFixed(5)} (${marco.reward_pips}p)`);
   if (marco.rrr != null)         lines.push(`RRR ${marco.rrr.toFixed(2)}:1`);
-  try {
-    new Notification(title, {
-      body: lines.join("  |  "),
-      tag: `marco-${pair}`,   // reemplaza notif previa del mismo par
-      requireInteraction: true,  // queda en el Centro de actividades de Windows hasta cerrarla
-    });
-  } catch {
-    // Silencioso si el navegador no soporta algún campo
-  }
+  sendNotification(title, lines.join("  |  "), `marco-${pair}`);
 }
 
 // Devuelve el lado si el marco es una señal FUERTE accionable, si no null.
@@ -410,6 +367,31 @@ function MarcoCard({ marco }: { marco: ZoneMarco }) {
         </div>
       )}
 
+      {/* Gestión de riesgo (calculada en backend, antes se descartaba) */}
+      {marco.account_check && (
+        marco.account_check.blocked ? (
+          <div className="marco-account marco-account-blocked" role="alert">
+            ⛔ Cuenta bloqueada: {marco.account_check.block_reasons.join(" · ") || "límite de pérdida alcanzado"}
+          </div>
+        ) : hasSetup ? (
+          <div className="marco-account">
+            <span className="marco-account-item">
+              Lote <b className="num">{marco.account_check.lot_size}</b>
+            </span>
+            <span className="marco-account-item">
+              Riesgo <b className="num">${marco.account_check.risk_usd.toFixed(2)}</b>
+            </span>
+            <span className="marco-account-item">
+              Pip <b className="num">${marco.account_check.pip_value.toFixed(2)}</b>
+            </span>
+            <span className="marco-account-item marco-account-loss">
+              Pérdida día <b className="num">${marco.account_check.daily_loss_usd.toFixed(0)}</b>
+              <span className="marco-account-cap num">/{marco.account_check.max_daily_loss_usd.toFixed(0)}</span>
+            </span>
+          </div>
+        ) : null
+      )}
+
       {/* Checklist de gates */}
       <div className="marco-gates">
         {marco.gates.map((g: MarcoGate) => (
@@ -523,6 +505,21 @@ function PairCard({ data }: { data: ZonesPairResponse }) {
             {data.data_age_minutes != null ? Math.round(data.data_age_minutes) : "?"}
           </span>{" "}
           min
+        </div>
+      )}
+
+      {data.asia_range && (
+        <div className="zsr-asia" title="High/low de la sesión asiática (02–09h Madrid) — la liquidez que London Open suele barrer">
+          <span className="zsr-asia-label">Rango Asia</span>
+          <span className="zsr-asia-item num">
+            H {data.asia_range.high.toFixed(5)}
+            {data.asia_range.swept_high && <span className="zsr-asia-swept"> · barrido ↑</span>}
+          </span>
+          <span className="zsr-asia-item num">
+            L {data.asia_range.low.toFixed(5)}
+            {data.asia_range.swept_low && <span className="zsr-asia-swept"> · barrido ↓</span>}
+          </span>
+          <span className="zsr-asia-item num">{data.asia_range.range_pips} pips</span>
         </div>
       )}
 
@@ -715,6 +712,9 @@ export function ZonasSRView() {
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [alertsOn, setAlertsOn] = useState<boolean>(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Ref (no state) para que el interval lea el valor actual y no el del
+  // closure con que se montó — antes la pausa por mercado cerrado no funcionaba.
+  const marketClosedRef = useRef(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   // Último lado FUERTE por par para detectar transiciones a OPERAR fuerte.
   const prevStrongRef = useRef<Map<string, "LONG" | "SHORT" | null>>(new Map());
@@ -736,13 +736,8 @@ export function ZonasSRView() {
   // Activar alertas — DEBE venir de un clic (gesto) para desbloquear audio +
   // permiso de notificación. Llamarlo en useEffect haría que el navegador lo ignore.
   const enableAlerts = useCallback(() => {
-    try {
-      const AC = window.AudioContext ?? (window as any).webkitAudioContext;
-      if (AC) {
-        if (!audioCtxRef.current) audioCtxRef.current = new AC();
-        audioCtxRef.current.resume().catch(() => {});
-      }
-    } catch { /* audio no disponible */ }
+    if (!audioCtxRef.current) audioCtxRef.current = createAudioContext();
+    audioCtxRef.current?.resume().catch(() => {});
     if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
       Notification.requestPermission().catch(() => {});
     }
@@ -765,13 +760,10 @@ export function ZonasSRView() {
   useEffect(() => {
     if (!alertsOn || audioCtxRef.current) return;
     const unlock = () => {
-      try {
-        const AC = window.AudioContext ?? (window as any).webkitAudioContext;
-        if (AC && !audioCtxRef.current) {
-          audioCtxRef.current = new AC();
-          audioCtxRef.current.resume().catch(() => {});
-        }
-      } catch { /* ignore */ }
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = createAudioContext();
+        audioCtxRef.current?.resume().catch(() => {});
+      }
     };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
@@ -791,7 +783,7 @@ export function ZonasSRView() {
       // Nueva señal fuerte (aparece o cambia de dirección)
       if (cur && cur !== last) {
         const ctx = audioCtxRef.current;
-        if (ctx) { ctx.resume().catch(() => {}); playStrongSound(ctx, cur); }
+        if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, cur); }
         if (item.marco) sendStrongNotification(item.pair, item.marco);
       }
     }
@@ -808,6 +800,7 @@ export function ZonasSRView() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: ZonesResponse = await res.json();
       setData(json);
+      marketClosedRef.current = !!json.market_closed;
       setLastFetchedAt(new Date().toISOString());
     } catch (e: any) {
       if (e?.name === "AbortError") return;
@@ -818,13 +811,14 @@ export function ZonasSRView() {
   }, [params]);
 
   useEffect(() => {
-    fetchZones();
+    // Debounce: cada cambio de parámetros recrea fetchZones; sin esto, cada
+    // tick del slider dispara un fetch a Twelve Data sin caché (generador de 429).
+    const timeout = setTimeout(fetchZones, PARAMS_DEBOUNCE_MS);
     const interval = setInterval(() => {
-      if (data?.market_closed) return; // pausa polling con mercado cerrado
+      if (marketClosedRef.current) return; // pausa polling con mercado cerrado
       fetchZones();
     }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { clearTimeout(timeout); clearInterval(interval); };
   }, [fetchZones]);
 
   return (

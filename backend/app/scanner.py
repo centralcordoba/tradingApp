@@ -10,15 +10,14 @@ Requiere env var TWELVEDATA_API_KEY.
 """
 from __future__ import annotations
 
-import json
 import os
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from . import storage, td_client
 from .constants import (
     CACHE_TTL_OHLC_SCANNER,
     HTTP_TIMEOUT_DEFAULT,
@@ -72,7 +71,9 @@ def _td_symbol(pair: str) -> str:
 CACHE_TTL_SECONDS = CACHE_TTL_OHLC_SCANNER
 _cache: dict[str, tuple[float, dict]] = {}          # scored cards (scan_pairs)
 _ohlc_cache: dict[str, tuple[float, dict]] = {}     # raw OHLC (compartido con radar)
-_last_error: str = ""
+# Errores por par: un fetch exitoso limpia el error de SU par sin pisar los
+# de otros (antes era un string global que quedaba stale para siempre).
+_last_errors: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -80,11 +81,13 @@ _last_error: str = ""
 # ---------------------------------------------------------------------------
 
 def _fetch_chart(pair: str, interval: str = SCANNER_INTERVAL, outputsize: int = SCANNER_OUTPUTSIZE) -> Optional[dict]:
-    """Descarga OHLC de Twelve Data. None si falla. Cachea el crudo 5 min
-    para que scanner y radar compartan la misma respuesta sin duplicar fetches."""
-    global _last_error
+    """Descarga OHLC de Twelve Data vía td_client (rate limit global 8/min +
+    single-flight + contador de créditos). None si falla.
+
+    Orden de resolución: cache memoria → cache DB (sobrevive al spin-down de
+    Render — el cold start ya no cuesta un burst de fetches) → fetch real."""
     if not TWELVEDATA_API_KEY:
-        _last_error = "TWELVEDATA_API_KEY no configurada"
+        _last_errors["_config"] = "TWELVEDATA_API_KEY no configurada"
         return None
 
     cache_key = f"{pair}:{interval}:{outputsize}"
@@ -93,43 +96,78 @@ def _fetch_chart(pair: str, interval: str = SCANNER_INTERVAL, outputsize: int = 
     if entry and (now - entry[0]) < CACHE_TTL_SECONDS:
         return entry[1]
 
-    params = {
-        "symbol": _td_symbol(pair),
-        "interval": interval,
-        "outputsize": str(outputsize),
-        "order": "ASC",  # oldest first, los indicadores calculan sobre series cronológicas
-        "apikey": TWELVEDATA_API_KEY,
-    }
-    url = f"{TWELVEDATA_BASE}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (AI Trading Assistant Scanner)",
-    })
+    # Single-flight: si otro thread ya está fetcheando esta key, esperamos su
+    # resultado en vez de duplicar el fetch (double-checked tras el lock).
+    with td_client.key_lock(cache_key):
+        now = time.time()
+        entry = _ohlc_cache.get(cache_key)
+        if entry and (now - entry[0]) < CACHE_TTL_SECONDS:
+            return entry[1]
+
+        db_row = storage.get_ohlc_cache(cache_key)
+        if db_row and (now - db_row[0]) < CACHE_TTL_SECONDS:
+            _ohlc_cache[cache_key] = (db_row[0], db_row[1])
+            return db_row[1]
+
+        params = {
+            "symbol": _td_symbol(pair),
+            "interval": interval,
+            "outputsize": str(outputsize),
+            "order": "ASC",  # oldest first, los indicadores calculan sobre series cronológicas
+            "apikey": TWELVEDATA_API_KEY,
+        }
+        url = f"{TWELVEDATA_BASE}?{urllib.parse.urlencode(params)}"
+        data, err = td_client.get_json(url)
+        if err is not None:
+            _last_errors[pair] = f"{pair}: {err}"
+            return None
+        if isinstance(data, dict) and data.get("status") == "error":
+            _last_errors[pair] = f"{pair}: {data.get('message', 'error')}"
+            return None
+
+        _last_errors.pop(pair, None)
+        _ohlc_cache[cache_key] = (now, data)
+        storage.save_ohlc_cache(cache_key, now, data)
+        return data
+
+
+def _interval_minutes(interval: Optional[str]) -> Optional[int]:
+    if not interval:
+        return None
+    s = str(interval).strip().lower()
     try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_DEFAULT) as r:
-            data = json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8", errors="replace")[:250]
-        except Exception:
-            pass
-        _last_error = f"{pair}: HTTP {e.code} — {body or e.reason}"
+        if s.endswith("min"):
+            return int(s[:-3])
+        if s.endswith("h"):
+            return int(s[:-1]) * 60
+    except ValueError:
         return None
-    except Exception as e:
-        _last_error = f"{pair}: {type(e).__name__}: {e}"
-        return None
+    if s in ("1day", "day", "1d"):
+        return 1440
+    return None
 
-    if isinstance(data, dict) and data.get("status") == "error":
-        _last_error = f"{pair}: {data.get('message', 'error')}"
-        return None
 
-    _ohlc_cache[cache_key] = (now, data)
-    return data
+def _parse_ts_utc(raw_ts: Optional[str]) -> Optional[datetime]:
+    if not raw_ts:
+        return None
+    s = str(raw_ts)
+    try:
+        if "T" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_ohlc(raw: dict) -> Optional[dict]:
-    """Extrae listas opens/closes/highs/lows/timestamps del formato Twelve Data."""
+    """Extrae listas opens/closes/highs/lows/timestamps del formato Twelve Data.
+
+    Excluye la vela en formación (su close/high/low cambian intrabar y repintan
+    EMA/RSI/ATR/side): solo velas cerradas alimentan los indicadores."""
     values = raw.get("values") if isinstance(raw, dict) else None
     if not values:
         return None
@@ -158,6 +196,12 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
         out_h.append(h)
         out_l.append(l)
 
+    interval_min = _interval_minutes((raw.get("meta") or {}).get("interval")) if isinstance(raw, dict) else None
+    if interval_min and out_ts:
+        opened = _parse_ts_utc(out_ts[-1])
+        if opened is not None and opened + timedelta(minutes=interval_min) > datetime.now(timezone.utc):
+            out_ts.pop(); out_o.pop(); out_c.pop(); out_h.pop(); out_l.pop()
+
     if len(out_c) < SCANNER_MIN_CANDLES:
         return None
 
@@ -165,58 +209,11 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Indicadores
+# Indicadores — implementación única en indicators.py. Los aliases conservan
+# los nombres que zones/radar ya consumen (scanner._atr, scanner._ema...).
 # ---------------------------------------------------------------------------
 
-def _ema(values: list[float], period: int) -> list[float]:
-    if len(values) < period:
-        return []
-    k = 2 / (period + 1)
-    out = [sum(values[:period]) / period]
-    for v in values[period:]:
-        out.append(v * k + out[-1] * (1 - k))
-    return out
-
-
-def _rsi(values: list[float], period: int = RSI_PERIOD) -> Optional[float]:
-    if len(values) < period + 1:
-        return None
-    gains, losses = 0.0, 0.0
-    for i in range(1, period + 1):
-        diff = values[i] - values[i - 1]
-        if diff >= 0:
-            gains += diff
-        else:
-            losses -= diff
-    avg_gain = gains / period
-    avg_loss = losses / period
-    for i in range(period + 1, len(values)):
-        diff = values[i] - values[i - 1]
-        gain = diff if diff > 0 else 0.0
-        loss = -diff if diff < 0 else 0.0
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-
-def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = ATR_PERIOD) -> Optional[float]:
-    if len(closes) < period + 1:
-        return None
-    trs = []
-    for i in range(1, len(closes)):
-        tr = max(
-            highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i] - closes[i - 1]),
-        )
-        trs.append(tr)
-    atr = sum(trs[:period]) / period
-    for tr in trs[period:]:
-        atr = (atr * (period - 1) + tr) / period
-    return atr
+from .indicators import atr_last as _atr, ema_series as _ema, rsi_last as _rsi  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +261,9 @@ def _detect_structure(closes: list[float], highs: list[float], lows: list[float]
     # Ordenar por índice
     all_swings = sorted([(i, p, "H") for i, p in swing_highs] + [(i, p, "L") for i, p in swing_lows])
 
-    # Extraer últimos 3 swings significativos (evitar duplicados del mismo lado consecutivo)
+    # Extraer swings alternados H/L. Ante dos del mismo tipo consecutivos se
+    # conserva el EXTREMO (mayor high / menor low) — conservar el primero
+    # clasificaba HH reales como LH y viceversa.
     filtered: list[tuple[int, float, str]] = []
     for i, p, k in all_swings:
         if not filtered:
@@ -272,7 +271,9 @@ def _detect_structure(closes: list[float], highs: list[float], lows: list[float]
             continue
         if k != filtered[-1][2]:
             filtered.append((i, p, k))
-    
+        elif (k == "H" and p > filtered[-1][1]) or (k == "L" and p < filtered[-1][1]):
+            filtered[-1] = (i, p, k)
+
     # Comparar últimos dos del mismo tipo
     if len(filtered) < 3:
         return {
@@ -288,12 +289,14 @@ def _detect_structure(closes: list[float], highs: list[float], lows: list[float]
     if len(last_highs) == 2 and len(last_lows) == 2:
         if last_highs[1] > last_highs[0] and last_lows[1] > last_lows[0]:
             return {"last_move": "HH", "description": "Highs más altos + lows más altos — tendencia alcista", "bullish": True}
-        if last_highs[1] > last_highs[0] and last_lows[1] < last_lows[0]:
-            return {"last_move": "HL", "description": "High más alto, low más bajo — posible acumulación", "bullish": True}
         if last_highs[1] < last_highs[0] and last_lows[1] < last_lows[0]:
             return {"last_move": "LL", "description": "Highs más bajos + lows más bajos — tendencia bajista", "bullish": False}
+        # Casos mixtos SIN dirección: antes se etiquetaban HL/LH con bullish
+        # arbitrario e inyectaban ±1 de ruido direccional al bias.
+        if last_highs[1] > last_highs[0] and last_lows[1] < last_lows[0]:
+            return {"last_move": "EXPANSION", "description": "High más alto + low más bajo — expansión de rango sin dirección", "bullish": None}
         if last_highs[1] < last_highs[0] and last_lows[1] > last_lows[0]:
-            return {"last_move": "LH", "description": "High más bajo, low más alto — posible distribución", "bullish": False}
+            return {"last_move": "COMPRESSION", "description": "High más bajo + low más alto — compresión / triángulo sin dirección", "bullish": None}
 
     return {"last_move": "RANGE", "description": "Sin patrón estructural claro", "bullish": None}
 
@@ -720,5 +723,5 @@ def scan_pairs(pairs: Optional[list[str]] = None) -> list[dict]:
 
 
 def last_error() -> str:
-    """Último mensaje de error para diagnóstico (vacío si todo OK)."""
-    return _last_error
+    """Errores vigentes por par para diagnóstico (vacío si todo OK)."""
+    return " | ".join(_last_errors.values())

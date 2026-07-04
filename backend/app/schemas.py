@@ -28,7 +28,9 @@ class TVSignal(BaseModel):
     rsi: float = 50.0
     kz: str = "24H"
     mtf: MTFType = "MIX"
-    zona: ZoneType = "COMPRA"
+    # Sin default direccional: un payload sin zona no debe regalar puntos de
+    # "zona favorable" al score.
+    zona: Optional[ZoneType] = None
     overhead: bool = False
     congestion: bool = False
     # Contexto adicional para el entry planner (opcional, default None)
@@ -39,15 +41,21 @@ class TVSignal(BaseModel):
     swing_low: Optional[float] = None
     high: Optional[float] = None
     low: Optional[float] = None
-    time: Optional[str] = None
+    # Timestamp de cierre de la barra de señal (epoch ms del Pine — llega como
+    # número JSON — o ISO 8601). Lo usa el veto de staleness del decision_engine.
+    time: Optional[str | int | float] = None
+    # Sweep de liquidez detectado por el Pine en la vela de señal
+    sweep_low: bool = False
+    sweep_high: bool = False
 
 
 class EntryPlan(BaseModel):
-    trigger_type: str   # PULLBACK_EMA9 | RETEST | MOMENTUM_CONFIRM | SWEEP_REVERSAL | EXTENDED_SKIP
+    trigger_type: str   # PULLBACK_EMA9 | RETEST | IMMEDIATE | SWEEP_REVERSAL | EXTENDED_SKIP
     wait_zone: List[float]   # [min, max] precio donde esperar la entrada
     trigger_price: float     # precio que confirma la entrada
     invalidation: float      # si se cruza, cancelar la operación
     instructions: str        # texto operativo claro
+    expires_after: Optional[int] = None  # velas M5 de validez del plan (0 = no operar, None = sin límite)
 
 
 class AnalyzeResponse(BaseModel):

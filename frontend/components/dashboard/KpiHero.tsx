@@ -39,7 +39,7 @@ export function KpiHero({ totalSignals, closed, open, overall, taken, executionR
         <div className="kpi-label">Profit &amp; Loss</div>
         <div className={`kpi-value num ${pnlClass}`}>{pnlText}</div>
         <div className="kpi-sub">
-          Hoy · <span className="num">{closed} trades cerrados</span>
+          Total · <span className="num">{closed} trades cerrados</span>
         </div>
       </div>
 

@@ -171,6 +171,9 @@
 .side-pill.side-sell    { background: var(--sell-bg); color: var(--sell); }
 .side-pill.side-wait    { background: var(--warn-bg); color: var(--warn); }
 .side-pill.side-neutral { background: var(--bg-hover); color: var(--text-tertiary); }
+/* Decisión ENTER en ámbar (acento): verde/rojo quedan reservados para el LADO
+   — un "ENTER verde" junto a un "SHORT rojo" en la misma fila era mis-lectura. */
+.side-pill.side-enter   { background: rgba(245, 158, 11, 0.14); color: var(--accent); }
 .side-pill.side-decision { font-size: 11.7px; padding: 1px 5px; }
 
 /* === Próxima ventana panel === */

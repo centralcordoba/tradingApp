@@ -18,10 +18,13 @@ type TopbarProps = {
   refreshing?: boolean;
   theme: "dark" | "light";
   onThemeToggle: () => void;
+  signalAlertsOn?: boolean;
+  onToggleSignalAlerts?: () => void;
 };
 
 const TABS: { id: View; label: string; key: string }[] = [
-  { id: "sr",           label: "Zonas S/R",         key: "D" },
+  { id: "dashboard",    label: "Dashboard",         key: "D" },
+  { id: "sr",           label: "Zonas S/R",         key: "R" },
   { id: "zones",        label: "Análisis de zonas", key: "Z" },
   { id: "stocks",       label: "Stocks",            key: "S" },
   { id: "correlations", label: "Correlaciones",     key: "C" },
@@ -35,6 +38,8 @@ export function Topbar({
   refreshing,
   theme,
   onThemeToggle,
+  signalAlertsOn,
+  onToggleSignalAlerts,
 }: TopbarProps) {
   const now = useTick(60_000);
 
@@ -46,7 +51,8 @@ export function Topbar({
       if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k === "d") { e.preventDefault(); onViewChange("sr"); }
+      if (k === "d") { e.preventDefault(); onViewChange("dashboard"); }
+      else if (k === "r") { e.preventDefault(); onViewChange("sr"); }
       else if (k === "z") { e.preventDefault(); onViewChange("zones"); }
       else if (k === "s") { e.preventDefault(); onViewChange("stocks"); }
       else if (k === "c") { e.preventDefault(); onViewChange("correlations"); }
@@ -121,6 +127,19 @@ export function Topbar({
         <span>{pillLabel} · </span>
         <span className="num">{pillCountdown}</span>
       </div>
+
+      {onToggleSignalAlerts && (
+        <button
+          className="icon-btn"
+          onClick={onToggleSignalAlerts}
+          aria-label={signalAlertsOn ? "Silenciar alertas de señal" : "Activar alertas de señal"}
+          title={signalAlertsOn
+            ? "Alertas de señal ENTER/WAIT activas — clic para silenciar"
+            : "Activar sonido + notificación cuando llegue una señal ENTER/WAIT"}
+        >
+          {signalAlertsOn ? "🔔" : "🔕"}
+        </button>
+      )}
 
       <button
         className="icon-btn"

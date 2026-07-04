@@ -136,27 +136,46 @@ def test_zero_range_candle_returns_false():
 
 
 # ---------------------------------------------------------------------------
-# 4. _detect_rsi_divergence: precio nuevo mínimo con RSI más alto
+# 4. _detect_rsi_divergence: pivot-a-pivot (LL de precio + HL de RSI)
 # ---------------------------------------------------------------------------
 
-def test_bullish_divergence_new_low_higher_rsi():
-    closes = [100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 94.0, 93.0, 92.0, 91.0, 90.0]
-    # RSI: el mínimo en la ventana está en el último índice de window (close=91 → rsi=30)
-    # El rsi actual (40) es mayor pero sigue en zona bajista (<50)
-    rsi = [None, 60.0, 55.0, 50.0, 45.0, 40.0, 38.0, 35.0, 33.0, 30.0, 40.0]
+# Dos pivot lows confirmados (ventana 2): i=2 (95) e i=7 (93). Precio hace LL.
+_DIV_LOWS = [100.0, 98.0, 95.0, 98.0, 100.0, 99.0, 97.0, 93.0, 97.0, 99.0,
+             100.0, 100.5, 101.0, 101.5, 102.0]
+_DIV_CLOSES = [v + 1.0 for v in _DIV_LOWS]
+_DIV_HIGHS = [v + 2.0 for v in _DIV_LOWS]
 
-    res = _detect_rsi_divergence(closes, rsi, lookback=10)
+
+def test_bullish_divergence_pivot_to_pivot():
+    # RSI en el segundo pivot (35) > primero (25), y < 50 → divergencia alcista
+    rsi = [40.0, 38.0, 25.0, 36.0, 42.0, 40.0, 38.0, 35.0, 38.0, 42.0,
+           44.0, 45.0, 46.0, 46.0, 47.0]
+    res = _detect_rsi_divergence(_DIV_CLOSES, rsi, lows=_DIV_LOWS, highs=_DIV_HIGHS, lookback=20)
     assert res["divergence"] is True
     assert res["type"] == "bullish"
     assert res["direction"] == "LONG"
 
 
-def test_no_divergence_when_rsi_still_falling():
-    closes = [100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 94.0, 93.0, 92.0, 91.0, 90.0]
-    rsi = [None, 60.0, 55.0, 50.0, 45.0, 40.0, 38.0, 35.0, 33.0, 30.0, 25.0]
-
-    res = _detect_rsi_divergence(closes, rsi, lookback=10)
+def test_no_divergence_when_rsi_confirms_the_low():
+    # RSI del segundo pivot (20) < primero (25): el RSI confirma la caída → sin divergencia
+    rsi = [40.0, 38.0, 25.0, 36.0, 42.0, 40.0, 38.0, 20.0, 30.0, 38.0,
+           40.0, 42.0, 44.0, 45.0, 46.0]
+    res = _detect_rsi_divergence(_DIV_CLOSES, rsi, lows=_DIV_LOWS, highs=_DIV_HIGHS, lookback=20)
     assert res["divergence"] is False
+
+
+def test_bearish_divergence_pivot_to_pivot():
+    # Espejo: dos pivot highs, precio HH con RSI LH (>50) → divergencia bajista
+    highs = [100.0, 102.0, 105.0, 102.0, 100.0, 101.0, 103.0, 107.0, 103.0, 101.0,
+             100.0, 99.5, 99.0, 98.5, 98.0]
+    closes = [v - 1.0 for v in highs]
+    lows = [v - 2.0 for v in highs]
+    rsi = [60.0, 62.0, 75.0, 64.0, 58.0, 60.0, 62.0, 65.0, 62.0, 58.0,
+           56.0, 55.0, 54.0, 54.0, 53.0]
+    res = _detect_rsi_divergence(closes, rsi, lows=lows, highs=highs, lookback=20)
+    assert res["divergence"] is True
+    assert res["type"] == "bearish"
+    assert res["direction"] == "SHORT"
 
 
 # ---------------------------------------------------------------------------

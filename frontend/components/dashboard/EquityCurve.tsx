@@ -78,18 +78,22 @@ export function EquityCurve() {
   useEffect(() => {
     let alive = true;
     const fetchRows = async () => {
+      if (document.visibilityState === "hidden") return;
       try {
         const r = await fetch(`${API}/signals?limit=500`, { cache: "no-store" });
+        if (!r.ok) return; // conserva la última curva buena
         const j = await r.json();
         if (alive) setRows(j.items || []);
       } catch {
-        if (alive) setRows([]);
+        // conserva la última curva buena — un blip no debe vaciar el gráfico
       } finally {
         if (alive) setLoading(false);
       }
     };
     fetchRows();
-    const id = setInterval(fetchRows, 30_000);
+    // La curva solo cambia al cerrar trades: 60s sobra (antes 30s duplicando
+    // el poller de señales de Home).
+    const id = setInterval(fetchRows, 60_000);
     return () => { alive = false; clearInterval(id); };
   }, []);
 

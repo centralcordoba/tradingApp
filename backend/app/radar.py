@@ -199,40 +199,8 @@ def _build_candles(ohlc: dict, n: int = 20) -> list[dict]:
 # Helpers indicadores (reutilizan o extienden scanner)
 # ---------------------------------------------------------------------------
 
-def _rsi_series(closes: list[float], period: int = RSI_PERIOD) -> list[Optional[float]]:
-    """RSI alineado con `closes`. Devuelve None para las posiciones de warm-up."""
-    n = len(closes)
-    out: list[Optional[float]] = [None] * n
-    if n < period + 1:
-        return out
-
-    gains, losses = 0.0, 0.0
-    for i in range(1, period + 1):
-        diff = closes[i] - closes[i - 1]
-        if diff >= 0:
-            gains += diff
-        else:
-            losses -= diff
-    avg_gain = gains / period
-    avg_loss = losses / period
-    if avg_loss == 0:
-        out[period] = 100.0
-    else:
-        rs = avg_gain / avg_loss
-        out[period] = 100 - (100 / (1 + rs))
-
-    for i in range(period + 1, n):
-        diff = closes[i] - closes[i - 1]
-        gain = diff if diff > 0 else 0.0
-        loss = -diff if diff < 0 else 0.0
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-        if avg_loss == 0:
-            out[i] = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            out[i] = 100 - (100 / (1 + rs))
-    return out
+# Implementación única en indicators.py — alias para los callers existentes.
+from .indicators import rsi_series as _rsi_series  # noqa: E402
 
 
 def _range_position(closes: list[float], lookback: int = 50) -> float:  # 50 velas estándar
@@ -446,46 +414,47 @@ def _detect_recent_rejection(
 def _detect_rsi_divergence(
     closes: list[float],
     rsi: list[Optional[float]],
+    lows: Optional[list[float]] = None,
+    highs: Optional[list[float]] = None,
     lookback: int = RADAR_DIVERGENCE_LOOKBACK,
 ) -> dict:
+    """Divergencia REAL pivot-a-pivot.
+
+    Alcista: dos pivot lows consecutivos donde el precio hace LL pero el RSI
+    hace HL (con RSI del segundo pivot < 50). Bajista simétrica sobre highs.
+    La versión anterior comparaba "mínimo de la ventana vs vela actual" sobre
+    closes — no registraba sweeps con mecha y casi nunca disparaba.
+    """
     empty = {"divergence": False, "type": None, "direction": None}
-
-    if len(closes) < lookback + 1 or len(rsi) != len(closes):
+    lows = lows if lows is not None else closes
+    highs = highs if highs is not None else closes
+    n = len(closes)
+    if n < 2 * 2 + 2 or len(rsi) != n or len(lows) != n or len(highs) != n:
         return empty
 
-    rsi_now = rsi[-1]
-    if rsi_now is None:
-        return empty
+    window = 2  # velas a cada lado que confirman el pivot
+    start = max(window, n - lookback)
+    piv_lows: list[tuple[int, float, float]] = []
+    piv_highs: list[tuple[int, float, float]] = []
+    for i in range(start, n - window):
+        if rsi[i] is None:
+            continue
+        if all(lows[i] < lows[i - d] for d in range(1, window + 1)) and \
+           all(lows[i] < lows[i + d] for d in range(1, window + 1)):
+            piv_lows.append((i, lows[i], rsi[i]))
+        if all(highs[i] > highs[i - d] for d in range(1, window + 1)) and \
+           all(highs[i] > highs[i + d] for d in range(1, window + 1)):
+            piv_highs.append((i, highs[i], rsi[i]))
 
-    price_now = closes[-1]
-    window_closes = closes[-(lookback + 1):-1]
-    window_rsi = rsi[-(lookback + 1):-1]
-    if not window_closes or not window_rsi:
-        return empty
+    if len(piv_lows) >= 2:
+        (i1, p1, r1), (i2, p2, r2) = piv_lows[-2], piv_lows[-1]
+        if i2 - i1 >= 3 and p2 < p1 and r2 > r1 and r2 < 50:
+            return {"divergence": True, "type": "bullish", "direction": "LONG"}
 
-    min_idx = min(range(len(window_closes)), key=lambda i: window_closes[i])
-    max_idx = max(range(len(window_closes)), key=lambda i: window_closes[i])
-
-    min_price = window_closes[min_idx]
-    max_price = window_closes[max_idx]
-    rsi_at_min = window_rsi[min_idx]
-    rsi_at_max = window_rsi[max_idx]
-
-    if (
-        rsi_at_min is not None
-        and price_now < min_price
-        and rsi_now > rsi_at_min
-        and rsi_now < 50
-    ):
-        return {"divergence": True, "type": "bullish", "direction": "LONG"}
-
-    if (
-        rsi_at_max is not None
-        and price_now > max_price
-        and rsi_now < rsi_at_max
-        and rsi_now > 50
-    ):
-        return {"divergence": True, "type": "bearish", "direction": "SHORT"}
+    if len(piv_highs) >= 2:
+        (i1, p1, r1), (i2, p2, r2) = piv_highs[-2], piv_highs[-1]
+        if i2 - i1 >= 3 and p2 > p1 and r2 < r1 and r2 > 50:
+            return {"divergence": True, "type": "bearish", "direction": "SHORT"}
 
     return empty
 
@@ -632,7 +601,7 @@ def _estimate_sl(
 
 def _analyze_symbol(symbol: str) -> Optional[dict]:
     try:
-        raw = scanner._fetch_chart(symbol)
+        raw = scanner._fetch_chart(symbol, interval=RADAR_INTERVAL, outputsize=RADAR_OUTPUTSIZE)
         if raw is None:
             return None
         ohlc = scanner._parse_ohlc(raw)
@@ -667,7 +636,7 @@ def _analyze_symbol(symbol: str) -> Optional[dict]:
             return None
 
         rejection = _detect_recent_rejection(opens, highs, lows, closes, ts)
-        divergence = _detect_rsi_divergence(closes, rsi)
+        divergence = _detect_rsi_divergence(closes, rsi, lows=lows, highs=highs)
 
         # Si la última vela se cerró hace mucho (fin de semana, feed caído),
         # fuerza el rechazo como expirado — no queremos mostrar "vela recién
@@ -859,12 +828,16 @@ def _cross_check_alignment(setups: list[dict], scanner_items: list[dict]) -> lis
 def _probe_market_age_minutes(symbols: list[str]) -> Optional[float]:
     """Lee el cache de OHLC crudo para los símbolos dados y devuelve la edad
     (min) de la vela más reciente entre todos. None si no hay cache.
+
+    Escanea TODAS las entradas del símbolo (scanner M5, radar M15:200, zones
+    M15:600) — antes probaba solo la key 15min:200 y dependía de que otro
+    módulo la hubiera poblado.
     """
     ages: list[float] = []
-    for sym in symbols:
-        key = f"{sym.strip().upper()}:15min:200"
-        entry = scanner._ohlc_cache.get(key)
-        if not entry:
+    wanted = {s.strip().upper() for s in symbols}
+    for key, entry in list(scanner._ohlc_cache.items()):
+        sym = key.split(":", 1)[0]
+        if sym not in wanted:
             continue
         raw = entry[1]
         values = raw.get("values") if isinstance(raw, dict) else None
@@ -897,7 +870,7 @@ def _enrich_with_smc(active_setups: list[dict]) -> None:
         if sym not in RADAR_SMC_PAIRS:
             continue
         # Reutiliza el cache de OHLC del scanner — sin créditos extra.
-        raw = scanner._fetch_chart(sym)
+        raw = scanner._fetch_chart(sym, interval=RADAR_INTERVAL, outputsize=RADAR_OUTPUTSIZE)
         if raw is None:
             continue
         ohlc = scanner._parse_ohlc(raw)

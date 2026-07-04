@@ -29,13 +29,21 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from . import scanner
+try:
+    from zoneinfo import ZoneInfo
+    _MADRID_TZ = ZoneInfo("Europe/Madrid")
+except Exception:
+    _MADRID_TZ = None
+
+from . import indicators, scanner
 from .constants import (
     ATR_PERIOD,
     CACHE_TTL_OHLC_SCANNER,
     EMA_PERIOD_50,
     EMA_PERIOD_100,
     PIP_SIZES,
+    WICK_RATIO_CAP,
+    ZONES_OUTPUTSIZE,
     ZONES_RANGO_ATR_MULT_DEFAULT,
     ZONES_PIVOT_WINDOW,
     ZONES_MERGE_DISTANCE_PIPS,
@@ -94,7 +102,8 @@ def _parse_candle_ts(raw: Optional[str]) -> Optional[datetime]:
 def _resample_m15_to_m30(ohlc: dict) -> Optional[pd.DataFrame]:
     """Agrupa las velas M15 en velas M30 alineadas a :00 y :30.
 
-    200 velas M15 ≈ 100 velas M30, suficiente para la EMA larga (EMA100)."""
+    600 velas M15 ≈ 300 velas M30 — warm-up suficiente para que la EMA100
+    del bias converja de verdad (seed SMA + ~200 iteraciones)."""
     if not ohlc.get("ts") or not ohlc.get("close"):
         return None
     try:
@@ -112,53 +121,51 @@ def _resample_m15_to_m30(ohlc: dict) -> Optional[pd.DataFrame]:
     ).sort_index()
     if df.empty:
         return None
-    m30 = (
-        df.resample("30min", label="right", closed="right")
-        .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
-        .dropna()
-    )
+    # Los timestamps de Twelve Data son la APERTURA de cada vela: con
+    # closed/label="left" la M30 de las 10:00 agrupa las M15 de 10:00 y 10:15,
+    # igual que cualquier M30 de broker/TV.
+    grouped = df.resample("30min", label="left", closed="left")
+    m30 = grouped.agg({"open": "first", "high": "max", "low": "min", "close": "last"}).dropna()
+    if len(m30):
+        # Descarta la última M30 si solo tiene una M15 hija (vela a medio formar).
+        n_children = grouped["close"].count().reindex(m30.index)
+        if int(n_children.iloc[-1]) < 2:
+            m30 = m30.iloc[:-1]
     return m30
 
 
 def _ema_last(values: np.ndarray, period: int) -> Optional[float]:
-    if len(values) < period:
-        return None
-    k = 2.0 / (period + 1)
-    ema = float(values[:period].mean())
-    for v in values[period:]:
-        ema = float(v) * k + ema * (1 - k)
-    return ema
+    return indicators.ema_last(list(values), period)
 
 
 def _atr_m30(m30: pd.DataFrame, period: int = ATR_PERIOD) -> Optional[float]:
     """ATR Wilder sobre las velas M30 ya resampleadas. None si no hay datos."""
     if m30 is None or len(m30) < period + 1:
         return None
-    highs = m30["high"].to_numpy(dtype=float)
-    lows = m30["low"].to_numpy(dtype=float)
-    closes = m30["close"].to_numpy(dtype=float)
-    trs: list[float] = []
-    for i in range(1, len(closes)):
-        tr = max(
-            highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i] - closes[i - 1]),
-        )
-        trs.append(tr)
-    if len(trs) < period:
-        return None
-    atr = sum(trs[:period]) / period
-    for tr in trs[period:]:
-        atr = (atr * (period - 1) + tr) / period
-    return float(atr)
+    return indicators.atr_last(
+        m30["high"].to_numpy(dtype=float).tolist(),
+        m30["low"].to_numpy(dtype=float).tolist(),
+        m30["close"].to_numpy(dtype=float).tolist(),
+        period,
+    )
+
+
+# Último estado del bias por (pair, atr_mult) para la histéresis del RANGO —
+# evita el flip-flop RANGO↔BULL/BEAR (y del cross verdict) en la frontera.
+_BIAS_STATE: dict[str, str] = {}
 
 
 def _compute_m30_bias(
     m30: pd.DataFrame,
     pip: float,
     atr_mult: float = ZONES_RANGO_ATR_MULT_DEFAULT,
+    state_key: Optional[str] = None,
 ) -> dict:
-    """Bias direccional M30: EMA50 vs EMA100 con tercer estado RANGO."""
+    """Bias direccional M30: EMA50 vs EMA100 con tercer estado RANGO.
+
+    Histéresis (si `state_key`): entrar en RANGO exige separación < 0.8×umbral;
+    salir de RANGO exige separación > 1.2×umbral. Sin estado previo se usa el
+    umbral simple."""
     out: dict = {
         "label": "NEUTRAL",
         "ema50": None,
@@ -196,12 +203,22 @@ def _compute_m30_bias(
     separation = abs(ema50 - ema100)
     threshold = atr_mult * atr
 
-    if separation < threshold:
+    prev = _BIAS_STATE.get(state_key) if state_key else None
+    if prev == "RANGO":
+        in_rango = separation < threshold * 1.2   # salir de RANGO cuesta más
+    elif prev in ("BULL", "BEAR"):
+        in_rango = separation < threshold * 0.8   # entrar en RANGO cuesta más
+    else:
+        in_rango = separation < threshold
+
+    if in_rango:
         label = "RANGO"
     elif ema50 > ema100:
         label = "BULL"
     else:
         label = "BEAR"
+    if state_key:
+        _BIAS_STATE[state_key] = label
 
     return {
         "label": label,
@@ -247,9 +264,16 @@ def _wick_ratio(ohlc: dict, idx: int = -1) -> dict:
         bot_wick = c - l
         direction = "bear"
 
-    # Wick ratio: wick mayor / body (0 si doji)
+    # La "dirección" de una vela con cuerpo microscópico es ruido de 1 tick —
+    # un doji no confirma rechazo en ningún sentido.
+    if body < rng * 0.15:
+        direction = "neutral"
+
+    # Wick ratio con techo: sin cap, un cuerpo de 0.2 pips con mecha de 2 pips
+    # daba ratio 10 y satisfacía trivialmente el gate de rechazo del marco.
     max_wick = max(top_wick, bot_wick)
-    ratio = max_wick / body if body > 0 else (max_wick / rng * 10.0)  # doji: usar escala relativa
+    raw_ratio = max_wick / body if body > 0 else (max_wick / rng * 10.0)
+    ratio = min(raw_ratio, WICK_RATIO_CAP)
 
     return {
         "top": round(top_wick, 5),
@@ -257,6 +281,61 @@ def _wick_ratio(ohlc: dict, idx: int = -1) -> dict:
         "body": round(body, 5),
         "ratio": round(ratio, 2),
         "direction": direction,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Rango asiático (02:00–09:00 Madrid) — los extremos de Asia son la liquidez
+# que London Open barre: dos niveles operativos de máxima calidad para la
+# ventana 09:00–14:00 del playbook.
+# ---------------------------------------------------------------------------
+
+ASIA_START_H = 2   # hora Madrid inclusive
+ASIA_END_H = 9     # hora Madrid exclusive
+
+
+def _asia_range(ohlc: dict, pip: float) -> Optional[dict]:
+    """High/low de la última sesión asiática visible en las M15 + flags de
+    sweep post-Asia (mecha que excede el extremo después de las 09:00)."""
+    if _MADRID_TZ is None or not ohlc.get("ts"):
+        return None
+    times = [_parse_candle_ts(t) for t in ohlc["ts"]]
+    local = [t.astimezone(_MADRID_TZ) if t else None for t in times]
+
+    asia_date = None
+    for loc in reversed(local):
+        if loc is not None and ASIA_START_H <= loc.hour < ASIA_END_H:
+            asia_date = loc.date()
+            break
+    if asia_date is None:
+        return None
+
+    asia_idx = [
+        i for i, loc in enumerate(local)
+        if loc is not None and loc.date() == asia_date and ASIA_START_H <= loc.hour < ASIA_END_H
+    ]
+    if len(asia_idx) < 4:  # menos de 1h de datos: rango no representativo
+        return None
+
+    high = max(ohlc["high"][i] for i in asia_idx)
+    low = min(ohlc["low"][i] for i in asia_idx)
+    post_idx = [
+        i for i, loc in enumerate(local)
+        if loc is not None and loc.date() == asia_date and loc.hour >= ASIA_END_H
+    ]
+    swept_high = any(ohlc["high"][i] > high for i in post_idx)
+    swept_low = any(ohlc["low"][i] < low for i in post_idx)
+    last_close = ohlc["close"][-1]
+
+    return {
+        "date": asia_date.isoformat(),
+        "high": round(high, 5),
+        "low": round(low, 5),
+        "range_pips": round((high - low) / pip, 1),
+        "swept_high": swept_high,
+        "swept_low": swept_low,
+        "high_distance_pips": round((high - last_close) / pip, 1),
+        "low_distance_pips": round((last_close - low) / pip, 1),
     }
 
 
@@ -403,7 +482,11 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
     # Sanea: el multiplicador tiene que ser positivo y dentro de un rango razonable.
     rango_atr_mult = max(0.05, min(2.0, rango_atr_mult))
 
-    raw = scanner._fetch_chart(pair, interval="15min", outputsize=200)
+    # 600 M15 → ~300 M30: con 200 (~100 M30) la EMA100 quedaba en su seed SMA
+    # sin una sola iteración de smoothing (pseudo-EMA no convergida) — el bias
+    # comparaba una EMA50 a medio converger contra un SMA100 disfrazado.
+    # Mismo coste TD: 1 crédito por request independiente del outputsize.
+    raw = scanner._fetch_chart(pair, interval="15min", outputsize=ZONES_OUTPUTSIZE)
     if raw is None:
         return None
     ohlc = scanner._parse_ohlc(raw)
@@ -421,7 +504,10 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
 
     # Bias M30 (resample de las propias M15)
     m30 = _resample_m15_to_m30(ohlc)
-    bias = _compute_m30_bias(m30, pip, atr_mult=rango_atr_mult)
+    bias = _compute_m30_bias(
+        m30, pip, atr_mult=rango_atr_mult,
+        state_key=f"{pair.upper()}:{round(rango_atr_mult, 3)}",
+    )
 
     # Wick ratio de las últimas 3 velas (acción del precio inmediata)
     recent_wicks = []
@@ -527,6 +613,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
             "level_selector": selector,
         },
         "levels": levels,
+        "asia_range": _asia_range(ohlc, pip),
         "active_count": sum(1 for lv in levels if lv["active"]),
         "n_bars": n_bars,
         "last_candle_ts": _normalize_ts(last_ts),

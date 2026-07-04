@@ -8,6 +8,7 @@ import {
   utcToMadrid,
 } from "@/lib/sessions";
 import { formatCountdown } from "@/lib/dates";
+import { MY_PAIRS } from "@/lib/config";
 import { MarketHoursCard } from "@/components/stocks/MarketHoursCard";
 import { StocksActiveSignalsPanel } from "@/components/stocks/StocksActiveSignalsPanel";
 import "./RightBar.css";
@@ -31,7 +32,9 @@ type Props = {
   onStocksSelect?: (symbol: string) => void;
 };
 
-const APLUS_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"];
+// Pares del playbook + Pine — fuente única en lib/config (antes esta lista
+// sugería majors que el playbook prohíbe y omitía AUDUSD/USDCAD).
+const APLUS_PAIRS = MY_PAIRS;
 
 function relativeTime(iso: string, now: Date): string {
   const t = new Date(iso).getTime();
@@ -48,7 +51,7 @@ function relativeTime(iso: string, now: Date): string {
 }
 
 function decisionLabel(d: string): { label: string; cls: string } {
-  if (d === "ENTER") return { label: "ENTER", cls: "side-buy" };
+  if (d === "ENTER") return { label: "ENTER", cls: "side-enter" };
   if (d === "WAIT")  return { label: "WAIT",  cls: "side-wait" };
   return { label: "AVOID", cls: "side-sell" };
 }

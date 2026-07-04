@@ -2,7 +2,7 @@
 from dotenv import load_dotenv
 load_dotenv()  # carga backend/.env si existe
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 import os
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from .schemas import TVSignal, AnalyzeResponse
 from .decision_engine import analyze
 from .tv_parser import parse_payload
-from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones, cross_verdict, zone_signal_engine
+from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones, cross_verdict, zone_signal_engine, td_client
 from .correlations import CorrelationsAIDisabled
 from .stocks_client import StocksUpstreamError
 from .constants import (
@@ -29,9 +29,33 @@ from .constants import (
     CONFIDENCE_MIN,
     CONFIDENCE_MAX,
     STOCK_SYMBOL_MAX_LENGTH,
+    ZONES_DEFAULT_PAIRS,
 )
 
 USE_AI_DEFAULT = os.getenv("USE_AI", "0") == "1"
+
+# Seguridad opcional (backend público en Render). Si la env var está vacía,
+# el endpoint se comporta como antes — configurarlas activa la protección.
+WEBHOOK_TOKEN = os.getenv("WEBHOOK_TOKEN", "")
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+
+# Solo estos pares se consultan a Twelve Data: un ?pairs= arbitrario con
+# símbolos no cacheados podría drenar los 800 créditos/día.
+ALLOWED_PAIRS = set(scanner.DEFAULT_PAIRS) | set(ZONES_DEFAULT_PAIRS) | {"XAUUSD"}
+
+
+def _sanitize_pairs(pairs: str) -> list[str] | None:
+    """Parsea ?pairs= y filtra contra la whitelist. None → defaults del caller."""
+    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()]
+    if not selected:
+        return None
+    allowed = [p for p in selected if p in ALLOWED_PAIRS]
+    return allowed or None
+
+
+def _require_admin(key: str | None) -> None:
+    if ADMIN_API_KEY and key != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="X-Admin-Key inválida")
 
 app = FastAPI(title="AI Trading Assistant", version="0.1.0")
 
@@ -46,6 +70,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup():
+    # Sin basicConfig los logger.warning/debug de los módulos no se ven en
+    # Render Logs — el diagnóstico en prod era arqueología de prints.
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     storage.init_db()
 
 
@@ -86,10 +117,21 @@ def analyze_endpoint(sig: TVSignal, ai: int | None = None):
 
 
 @app.post("/webhook/tradingview")
-async def tv_webhook(request: Request, ai: int | None = None):
+async def tv_webhook(request: Request, ai: int | None = None, token: str | None = None):
     body = await request.body()
     try:
         data = parse_payload(body)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Payload inválido: {e}")
+
+    # Token opcional (query ?token= o campo "token" del payload JSON). Solo se
+    # exige si WEBHOOK_TOKEN está configurada — evita señales inyectadas por
+    # terceros que conozcan la URL pública.
+    provided = token or str(data.pop("token", "") or "")
+    if WEBHOOK_TOKEN and provided != WEBHOOK_TOKEN:
+        raise HTTPException(status_code=401, detail="Webhook token inválido")
+
+    try:
         sig = TVSignal(**data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Payload inválido: {e}")
@@ -100,6 +142,45 @@ async def tv_webhook(request: Request, ai: int | None = None):
     sid = storage.save_signal(sig.model_dump(), record)
     final.signal_id = sid
     return {"ok": True, "decision": final.decision, "id": sid, "result": record}
+
+
+@app.get("/signals/stream")
+async def signals_stream():
+    """SSE: emite `event: signal` cuando aparece una señal nueva.
+
+    Chequea el último id cada 2s (consulta local barata) — latencia
+    señal→pantalla ~2s en vez de los 0-5s del polling, y el frontend degrada
+    a polling puro si la conexión se cae (EventSource reconecta solo).
+    """
+    import asyncio
+
+    async def gen():
+        loop = asyncio.get_event_loop()
+        try:
+            last_id = await loop.run_in_executor(None, storage.max_signal_id)
+        except Exception:
+            last_id = None
+        yield f"event: hello\ndata: {last_id or 0}\n\n"
+        ticks = 0
+        while True:
+            await asyncio.sleep(2)
+            ticks += 1
+            try:
+                current = await loop.run_in_executor(None, storage.max_signal_id)
+            except Exception:
+                continue
+            if current is not None and (last_id is None or current > last_id):
+                last_id = current
+                yield f"event: signal\ndata: {current}\n\n"
+            elif ticks % 15 == 0:
+                yield ": ping\n\n"  # keep-alive para proxies
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/signals")
@@ -126,6 +207,8 @@ def scanner_debug():
         "key_length": len(key),
         "key_prefix": (key[:4] + "…") if key else "",
         "last_error": scanner.last_error(),
+        # Presupuesto TD compartido (forex + stocks) — td_client
+        "td": td_client.metrics(),
     }
 
 
@@ -136,7 +219,7 @@ def scan_pairs(pairs: str = ""):
     `pairs` opcional: lista separada por comas (ej: "EURUSD,GBPUSD"). Si vacío,
     usa la lista por defecto (majors + cruces).
     """
-    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
+    selected = _sanitize_pairs(pairs)
     results = scanner.scan_pairs(selected)
     probe_list = selected or scanner.DEFAULT_PAIRS
     age_min = radar._probe_market_age_minutes(probe_list)
@@ -166,7 +249,7 @@ def radar_setups(pairs: str = ""):
     `pairs` opcional: lista separada por comas (ej: "EURUSD,GBPUSD"). Si vacío,
     usa la lista por defecto del escáner.
     """
-    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
+    selected = _sanitize_pairs(pairs)
     return radar.get_radar_response(selected)
 
 
@@ -195,7 +278,7 @@ def zones_sr(
     - touch_tolerance_pips: tolerancia para contar un "toque" (default 3)
     - level_selector: 'median' o 'mean' para fijar el precio del cluster
     """
-    selected = [p.strip().upper() for p in pairs.split(",") if p.strip()] or None
+    selected = _sanitize_pairs(pairs)
     params: dict = {}
     if window is not None:
         params["window"] = window
@@ -216,8 +299,7 @@ def zones_sr(
     # bias del cruce coincida con el chip M30 que se renderiza en esta vista.
     cross = cross_verdict.build_cross_map([it["pair"] for it in response.get("items", [])], zones_params=params)
     # Scanner M5 para el motor de señales (usa caché compartida con cross_verdict)
-    from .constants import ZONES_DEFAULT_PAIRS as _zdp
-    zone_pairs = selected or list(_zdp)
+    zone_pairs = selected or list(ZONES_DEFAULT_PAIRS)
     try:
         scan_map = {x["pair"]: x for x in scanner.scan_pairs(zone_pairs)}
     except Exception:
@@ -254,6 +336,8 @@ def correlations_query(payload: dict):
     question = (payload.get("question") or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="Falta 'question'")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="question demasiado larga (máx 500 caracteres)")
     try:
         answer = correlations.query(question)
     except CorrelationsAIDisabled:
@@ -298,8 +382,9 @@ def set_result(signal_id: int, payload: dict):
 
 
 @app.delete("/signals/{signal_id}")
-def delete_signal(signal_id: int):
+def delete_signal(signal_id: int, x_admin_key: str | None = Header(None)):
     """Elimina una señal del historial (para corregir data sucia)."""
+    _require_admin(x_admin_key)
     deleted = storage.delete_signal(signal_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Señal no encontrada")
@@ -307,8 +392,9 @@ def delete_signal(signal_id: int):
 
 
 @app.delete("/signals")
-def delete_all_signals(symbol: str | None = None):
+def delete_all_signals(symbol: str | None = None, x_admin_key: str | None = Header(None)):
     """Elimina todas las señales, opcionalmente filtradas por símbolo."""
+    _require_admin(x_admin_key)
     n = storage.delete_all_signals(symbol)
     return {"ok": True, "deleted": n, "symbol": symbol}
 

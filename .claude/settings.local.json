@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npm run *)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "PowerShell($path = \"C:\\\\repositories\\\\tradingApp\\\\frontend\\\\app\\\\page.tsx\"; $lines = Get-Content $path -Encoding UTF8; $keep = New-Object System.Collections.Generic.List[string]; for \\($i = 0; $i -lt $lines.Count; $i++\\) { $n = $i + 1; if \\(\\($n -ge 316 -and $n -le 445\\) -or \\($n -ge 738 -and $n -le 771\\) -or \\($n -ge 781 -and $n -le 1445\\)\\) { continue }; $keep.Add\\($lines[$i]\\) }; [System.IO.File]::WriteAllLines\\($path, $keep, \\(New-Object System.Text.UTF8Encoding\\($false\\)\\)\\); Write-Output \"Antes: $\\($lines.Count\\) — Después: $\\($keep.Count\\)\")",
+      "PowerShell(Select-String -Path \"C:\\\\repositories\\\\tradingApp\\\\frontend\\\\app\\\\page.tsx\" -Pattern \"JournalModal|openJournal|submitJournal|JournalDraft|type Emotion|btn-win|btn-loss|btn-be|taken-badge\" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line.Trim\\(\\)\\)\" })"
     ]
   }
 }

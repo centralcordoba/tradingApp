@@ -40,7 +40,7 @@ Frontend Next.js (local) ←─polling── Render
    (playbook estático · radar backend-only sin polling desde la UI)
 ```
 
-**Cache OHLC compartido**: scanner y radar llaman `scanner._fetch_chart()`. Misma key `f"{pair}:15min:200"` en `_ohlc_cache`. Una fetch por par cada 15min independiente de cuántas vistas la consulten.
+**Cache OHLC compartido**: scanner/zones/radar llaman `scanner._fetch_chart()` → key `f"{pair}:{interval}:{outputsize}"` en `_ohlc_cache`. Una fetch por par/interval cada 15min independiente de cuántas vistas la consulten. **Fase 3**: el fetch pasa por `td_client` (token-bucket global 8/min compartido con stocks + single-flight por key — dos requests concurrentes con cache frío ya no duplican el fetch) y se persiste en la tabla `ohlc_cache` de la DB: tras un spin-down de Render, el primer request rehidrata desde DB si el TTL sigue vivo → **el cold start ya no cuesta un burst de 429s**. `/scanner/debug` expone `td.credits_today` / `requests_last_minute`.
 
 ## Estructura
 
@@ -57,11 +57,15 @@ backend/app/
   zones.py            # Zonas S/R + bias M30 (EMA50 vs EMA100, M15→M30). Fetch M15 propio
   cross_verdict.py    # Veredicto cruzado M30+M5 (reconcile + build_cross_map). Fuente única
   radar.py            # Setups (pin bar/envolv + divergencia + SL cap) + cross-check
-  stocks_client.py    # Twelve Data stocks + indicadores Python (SMA/EMA/RSI/MACD/BBANDS/ADX)
+  stocks_client.py    # Twelve Data stocks (fetch vía td_client) + bundle de indicadores
+  indicators.py       # Implementación ÚNICA de EMA/RSI/ATR/SMA/MACD/BBANDS/ADX (antes 3 copias)
+  td_client.py        # Gate único a Twelve Data: token-bucket 8/min global (forex+stocks),
+                      # single-flight por cache key, contador diario de créditos, retry con Retry-After
   correlations.py     # Mapa estático 6 pares + system prompt + query() OpenRouter
   constants.py        # Valores mágicos centralizados (intervalos, TTLs, EMA periods, pares)
   storage.py          # Dual-mode PG/SQLite. Tablas: signals + investor_profile + stocks_watchlist
-backend/tests/test_radar.py  # 49 tests del radar
+backend/scripts/calibrate.py # Calibración offline (WR por factor + sweep de umbral)
+backend/tests/       # test_radar + test_zone_marco + test_phase2 + test_phase3 (97 tests)
 backend/{requirements.txt, render.yaml, supabase_init.sql, .env.example}
 
 frontend/
@@ -86,6 +90,8 @@ Iniciar App.cmd       # Lanzador 1-clic del frontend (+ acceso directo en Escrit
 - LONG en `VENDE YA`, MTF30 BEAR, RSI ≥ 78, overhead/resistencia inmediata.
 - SHORT en `COMPRA YA`, MTF30 BULL, RSI ≤ 22, soporte inmediato.
 - `conf < 5`, `congestion = true`.
+- **Geometría** (Fase 2): SL del lado equivocado · `risk_pips > SL_MAX_PIPS[symbol]` (25 EURUSD) · `R:R (tp vs sl) < 1.5`.
+- **Staleness** (Fase 2): edad de la señal > 10 min → AVOID (usa el campo `time` del Pine, epoch ms de `time_close`; sin `time`, no aplica).
 
 **News NO es veto**: banner de aviso en frontend, pero la señal se evalúa normalmente. Decisión explícita del usuario.
 
@@ -96,33 +102,37 @@ Iniciar App.cmd       # Lanzador 1-clic del frontend (+ acceso directo en Escrit
 | Quality PREMIUM / STRONG / NORMAL | +4 / +3 / +1 |
 | MTF30 alineado | +2 |
 | Zona favorable (`COMPRA*` LONG, `VENDE*` SHORT) | +2 |
-| Patrón presente alineado | +1 |
+| Patrón direccional presente (NR7/Inside Bar NO puntúan: son neutros) | +1 |
 | `vol_high` | +1 |
-| FVG presente alineado | +1 |
-| `conf >= 14` / `>= 10` | +2 / +1 |
+| FVG presente | +1 |
+| Kill zone Madrid (mismas ventanas que `lib/killZones.ts`) | FIRE +1 / WARN −1 / AVOID −2 |
 
-**Mapeo**: ≥8 → ENTER (degrada a WAIT si plan dice PULLBACK/EXTENDED/SWEEP); ≥5 → WAIT; <5 → AVOID.
+**`conf` NO se puntúa aparte** (Fase 2): en el Pine `quality` ES función determinista de `conf` (`>=14 PREMIUM, >=10 STRONG, >=5 NORMAL`) — puntuar ambas contaba la misma variable dos veces y el score era ~una transformación afín de conf.
+
+**Mapeo** (provisional hasta calibrar con `scripts/calibrate.py`): ≥7 → ENTER (degrada a WAIT si el plan exige esperar [PULLBACK/EXTENDED/SWEEP_REVERSAL/RETEST], si la señal tiene edad >3 min, o si la kill zone es AVOID); ≥4 → WAIT; <4 → AVOID.
 
 ### Entry planner
 
-Calcula `wait_zone`, `trigger_price`, `invalidation`, `instructions` (español). Requiere campos del Pine: `ema9`, `ema21`, `atr`, `swing_high`, `swing_low`, `high`, `low`.
+Calcula `wait_zone`, `trigger_price`, `invalidation`, `instructions` (español) + `expires_after` (velas M5 de validez — los triggers usan referencias congeladas al momento de la señal). Requiere campos del Pine: `ema9`, `ema21`, `atr`, `swing_high`, `swing_low`, `high`, `low`.
 
-| Tipo | Cuándo |
-|---|---|
-| `SWEEP_REVERSAL` | Zona extrema → barrida + vuelta dentro |
-| `PULLBACK_EMA9` | >1× ATR del EMA9 → esperar retroceso |
-| `EXTENDED_SKIP` | >2.5× ATR del EMA9 → mejor saltar |
-| `RETEST` | Romper swing reciente → esperar retest |
-| `MOMENTUM_CONFIRM` | Cerca del EMA sin cierre fuerte → esperar cierre con cuerpo >50% |
+| Tipo | Cuándo | Vigencia | ¿Degrada ENTER? |
+|---|---|---|---|
+| `SWEEP_CONFIRMED` | El Pine detectó sweep EN la vela de señal (flags `sweep_low/high`) → la reversión ya confirmó | 2 | No (entrada inmediata) |
+| `SWEEP_REVERSAL` | Zona extrema, sweep aún NO ocurrió → esperar barrida + vuelta | 6 | Sí |
+| `RETEST` | Romper swing reciente → esperar retest (va ANTES del chequeo de extensión; antes era inalcanzable porque la vela de ruptura casi siempre está >1×ATR del EMA9) | 8 | Sí |
+| `PULLBACK_EMA9` | >1× ATR del EMA9 → esperar retroceso | 6 | Sí |
+| `EXTENDED_SKIP` | >2.5× ATR del EMA9 → mejor saltar | 0 | Sí |
+| `IMMEDIATE` | Cerca del EMA9 con cierre fuerte (reemplazó a `MOMENTUM_CONFIRM`, cuya premisa era falsa: el Pine SOLO señala con isStrongBull/Bear) | 1 | No |
 
-Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros esperan pullback al EMA9, retest del nivel, o sweep + reversión.
+Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros esperan pullback al EMA9, retest del nivel, o sweep + reversión. Cuando la señal NO está extendida, el cierre fuerte del Pine ya es la confirmación → ENTER inmediato coherente (antes el motor decía ENTER y el plan decía "espera").
 
 ### TVSignal (lo que envía el Pine)
 
 - **Obligatorios**: `signal`, `symbol`, `price`, `sl`, `be`, `tp`, `conf`, `quality`.
 - **Contextuales**: `pattern`, `fvg`, `vol_high`, `vol_ratio`, `rsi`, `kz`, `mtf`, `zona`, `overhead`, `congestion`.
 - **Planner (recomendados)**: `ema9`, `ema21`, `atr`, `swing_high`, `swing_low`, `high`, `low`.
-- Categóricos: `signal: LONG|SHORT|BUY|SELL` · `quality: PREMIUM|STRONG|NORMAL|LOW` · `mtf: BULL|BEAR|MIX` · `zona: COMPRA YA|COMPRA|VENDE|VENDE YA`.
+- **Fase 2**: `time` (epoch ms de `time_close` — staleness), `sweep_low`, `sweep_high` (bool — sweep en la vela de señal). **Requiere re-pegar el Pine actualizado en TradingView** — sin estos campos el motor funciona igual pero sin veto de staleness ni SWEEP_CONFIRMED.
+- Categóricos: `signal: LONG|SHORT|BUY|SELL` · `quality: PREMIUM|STRONG|NORMAL|LOW` · `mtf: BULL|BEAR|MIX` · `zona: COMPRA YA|COMPRA|VENDE|VENDE YA` (opcional — sin default direccional).
 
 ## Endpoints
 
@@ -132,10 +142,11 @@ Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros es
 | POST | `/analyze?ai=0\|1` | Evalúa señal Pydantic |
 | POST | `/webhook/tradingview?ai=0\|1` | Recibe del Pine (JSON o texto legacy) |
 | GET | `/signals?limit=&symbol=` | Lista paginada filtrable |
+| GET | `/signals/stream` | **SSE**: `event: signal` al llegar señal nueva (chequeo cada 2s del max id; keep-alive 30s). Frontend lo usa para load inmediato; polling 5s queda de fallback |
 | GET | `/symbols` | Símbolos únicos vistos |
 | POST | `/signals/{id}/result` | `{result, exit_price?, journal_*?}` |
 | DELETE | `/signals/{id}` | Borrar (limpiar data sucia) |
-| GET | `/stats` | Overall + by_symbol/decision/source/quality/side/zona/mtf/pattern + taken/rated/execution_rate |
+| GET | `/stats` | Overall + by_symbol/decision/source/quality/side/zona/mtf/pattern/**score/conf** + taken/rated/execution_rate |
 | GET | `/news?symbol=&hours=` | Próximas high-impact relevantes |
 | GET | `/news/warnings?currencies=&now=` | Warnings activos (polling 5s, `now` para simular) |
 | GET | `/news/calendar?date=&impact=` | Eventos de un día en hora Madrid |
@@ -174,6 +185,10 @@ investor_profile (  -- singleton id=1
 stocks_watchlist (
   symbol PK (UPPERCASE), last_decision (BUY|SELL|HOLD|NULL), last_confidence (0-1), added_at
 )
+
+ohlc_cache (  -- persistencia del cache OHLC (Fase 3): rehidrata tras cold start
+  key PK ("PAIR:interval:outputsize"), fetched_at (epoch float), payload (JSON raw de TD)
+)
 ```
 
 **Migración auto en `init_db()`**: PG usa `ALTER TABLE ADD COLUMN IF NOT EXISTS`; SQLite hace `PRAGMA table_info` + ALTER condicional. Al añadir columnas, agregarlas a ambos branches. Upsert profile via `ON CONFLICT (id) DO UPDATE` / `INSERT OR REPLACE`. Add watchlist idempotente via `ON CONFLICT DO NOTHING` / `INSERT OR IGNORE`.
@@ -193,6 +208,8 @@ NEWS_FILTER_ENABLED=1
 NEWS_WINDOW_BEFORE_MIN=30
 NEWS_WINDOW_AFTER_MIN=5
 TWELVEDATA_API_KEY=  # compartida scanner forex + módulo stocks
+WEBHOOK_TOKEN=       # opcional: si está set, /webhook/tradingview exige ?token= o campo "token" en el payload (401 si no coincide)
+ADMIN_API_KEY=       # opcional: si está set, DELETE /signals y /signals/{id} exigen header X-Admin-Key
 ```
 
 ## Scanner en vivo
@@ -200,22 +217,24 @@ TWELVEDATA_API_KEY=  # compartida scanner forex + módulo stocks
 Análisis independiente del Pine. Lectura técnica multi-factor sobre **OHLC M5** (`SCANNER_INTERVAL="5min"`, `SCANNER_OUTPUTSIZE=200` en `constants.py`), devuelve pares rankeados por confluencia.
 
 - **Twelve Data** (`api.twelvedata.com/time_series`). Yahoo Finance no funciona desde Render (bloquea IPs datacenter).
-- **Símbolos**: conversión auto `EURUSD → EUR/USD` etc. `_parse_ohlc` extrae `open/high/low/close/ts` (el `open` lo usa el radar para pin bars).
+- **Símbolos**: conversión auto `EURUSD → EUR/USD` etc. `_parse_ohlc` extrae `open/high/low/close/ts` (el `open` lo usa el radar para pin bars). **Excluye la vela en formación** (si `meta.interval` presente y `open_ts + interval > now`): solo velas cerradas alimentan indicadores — antes el side/bias repintaba intrabar y quedaba congelado 15 min por el TTL. Fixtures sintéticas sin `meta` no se ven afectadas.
 - **Cache**: `CACHE_TTL_OHLC_SCANNER=900` (15min). `_cache` (cards scored) + `_ohlc_cache` (OHLC crudo). Key `f"{pair}:{interval}:{outputsize}"` → scanner usa `pair:5min:200`, radar `pair:15min:200`, zones `pair:15min:200`.
 - **Indicadores**: EMA9/21/50, RSI14, ATR14, posición rango 50v, impulso 5v.
 - **Scoring**: 7 factores ±1/0. `bias = Σ`. `side: LONG si bias≥3, SHORT si ≤-3, NEUTRAL`. `confluence = |bias|` (0-7).
-- **Endpoint**: `/scanner/pairs?pairs=...` (default 6 majors). Devuelve `{items, count, brief, last_error, market_closed, data_age_minutes}`. Cada item lleva `cross` (veredicto M30+M5). `market_closed=true` si vela más reciente >30min → frontend pausa polling. `/scanner/debug` para diagnóstico.
+- **Endpoint**: `/scanner/pairs?pairs=...` (default 6 majors; `?pairs=` se filtra contra `ALLOWED_PAIRS` en `main.py` — símbolos fuera de whitelist se ignoran para no drenar créditos TD). Devuelve `{items, count, brief, last_error, market_closed, data_age_minutes}`. Cada item lleva `cross` (veredicto M30+M5). `market_closed=true` si vela más reciente >45min (`RADAR_MARKET_STALE_THRESHOLD_MIN=45`: intervalo M15 + TTL 15min + margen, necesario desde que se excluye la vela en formación) → frontend pausa polling. `/scanner/debug` para diagnóstico — errores por par en `_last_errors` (dict), un fetch exitoso limpia el error de su par (antes un string global quedaba stale para siempre).
 
 ## Zonas S/R Activas + bias M30 (`zones.py` · view `sr`)
 
 Tercera capa: niveles soporte/resistencia operables (scalp M5/M15) + **bias direccional M30**. Lenguaje estrictamente descriptivo.
 
 - **Fetch M15 propio**: `zones.analyze_zones` llama `scanner._fetch_chart(pair, interval="15min", outputsize=200)` → cache key `pair:15min:200`, **independiente del scanner M5**. (El scanner pasó a M5 en commit `e7827e4`; antes zones compartía su caché — al cambiar a M5 zones recibía solo ~34 velas M30 y el bias caía a "insuficiente". El fix devolvió a zones su fetch M15: 200 M15 → ~100 M30.)
-- **Bias M30** (`_compute_m30_bias`): resample M15→M30 (`_resample_m15_to_m30`), EMA50 vs EMA100. Guard `len(m30) < EMA_PERIOD_100` (100) → `insufficient_m30_bars`. Estados: BULL (ema50>ema100), BEAR (ema50<ema100), RANGO (|ema50-ema100| < `rango_atr_mult`×ATR_M30, default 0.3). `available=false` con `reason` si no calculable.
+- **Bias M30** (`_compute_m30_bias`): resample M15→M30 (`_resample_m15_to_m30`, `closed="left", label="left"` — los ts de TD son la APERTURA de la vela; con `right` las M30 quedaban desfasadas 15 min de cualquier M30 de broker. Descarta la última M30 si solo tiene 1 hija M15), EMA50 vs EMA100. Fetch `ZONES_OUTPUTSIZE=600` M15 → ~300 M30 (con 200 la EMA100 quedaba en su seed SMA sin converger; mismo coste TD). Guard `len(m30) < EMA_PERIOD_100` (100) → `insufficient_m30_bars`. Estados: BULL (ema50>ema100), BEAR (ema50<ema100), RANGO (|ema50-ema100| < `rango_atr_mult`×ATR_M30, default 0.3) **con histéresis** (`_BIAS_STATE` por par+mult: entrar en RANGO exige sep < 0.8×umbral, salir > 1.2× — mata el flip-flop del cross verdict en la frontera). `available=false` con `reason` si no calculable.
+- **Rango asiático** (`_asia_range`, Fase 2): high/low de la sesión Asia (02–09h Madrid) desde las M15 + flags `swept_high/swept_low` (mecha post-09h que excede el extremo). Expuesto como `asia_range` por par en `/api/zones` y renderizado en `PairCard` — la liquidez que London Open suele barrer, niveles de referencia para la ventana AUDUSD 09–14h del playbook.
+- **Wick ratio**: cap en `WICK_RATIO_CAP=5.0` + dirección `neutral` si el cuerpo es <15% del rango — antes un doji con cuerpo de 1 tick daba ratio 10 y satisfacía trivialmente el gate de rechazo del marco.
 - **Niveles**: pivots fractales (ventana 3) + clustering single-linkage por pips. Cada nivel: precio, tipo (support/resistance), fuerza 1-5, toques, antigüedad, distancia, `active` (dentro de rango + coherente con bias), wick ratio del último toque.
-- **Endpoint** `/api/zones`: `{items, count, market_closed}`. Cada item: `bias_m30`, `levels[]`, `recent_wicks`, `cross`, `marco`, `params`. Params override vía query (window, merge_distance_pips, active_range_pips, min_bars_between, touch_tolerance_pips, level_selector, rango_atr_mult). Cache `_zones_cache` por (pairs, params), TTL 15min.
+- **Endpoint** `/api/zones`: `{items, count, market_closed}`. Cada item: `bias_m30`, `levels[]`, `recent_wicks`, `cross`, `marco`, `params`. Params override vía query (window, merge_distance_pips, active_range_pips, min_bars_between, touch_tolerance_pips, level_selector, rango_atr_mult). Cache `_zones_cache` por (pairs, params), TTL 15min. **No cachea respuestas con `items` vacío** (`get_zones_response`): si todos los pares fallan (típicamente un 429 transitorio de TD por el cap 8 req/min), cachear el vacío congelaría "Sin datos disponibles" durante el TTL entero; dejándolo sin cachear, el siguiente poll (5 min) reintenta.
 - **Pares default** (`ZONES_DEFAULT_PAIRS`): AUDUSD, USDCAD. Frontend `ZonasSRView` poll 5min, pausa si `market_closed`.
-- **Marco teórico** (`zone_signal_engine.generate_zone_marco`, `MarcoCard` en `ZonasSRView`): reemplazó a la antigua "señal" (FUERTE_COMPRA/COMPRA/VENTA) y su sistema de alertas (sonido + `Notification`), **eliminados por completo** (nunca funcionaron de forma fiable). El motor mantiene sus dos capas pero reencuadradas: CAPA 1 = **gates** (mercado abierto, MTF coherente M30/M5, sesión, no-extendido, volatilidad, estructura con impulso, nivel S/R operable, rechazo, RRR≥2, cuenta) como checklist ✓/✗; CAPA 2 = **confluencia** (score 0–18). Decisión final: **OPERAR** (gates duros OK + score ≥ `min_score_normal`), **ESPERAR** (gates OK pero confluencia floja, o degradado por noticia), **NO OPERAR** (falla algún gate duro). **Noticias = gate blando**: `news_client.get_active_warnings` por par; un high-impact en ventana degrada OPERAR→ESPERAR (banner ámbar), nunca veta. `main.py::/api/zones` inyecta `marco` por par. Test: `backend/tests/test_zone_marco.py`.
+- **Marco teórico** (`zone_signal_engine.generate_zone_marco`, `MarcoCard` en `ZonasSRView`): reemplazó a la antigua "señal" (FUERTE_COMPRA/COMPRA/VENTA) y su sistema de alertas (sonido + `Notification`), **eliminados por completo** (nunca funcionaron de forma fiable). El motor mantiene sus dos capas pero reencuadradas: CAPA 1 = **gates** (mercado abierto, MTF coherente M30/M5, sesión, no-extendido, volatilidad, estructura con impulso, nivel S/R operable, rechazo, RRR≥2, cuenta) como checklist ✓/✗; CAPA 2 = **confluencia** (score 0–18). **Gate 9 (RRR+SL cap) es fallable desde Fase 2**: `_calculate_sl_tp` ya NO recorta el SL estructural al cap (si excede → gate falla; recortarlo dejaba el SL dentro del nivel = stop-out garantizado) ni fabrica TP sintético 2:1 a través de niveles (el TP es el nivel opuesto real; si da RRR<2 → gate falla; 2:1 solo cuando no hay nivel opuesto que obstruya). Antes el gate solo podía fallar con risk=0 — era teatro. Decisión final: **OPERAR** (gates duros OK + score ≥ `min_score_normal`), **ESPERAR** (gates OK pero confluencia floja, o degradado por noticia), **NO OPERAR** (falla algún gate duro). **Noticias = gate blando**: `news_client.get_active_warnings` por par; un high-impact en ventana degrada OPERAR→ESPERAR (banner ámbar), nunca veta. `main.py::/api/zones` inyecta `marco` por par. Test: `backend/tests/test_zone_marco.py`.
 - **Alertas de señal FUERTE** (`ZonasSRView`): sonido Web Audio (chime ascendente LONG / descendente SHORT) + `Notification` del navegador **solo** cuando un par transiciona a `OPERAR` + `strength="fuerte"` (`strongSide()`). Botón header `🔔/🔕` toggle; `enableAlerts()` desbloquea el `AudioContext` y pide permiso de notificación **desde el clic** (gesto de usuario — obligatorio o el navegador bloquea audio/permiso). Estado persistido en `localStorage` `tradingapp:zones_alerts_on`. Detección por `prevStrongRef` (Map por par): baseline al montar sin alertar, dispara en aparición o cambio de dirección. **Gotcha**: la versión anterior (alertas en cada cambio de señal) no sonaba porque creaba el `AudioContext` sin gesto previo → suspendido. Frontend-only: `marco.strength` ya viene del backend; no requiere deploy.
 
 ## Veredicto cruzado M30+M5 (`cross_verdict.py`)
@@ -239,11 +258,11 @@ Reconcilia el bias M30 (Zonas S/R) con el side del scanner M5. **Una sola fuente
 
 ## Radar de setups (UI oculta · backend activo)
 
-Segunda capa: puntos concretos de entrada en zonas clave (M15) con price action puro. **La tab del Topbar fue eliminada**; toda la lógica de `backend/app/radar.py`, el endpoint `/api/radar`, los tests (`backend/tests/test_radar.py`), `radarChart.ts` y `lib/radar/` permanecen. `RadarView` queda como función inline en `page.tsx` sin entrada al routing. Para reactivar: volver a colocar la entrada en `Topbar.tsx::TABS`, el atajo `r` y el caso `view === "radar"` en `page.tsx`.
+Segunda capa: puntos concretos de entrada en zonas clave (M15) con price action puro. **La tab del Topbar fue eliminada**; toda la lógica de `backend/app/radar.py`, el endpoint `/api/radar`, los tests (`backend/tests/test_radar.py`), `radarChart.ts` y `lib/radar/` permanecen. **`RadarView` y sus ~830 líneas de componentes muertos fueron BORRADOS de `page.tsx` en Fase 3** (inalcanzables; inflaban el archivo de 2722 a ~1890 líneas). Para reactivar: recuperar `RadarView`/`RadarCard`/`RadarSemaforo` y los tipos `RadarSetup`/`GeometryAnalysis`/`SmcAnalysis` del historial de git (commit previo a Fase 3), colocarlos en `components/radar/`, y añadir la entrada en `Topbar.tsx::TABS` + el caso `view === "radar"`.
 
 ### Pipeline (`radar._analyze_symbol`)
 
-1. `scanner._fetch_chart` → reutiliza `_ohlc_cache`.
+1. `scanner._fetch_chart(symbol, interval=RADAR_INTERVAL, outputsize=RADAR_OUTPUTSIZE)` → reutiliza `_ohlc_cache` (key `pair:15min:200`). **Gotcha corregido**: se llamaba sin args → heredaba los defaults M5 del scanner y todo el radar (niveles, M30 sintético, MTF-LOCK, market_closed) corría sobre un timeframe falso.
 2. `_find_key_levels` → pivots fractales (2 velas a cada lado) + clustering 0.2% → S/R más cercanos.
 3. **Filtro rango comprimido**: si `(R-S)/price < MIN_RANGE_PCT` (0.15% XAU / 0.10% EUR / 0.12% default) → `return None` (consolidación).
 4. `_detect_recent_rejection` → últimas 3 velas: pin bar / envolvente. `candle_age (1/2/3)`, `candle_ts`. Si age=3 → `expired=True`.
@@ -382,9 +401,13 @@ Tokyo, Londres, NY, Madrid. Hora local + ABIERTO/CERRADO + barra de progreso + c
 
 **Decisión**: descartado panel independiente de zonas (redundante con motor + principio "menos indicadores = mejor ejecución").
 
-## Taken vs Rated + Journal
+## Taken vs Rated + Journal — **UI RETIRADA (jul-2026)**
 
-Separa **calidad del sistema** (rated) de **calidad de ejecución** (taken). Modal obligatorio al marcar W/L/BE (sin botón Saltar).
+**El usuario ya no marca resultados W/L/BE.** Los botones W/L/BE y el `JournalModal` fueron eliminados de `page.tsx`; la columna Resultado muestra los badges históricos (WIN/LOSS/BE + EJEC/CAL) en señales viejas y "—" en las nuevas. **El backend queda intacto**: `POST /signals/{id}/result`, las columnas `taken`/`journal_*` en la tabla `signals` y los breakdowns de `/stats` siguen funcionando por si el flujo vuelve o se automatiza.
+
+**Implicación**: `scripts/calibrate.py` no recibirá datos nuevos vía journal. La vía realista para calibrar umbrales pasa a ser la **auto-resolución de resultados** (evaluar cada señal contra el OHLC posterior: qué tocó primero, TP o SL — pendiente, no construido). Los KPIs (PnL/WR/ExecRate) y EquityCurve muestran solo el histórico congelado.
+
+Diseño original (referencia si se reactiva): separaba **calidad del sistema** (rated) de **calidad de ejecución** (taken); modal obligatorio al marcar W/L/BE.
 
 - **No, solo calificar** → `taken='no'`. Solo resultado. Mide edge del sistema.
 - **Sí, la operé** → `taken='yes'` + obligatorio: ¿Respetaste plan? ¿Cerraste antes TP/SL? Emoción (Confianza/Miedo/FOMO/Venganza).
@@ -409,7 +432,9 @@ Tabla señales: badge `EJEC` (verde) o `CAL` (azul) junto al resultado.
 ```
 
 - **`AppShell`**: grid CSS `grid-template-areas`. `body[data-shell="active"]` → `overflow:hidden; height:100vh`, scroll por columna. Responsive: <1024 oculta rightbar, <768 oculta sidebar.
-- **`Topbar`**: brand + tabs + spacer + session pill + iconos. Shortcuts D/Z/S/C/P (ignora si foco en input). Pill usa `useTick(60_000)`. La tab `Radar de setups` (atajo R, botón "Abrir radar" del RightBar) fue removida del UI; `RadarView` queda como función inline en `page.tsx` (código muerto pero compilable). Junto a la tab Playbook hay un enlace externo **"Patrones ↗"** (`<a>` estilizado como tab, color ámbar `.tab-link`) que abre `/patterns.html` en pestaña nueva — NO es un `View` ni tiene atajo de teclado.
+- **`VerdictStrip`** (Fase 3, `components/shell/`): strip global bajo el Topbar (todas las vistas salvo stocks) — una línea por par operado con decisión del marco (OPERAR/ESPERAR/NO OPERAR + side, color por lado), estado del cross (A FAVOR/FADE/⚠ CONFLICTO) y kill zone actual. Responde "qué hago ahora" sin cruzar 3 pantallas. Poll propio a `/api/zones` cada 5min (misma cache backend → 0 créditos extra), pausa con mercado cerrado o pestaña oculta.
+- **Dedup Fase 3**: `page.tsx` pasó de 2722 a ~1890 líneas — sessions/kill zones/useTick ahora se importan de `lib/` (antes duplicados línea por línea), RadarView muerto eliminado, `WATCHLIST`/`MY_PAIRS` viven en `lib/config.ts` (fuente única: RightBar A+ ya no sugiere pares que el playbook prohíbe), `EquityCurve` poll 60s (la curva solo cambia al cerrar trades) y conserva la última curva buena ante errores.
+- **`Topbar`**: brand + tabs + spacer + session pill + iconos. Tabs: **Dashboard (D)** · Zonas S/R (R) · Análisis de zonas (Z) · Stocks (S) · Correlaciones (C) · Playbook (P) — atajos ignoran si foco en input. La tab Dashboard fue **restaurada** (antes era inalcanzable: el branch else de `page.tsx` con KpiHero/tabla/journal existía pero ningún `setView("dashboard")`). Incluye botón 🔔/🔕 global de **alertas de señal del Pine** (sonido + Notification cuando llega una señal nueva con decision ENTER/WAIT; detección por ids nuevos vs `seenSignalIdsRef`, baseline al montar sin alertar; estado en `localStorage` `tradingapp:signal_alerts_on`; helpers compartidos en `lib/alerts.ts` — mismos que usa ZonasSRView). Pill usa `useTick(60_000)`. La tab `Radar de setups` sigue removida; `RadarView` fue borrado de `page.tsx` en Fase 3 (recuperable del historial de git). Junto a la tab Playbook hay un enlace externo **"Patrones ↗"** (`<a>` estilizado como tab, color ámbar `.tab-link`) que abre `/patterns.html` en pestaña nueva — NO es un `View` ni tiene atajo de teclado.
 - **`Sidebar` (context-aware)**: prop `context: 'forex'|'stocks'`. Las vistas `correlations` y `playbook` también usan `forex`.
   - forex: search + lista de pares (favoritos en `useFavoritePairs`) + calendario mini-list.
   - stocks: `StocksSidebarSection` (search ticker + watchlist con pills BUY/SELL/HOLD).
@@ -620,6 +645,7 @@ El contenido es snapshot de las estadísticas del usuario al momento de creació
 ## Polling y créditos Twelve Data
 
 - Frontend scanner: 5min. TTL backend 15min → 2 de 3 polls = cache hit (0 cr). Radar ya no se consulta desde la UI; `/api/radar` sigue accesible pero sin tráfico orgánico.
+- **Fase 3**: `td_client` es el gate único (token-bucket 7/min con margen bajo el cap 8, single-flight, contador de créditos en `/scanner/debug`); el cache OHLC persiste en DB (`ohlc_cache`) → cold start rehidrata sin fetches. Polling del dashboard estratificado: `/signals`+`/news/warnings` cada 5s, `/stats`+`/symbols` cada ~60s, todo pausado con la pestaña oculta (`visibilitychange`); SSE `/signals/stream` dispara load inmediato al llegar señal. `VerdictStrip` (strip global) consume `/api/zones` cada 5min con los pares default → misma cache que la vista Zonas S/R, 0 créditos extra.
 - **Veredicto cruzado**: el cruce añade ~+2 fetches TD por pantalla y ciclo (M15 al abrir el scanner para AUDUSD/USDCAD, M5 al abrir Zonas S/R) — solo los 2 pares de `CROSS_PAIRS`. Holgado bajo el cap 8 req/min. El cruce reutiliza cachés compartidas, así que abrir ambas vistas no duplica fetches dentro del TTL.
 - `market_closed` pausa `setInterval` (cero tráfico finde).
 - `/health`, `/signals`, `/stats`, `/news/*`, webhook **NO consumen TD**.
@@ -634,6 +660,18 @@ El contenido es snapshot de las estadísticas del usuario al momento de creació
 - **Horario**: opera en hora Madrid. Toda UI muestra Madrid o ET según contexto del mercado.
 - **Dirección visual**: NO preset "AI-built dashboard" (Inter+slate+indigo). Identidad: Space Grotesk + Space Mono + ámbar `#F59E0B`. Body 18px, hero 40-57px.
 - **Single-user**: cero auth. `investor_profile` singleton id=1. Multi-user requiere migrar a `user_id`.
+
+## Calibración offline (`backend/scripts/calibrate.py`)
+
+Cruza la tabla `signals` (Supabase o SQLite) con resultados reales: WR/PnL por decisión, score, quality, conf-bucket, zona-vs-lado, MTF-vs-lado, patrón, vol, FVG y hora Madrid, con intervalo de Wilson para n pequeño + **sweep de umbral ENTER** (qué threshold de score habría maximizado expectancy). Los umbrales 7/4 del motor son provisionales hasta que este script diga otra cosa con ≥50 cierres.
+
+```bash
+cd backend
+.venv\Scripts\python.exe -m scripts.calibrate            # todo
+.venv\Scripts\python.exe -m scripts.calibrate --taken    # solo operadas
+```
+
+Ojo: los scores históricos previos al fix del double-counting eran ~1-2 pts más altos — comparar cohortes de la misma época del motor.
 
 ## Cómo se levanta
 
@@ -661,7 +699,7 @@ Frontend http://localhost:3001 · Docs API http://127.0.0.1:8000/docs.
 
 ## Próximos pasos posibles (no hechos)
 
-**Forex**: notificaciones Telegram en ENTER · calculadora tamaño posición · R:R floor como veto duro en `decision_engine.py` · kill zone como veto duro · daily loss limit + cooldown · heatmap hora-vs-PnL · backtest sobre histórico Supabase · stats por journal (emociones, plan respetado).
+**Forex**: notificaciones Telegram en ENTER · calculadora tamaño posición · daily loss limit + cooldown · backtest sobre histórico Supabase · stats por journal (emociones, plan respetado). ~~R:R floor como veto~~, ~~kill zone en el motor~~ y ~~heatmap hora-vs-PnL~~ (tabla "Por hora Madrid" en `scripts/calibrate.py`) hechos en Fase 2 (jul-2026).
 
 **Stocks**: `MarketPulse` (DXY/VIX/SPX/US10Y) · NYSE holidays en `marketHours.ts` · `DELETE /stocks/watchlist` clear-all · loading/error UI states · stocks signals tracking + journal análogo a forex.
 
@@ -674,6 +712,7 @@ Frontend http://localhost:3001 · Docs API http://127.0.0.1:8000/docs.
 - **Render free spin-down**: 15min inactividad → cold start ~30-50s. Mitigar con UptimeRobot/cron-job.org pinging `/health` cada 5min. **CRÍTICO**: pinger debe apuntar a `/health` (gratis) — NUNCA a `/scanner/pairs` o `/api/radar` (~11 cr × 288 pings = 3168 cr/día, muy sobre cap 800).
 - **Créditos TD**: backend 100% reactivo. Solo `/scanner/pairs` y `/api/radar` consumen. Si suben sin uso: pinger / sesión abierta / bot.
 - **Cold start borra cache**: tras spin-down arranca vacío. Pinger `/health` evita.
+- **"Sin datos disponibles" en Zonas S/R**: NO es backend caído ni créditos diarios agotados — casi siempre es el cap **8 req/min** de TD (free). Un 429 hace que `_fetch_chart`→`None`→`analyze_zones`→`None`; si fallan todos los pares, `/api/zones` sale con `items: []` y el frontend muestra el mensaje. Es transitorio (se limpia al minuto). Se agrava cuando el burst supera 8/min (Dashboard poleando 6 majors + abrir Zonas + cold-start). Diagnóstico: `/scanner/debug` → `last_error` muestra el 429 real. Fix aplicado: `get_zones_response` ya no cachea el vacío (antes lo congelaba 15 min).
 - **Supabase password con `@`/`#`/`:`**: rompe parsing de `DATABASE_URL`. Resetear con solo letras/números.
 - **Supabase Direct Connection no funciona en Render** (IPv4 only). Usar **Transaction pooler** (port 6543, user `postgres.PROJECT_REF`).
 - **`zoneinfo` en Windows**: requiere `tzdata` (en `requirements.txt`).

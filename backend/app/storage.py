@@ -13,17 +13,24 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # ---------------------------------------------------------------------------
 
 if DATABASE_URL:
+    import threading
+
     import psycopg2
     import psycopg2.pool
     import psycopg2.extras
 
-    _pool: psycopg2.pool.SimpleConnectionPool | None = None
+    # ThreadedConnectionPool: FastAPI ejecuta los endpoints sync en un
+    # threadpool — SimpleConnectionPool no es thread-safe y puede entregar la
+    # misma conexión a dos threads.
+    _pool: psycopg2.pool.ThreadedConnectionPool | None = None
+    _pool_lock = threading.Lock()
 
-    def _get_pool() -> psycopg2.pool.SimpleConnectionPool:
+    def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
         global _pool
-        if _pool is None or _pool.closed:
-            _pool = psycopg2.pool.SimpleConnectionPool(1, 5, DATABASE_URL)
-        return _pool
+        with _pool_lock:
+            if _pool is None or _pool.closed:
+                _pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+            return _pool
 
     class _PgContext:
         """Context manager que saca conexión del pool y hace commit/rollback."""
@@ -122,6 +129,13 @@ def init_db() -> None:
                     added_at TEXT NOT NULL
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ohlc_cache (
+                    key TEXT PRIMARY KEY,
+                    fetched_at DOUBLE PRECISION NOT NULL,
+                    payload TEXT NOT NULL
+                )
+            """)
     else:
         with _db() as cur:
             cur.execute("""
@@ -172,6 +186,49 @@ def init_db() -> None:
                     added_at TEXT NOT NULL
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ohlc_cache (
+                    key TEXT PRIMARY KEY,
+                    fetched_at REAL NOT NULL,
+                    payload TEXT NOT NULL
+                )
+            """)
+
+
+# ---------------------------------------------------------------------------
+# OHLC cache persistente — sobrevive al spin-down de Render (cold start sin
+# burst de fetches). Best-effort: cualquier fallo de DB se traga con warning,
+# nunca rompe el fetch a Twelve Data.
+# ---------------------------------------------------------------------------
+
+def get_ohlc_cache(key: str):
+    """(fetched_at, payload_dict) o None."""
+    try:
+        with _db() as cur:
+            _exec(cur, f"SELECT fetched_at, payload FROM ohlc_cache WHERE key = {_PH}", (key,))
+            row = _fetchone(cur)
+        if not row:
+            return None
+        return float(row["fetched_at"]), json.loads(row["payload"])
+    except Exception:
+        return None
+
+
+def save_ohlc_cache(key: str, fetched_at: float, payload: dict) -> None:
+    try:
+        blob = json.dumps(payload)
+        with _db() as cur:
+            if DATABASE_URL:
+                _exec(cur, (
+                    "INSERT INTO ohlc_cache (key, fetched_at, payload) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET fetched_at = EXCLUDED.fetched_at, payload = EXCLUDED.payload"
+                ), (key, fetched_at, blob))
+            else:
+                _exec(cur, "INSERT OR REPLACE INTO ohlc_cache (key, fetched_at, payload) VALUES (?, ?, ?)",
+                      (key, fetched_at, blob))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("save_ohlc_cache falló para %s", key, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -304,11 +361,34 @@ def delete_all_signals(symbol: Optional[str] = None) -> int:
         return cur.rowcount or 0
 
 
+def max_signal_id() -> Optional[int]:
+    """Último id de señal — lo usa el stream SSE para detectar nuevas."""
+    with _db() as cur:
+        _exec(cur, "SELECT MAX(id) AS m FROM signals", ())
+        row = _fetchone(cur)
+    return row["m"] if row else None
+
+
 def distinct_symbols() -> List[str]:
     with _db() as cur:
         _exec(cur, "SELECT DISTINCT symbol FROM signals ORDER BY symbol", ())
         rows = _fetchall(cur)
     return [r["symbol"] for r in rows if r["symbol"]]
+
+
+def _conf_bucket(conf) -> str:
+    """Bucket de conf del Pine para calibración: <5 / 5-9 / 10-13 / 14+."""
+    try:
+        c = int(conf)
+    except (TypeError, ValueError):
+        return "unknown"
+    if c >= 14:
+        return "14+"
+    if c >= 10:
+        return "10-13"
+    if c >= 5:
+        return "5-9"
+    return "<5"
 
 
 def stats() -> dict:
@@ -358,6 +438,8 @@ def stats() -> dict:
         "by_zona": _bucket(lambda r: r["signal"].get("zona")),
         "by_mtf": _bucket(lambda r: r["signal"].get("mtf")),
         "by_pattern": _bucket(lambda r: r["signal"].get("pattern")),
+        "by_score": _bucket(lambda r: str(r["response"].get("score", "?"))),
+        "by_conf": _bucket(lambda r: _conf_bucket(r["signal"].get("conf"))),
         "by_emotion": _bucket(lambda r: r.get("journal_emotion"), items=taken),
         "by_respected_plan": _bucket(lambda r: r.get("journal_respected_plan"), items=taken),
     }

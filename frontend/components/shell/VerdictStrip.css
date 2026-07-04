@@ -1,0 +1,36 @@
+.verdict-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 6px 14px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+  font-size: 12.5px;
+}
+
+.vs-kz {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.vs-kz-fire  { color: var(--accent, #f59e0b); border-color: rgba(245, 158, 11, 0.4); }
+.vs-kz-ok    { color: #4ade80; border-color: rgba(74, 222, 128, 0.35); }
+.vs-kz-warn  { color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); }
+.vs-kz-avoid { color: var(--text-muted); border-color: var(--border); }
+
+.vs-closed { color: var(--text-muted); font-size: 11.5px; }
+
+.vs-pair { white-space: nowrap; color: var(--text-muted); }
+.vs-pair b { color: var(--text); margin-right: 2px; }
+.vs-long  { color: #4ade80; }
+.vs-short { color: #f87171; }
+.vs-wait  { color: #fbbf24; }
+.vs-no    { color: var(--text-muted); }
+.vs-cross { opacity: 0.75; font-size: 11.5px; }
+.vs-cross-conflict { color: #f87171; opacity: 1; font-weight: 600; }
