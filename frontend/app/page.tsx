@@ -955,6 +955,11 @@ export default function Home() {
       const slow = includeSlow
         ? Promise.all([get(`${API}/stats`), get(`${API}/symbols`)])
         : null;
+      // Si el Promise.all rápido lanza (p.ej. abort del siguiente load), el
+      // `await slow` de abajo nunca se alcanza y su rechazo quedaría unhandled
+      // (overlay de error en dev). Este catch lateral lo marca como manejado
+      // sin afectar al await del try.
+      slow?.catch(() => {});
       const [signalsData, nj, oj] = await Promise.all([
         get(`${API}/signals?limit=${PAGE_SIZE}&offset=${offset}${symParam}`),
         get(`${API}/news/warnings`),
