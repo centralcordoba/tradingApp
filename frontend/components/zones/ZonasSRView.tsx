@@ -10,6 +10,9 @@ import "./ZonasSRView.css";
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 min
 const PARAMS_DEBOUNCE_MS = 600;
 const ALERTS_ON_KEY = "tradingapp:zones_alerts_on";
+const LAST_ALERTS_KEY = "tradingapp:zones_last_alerts";
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000; // una vela M15: no repetir mismo par+lado antes
+const ALERT_MAX_AGE_MIN = 10;             // dato más viejo → Notification sin chime
 
 // ─── Alertas de señal FUERTE (estilo TradingView) ──────────────────────────
 // Solo se disparan cuando un par pasa a OPERAR + strength "fuerte". El audio se
@@ -17,11 +20,30 @@ const ALERTS_ON_KEY = "tradingapp:zones_alerts_on";
 // un gesto de usuario — ese era el motivo de que la versión anterior no sonara).
 // Los helpers de sonido/notificación viven en lib/alerts.ts (compartidos con
 // las alertas de señal del Pine en el Dashboard).
+// El registro par→{lado,timestamp} en localStorage sobrevive recargas: una
+// señal ya activa al montar suena si aún no se alertó (antes el baseline se la
+// tragaba) y el cooldown evita re-alertar el mismo par+lado en cada F5 o si el
+// score flip-flopea en la frontera del umbral.
 
-function sendStrongNotification(pair: string, marco: ZoneMarco) {
+type LastAlert = { side: "LONG" | "SHORT"; at: number };
+
+function loadLastAlerts(): Record<string, LastAlert> {
+  try { return JSON.parse(localStorage.getItem(LAST_ALERTS_KEY) || "{}"); } catch { return {}; }
+}
+
+function saveLastAlerts(rec: Record<string, LastAlert>) {
+  try { localStorage.setItem(LAST_ALERTS_KEY, JSON.stringify(rec)); } catch { /* ignore */ }
+}
+
+function sendStrongNotification(pair: string, marco: ZoneMarco, ageMin: number | null | undefined) {
   const isLong = marco.side === "LONG";
   const title = `${isLong ? "📈 FUERTE COMPRA" : "📉 FUERTE VENTA"} · ${pair}`;
   const lines: string[] = [];
+  if (ageMin != null) {
+    lines.push(ageMin > ALERT_MAX_AGE_MIN
+      ? `⚠ Señal de hace ${Math.round(ageMin)} min — verificar en el chart antes de entrar`
+      : `Hace ${Math.round(ageMin)} min`);
+  }
   if (marco.entry_price != null) lines.push(`Entrada ${marco.entry_price.toFixed(5)}`);
   if (marco.sl_price != null)    lines.push(`SL ${marco.sl_price.toFixed(5)} (${marco.risk_pips}p)`);
   if (marco.tp_price != null)    lines.push(`TP ${marco.tp_price.toFixed(5)} (${marco.reward_pips}p)`);
@@ -770,23 +792,33 @@ export function ZonasSRView() {
   }, [alertsOn]);
 
   // Detectar transición a señal FUERTE y disparar sonido + notificación.
+  // Transición = aparece o cambia de lado (prevStrongRef, en memoria) — pero
+  // gateada por el registro persistido: cooldown de 15 min por par+lado que
+  // sobrevive recargas. Si el dato es viejo (>ALERT_MAX_AGE_MIN) no suena el
+  // chime — solo Notification con la edad, para no invitar a una entrada tardía.
   useEffect(() => {
-    if (!data?.items) return;
+    if (!data?.items || !alertsOn) return;
     const prev = prevStrongRef.current;
-    const isFirst = prev.size === 0;
+    const rec = loadLastAlerts();
+    const now = Date.now();
+    let dirty = false;
     for (const item of data.items) {
       const cur = strongSide(item.marco);
       const last = prev.get(item.pair) ?? null;
       prev.set(item.pair, cur);
-      if (isFirst) continue;            // baseline al montar, sin alertar
-      if (!alertsOn) continue;
-      // Nueva señal fuerte (aparece o cambia de dirección)
-      if (cur && cur !== last) {
+      if (!cur || cur === last) continue;
+      const seen = rec[item.pair];
+      if (seen && seen.side === cur && now - seen.at < ALERT_COOLDOWN_MS) continue;
+      rec[item.pair] = { side: cur, at: now };
+      dirty = true;
+      const age = item.data_age_minutes;
+      if (age == null || age <= ALERT_MAX_AGE_MIN) {
         const ctx = audioCtxRef.current;
         if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, cur); }
-        if (item.marco) sendStrongNotification(item.pair, item.marco);
       }
+      if (item.marco) sendStrongNotification(item.pair, item.marco, age);
     }
+    if (dirty) saveLastAlerts(rec);
   }, [data, alertsOn]);
 
   const fetchZones = useCallback(async () => {

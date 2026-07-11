@@ -14,7 +14,7 @@ import { ZonasSRView } from "@/components/zones/ZonasSRView";
 import { CrossBadge } from "@/components/cross/CrossBadge";
 import type { CrossVerdict } from "@/lib/types";
 import { useTick } from "@/hooks/useTick";
-import { playChime, sendNotification, createAudioContext } from "@/lib/alerts";
+import { playChime, sendNotification, createAudioContext, CHIME_REPEATS } from "@/lib/alerts";
 import {
   SESSIONS,
   type SessionInfo,
@@ -828,7 +828,9 @@ export default function Home() {
       const side: "LONG" | "SHORT" =
         (s.signal.signal === "LONG" || s.signal.signal === "BUY") ? "LONG" : "SHORT";
       const ctx = signalAudioRef.current;
-      if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, side); }
+      // ENTER = chime completo (~5s, urgente); WAIT = un solo motif (~1s):
+      // "hay plan pero no ejecutes todavía" no debe sonar igual que "entra ya".
+      if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, side, d === "ENTER" ? CHIME_REPEATS : 1); }
       const tp = s.response.take_profit?.length
         ? s.response.take_profit[s.response.take_profit.length - 1]
         : null;

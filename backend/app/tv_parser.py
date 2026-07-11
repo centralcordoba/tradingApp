@@ -109,5 +109,7 @@ def parse_payload(raw: str | bytes) -> dict[str, Any]:
                 out["vol_ratio"] = n
         elif key == "FVG":
             out["fvg"] = "SI" in val.upper()
+        elif key == "IFVG":
+            out["ifvg"] = "SI" in val.upper()
 
     return out

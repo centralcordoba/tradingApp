@@ -24,6 +24,7 @@ Scoring (después de pasar los vetos):
   - Patron direccional presente +1 (NR7/Inside Bar no puntúan: son neutros)
   - Volumen alto +1
   - FVG presente +1
+  - IFVG (retest de FVG invertido) +1
   - Kill zone Madrid: FIRE +1, WARN -1, AVOID -2
 
 Mapeo final (provisional hasta calibrar con la tabla signals):
@@ -214,6 +215,10 @@ def analyze(sig: TVSignal) -> AnalyzeResponse:
     if sig.fvg:
         score += 1
         reasons.append("FVG activo")
+
+    if sig.ifvg:
+        score += 1
+        reasons.append("IFVG: retest de FVG invertido")
 
     # NOTA: conf NO se puntúa aparte — quality ya es el tier de conf del Pine.
 

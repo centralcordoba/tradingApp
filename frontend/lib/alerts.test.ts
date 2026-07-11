@@ -6,7 +6,7 @@
      2. Ejecutarse manualmente con `npx tsx lib/alerts.test.ts`.
    ────────────────────────────────────────────────────────────────── */
 
-import { chimeSchedule, playChime, CHIME_TARGET_SEC, type ChimeNote } from "./alerts";
+import { chimeSchedule, playChime, CHIME_TARGET_SEC, CHIME_REPEATS, type ChimeNote } from "./alerts";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`ASSERTION FAILED: ${msg}`);
@@ -100,6 +100,24 @@ for (const side of ["LONG", "SHORT"] as const) {
     );
     assert(s.stop > s.start, `${side}: nota ${i} stop <= start`);
   });
+}
+
+// ─── Tono corto (repeats=1) para avisos no urgentes (WAIT) ──────
+
+for (const side of ["LONG", "SHORT"] as const) {
+  const short = chimeSchedule(side, 1);
+  assert(short.length === 3, `${side}: repeats=1 debe dar un solo motif de 3 notas`);
+  assert(totalDuration(short) < 1.5, `${side}: el tono corto debe durar ~1s, dura ${totalDuration(short).toFixed(2)}s`);
+}
+assert(
+  JSON.stringify(chimeSchedule("LONG", CHIME_REPEATS)) === JSON.stringify(chimeSchedule("LONG")),
+  "sin repeats debe equivaler a CHIME_REPEATS",
+);
+
+{
+  const { ctx, scheduled } = mockAudioContext(0);
+  playChime(ctx, "SHORT", 1);
+  assert(scheduled.length === 3, `playChime con repeats=1 creó ${scheduled.length} osciladores, esperaba 3`);
 }
 
 // ─── playChime no lanza con un contexto roto ────────────────────

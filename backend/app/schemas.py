@@ -23,6 +23,7 @@ class TVSignal(BaseModel):
     quality: QualityType
     pattern: str = "---"
     fvg: bool = False
+    ifvg: bool = False  # retest de FVG invertido (zona rota actuando de oferta/demanda)
     vol_high: bool = False
     vol_ratio: float = 1.0
     rsi: float = 50.0

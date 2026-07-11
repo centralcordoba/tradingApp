@@ -42,6 +42,7 @@ showFVG        = input.bool(true, "Mostrar FVG", group="FVG")
 fvgMinSize     = input.float(0.03, "Tamano minimo FVG %", minval=0.01, maxval=0.5, group="FVG", tooltip="EURUSD: 0.03% recomendado")
 maxFVG         = input.int(3, "Max FVG visibles", minval=1, maxval=10, group="FVG")
 useFVGConf     = input.bool(true, "Usar FVG como Confluencia", group="FVG")
+showIFVG       = input.bool(true, "Rastrear IFVG (FVG invertido)", group="FVG", tooltip="Un FVG violado por cierre cambia de rol: la zona rota actua como oferta/demanda. El retest se envia al backend como ifvg")
 
 showSweeps     = input.bool(true, "Mostrar Liquidity Sweeps", group="Liquidez")
 showEQHL       = input.bool(false, "Mostrar Equal H/L", group="Liquidez")
@@ -144,6 +145,8 @@ obBullColor    = color.new(color.rgb(38, 166, 154), 80)
 obBearColor    = color.new(color.rgb(239, 83, 80), 80)
 fvgBullColor   = color.new(color.rgb(0, 150, 255), 80)
 fvgBearColor   = color.new(color.rgb(255, 150, 0), 80)
+ifvgBullColor  = color.new(color.rgb(0, 200, 150), 82)
+ifvgBearColor  = color.new(color.rgb(190, 60, 220), 82)
 breakerBullCol = color.new(color.rgb(0, 200, 255), 75)
 breakerBearCol = color.new(color.rgb(255, 100, 200), 75)
 vwapColor      = color.rgb(255, 235, 59)
@@ -427,6 +430,80 @@ if showFVG and fvgBearCond and barstate.isconfirmed
     array.push(bearFVGTops, low[2])
     array.push(bearFVGBots, high)
 
+// ============================================================================
+// IFVG — FVG INVERTIDO (SMC)
+// Un FVG violado por cierre cambia de rol: Bull FVG roto a la baja pasa a ser
+// oferta (confluencia SHORT en el retest); Bear FVG roto al alza pasa a ser
+// demanda (confluencia LONG en el retest). Esto ademas corrige la confluencia
+// FVG clasica: antes un FVG roto nunca se eliminaba de los arrays y seguia
+// contando a favor (isInBullFVG/isInBearFVG sobre zona ya invalidada).
+// ============================================================================
+
+var array<box> bullIFVGBoxes = array.new<box>()   // demanda (ex-Bear FVG roto al alza)
+var array<float> bullIFVGTops = array.new<float>()
+var array<float> bullIFVGBots = array.new<float>()
+var array<box> bearIFVGBoxes = array.new<box>()   // oferta (ex-Bull FVG roto a la baja)
+var array<float> bearIFVGTops = array.new<float>()
+var array<float> bearIFVGBots = array.new<float>()
+
+// Bull FVG violado (cierre bajo el gap) → se invierte a oferta
+if barstate.isconfirmed and array.size(bullFVGBots) > 0
+    for i = array.size(bullFVGBots) - 1 to 0
+        if close < array.get(bullFVGBots, i)
+            fBox = array.get(bullFVGBoxes, i)
+            if showIFVG
+                box.set_bgcolor(fBox, ifvgBearColor)
+                box.set_border_color(fBox, color.rgb(190, 60, 220))
+                if array.size(bearIFVGBoxes) >= maxFVG
+                    box.delete(array.shift(bearIFVGBoxes))
+                    array.shift(bearIFVGTops)
+                    array.shift(bearIFVGBots)
+                array.push(bearIFVGBoxes, fBox)
+                array.push(bearIFVGTops, array.get(bullFVGTops, i))
+                array.push(bearIFVGBots, array.get(bullFVGBots, i))
+            else
+                box.delete(fBox)
+            array.remove(bullFVGBoxes, i)
+            array.remove(bullFVGTops, i)
+            array.remove(bullFVGBots, i)
+
+// Bear FVG violado (cierre sobre el gap) → se invierte a demanda
+if barstate.isconfirmed and array.size(bearFVGTops) > 0
+    for i = array.size(bearFVGTops) - 1 to 0
+        if close > array.get(bearFVGTops, i)
+            fBox = array.get(bearFVGBoxes, i)
+            if showIFVG
+                box.set_bgcolor(fBox, ifvgBullColor)
+                box.set_border_color(fBox, color.rgb(0, 200, 150))
+                if array.size(bullIFVGBoxes) >= maxFVG
+                    box.delete(array.shift(bullIFVGBoxes))
+                    array.shift(bullIFVGTops)
+                    array.shift(bullIFVGBots)
+                array.push(bullIFVGBoxes, fBox)
+                array.push(bullIFVGTops, array.get(bearFVGTops, i))
+                array.push(bullIFVGBots, array.get(bearFVGBots, i))
+            else
+                box.delete(fBox)
+            array.remove(bearFVGBoxes, i)
+            array.remove(bearFVGTops, i)
+            array.remove(bearFVGBots, i)
+
+// IFVG fallido (doble ruptura) = chop, se descarta sin re-invertir
+if barstate.isconfirmed and array.size(bullIFVGBots) > 0
+    for i = array.size(bullIFVGBots) - 1 to 0
+        if close < array.get(bullIFVGBots, i)
+            box.delete(array.get(bullIFVGBoxes, i))
+            array.remove(bullIFVGBoxes, i)
+            array.remove(bullIFVGTops, i)
+            array.remove(bullIFVGBots, i)
+if barstate.isconfirmed and array.size(bearIFVGTops) > 0
+    for i = array.size(bearIFVGTops) - 1 to 0
+        if close > array.get(bearIFVGTops, i)
+            box.delete(array.get(bearIFVGBoxes, i))
+            array.remove(bearIFVGBoxes, i)
+            array.remove(bearIFVGTops, i)
+            array.remove(bearIFVGBots, i)
+
 isInBullFVG = false
 isInBearFVG = false
 if array.size(bullFVGBots) > 0
@@ -437,6 +514,18 @@ if array.size(bearFVGBots) > 0
     for i = 0 to array.size(bearFVGBots) - 1
         if close >= array.get(bearFVGBots, i) and close <= array.get(bearFVGTops, i)
             isInBearFVG := true
+
+// Retest de IFVG: cierre dentro de la zona invertida (el precio volvio al gap roto)
+isInBullIFVG = false
+isInBearIFVG = false
+if array.size(bullIFVGBots) > 0
+    for i = 0 to array.size(bullIFVGBots) - 1
+        if close >= array.get(bullIFVGBots, i) and close <= array.get(bullIFVGTops, i)
+            isInBullIFVG := true
+if array.size(bearIFVGBots) > 0
+    for i = 0 to array.size(bearIFVGBots) - 1
+        if close >= array.get(bearIFVGBots, i) and close <= array.get(bearIFVGTops, i)
+            isInBearIFVG := true
 
 // ============================================================================
 // FIBONACCI / PREMIUM-DISCOUNT
@@ -966,6 +1055,7 @@ longMessage = '{"signal":"LONG","symbol":"' + syminfo.ticker + '","timeframe":"'
      ',"quality":"' + qualityNameLong + '"' +
      ',"pattern":"' + bullPatternName + '"' +
      ',"fvg":' + (isInBullFVG ? "true" : "false") +
+     ',"ifvg":' + (isInBullIFVG ? "true" : "false") +
      ',"vol_high":' + (bullVolConf ? "true" : "false") +
      ',"vol_ratio":' + str.tostring(volRatio, "#.##") +
      ',"rsi":' + str.tostring(rsiValue, "#.#") +
@@ -995,6 +1085,7 @@ shortMessage = '{"signal":"SHORT","symbol":"' + syminfo.ticker + '","timeframe":
      ',"quality":"' + qualityNameShort + '"' +
      ',"pattern":"' + bearPatternName + '"' +
      ',"fvg":' + (isInBearFVG ? "true" : "false") +
+     ',"ifvg":' + (isInBearIFVG ? "true" : "false") +
      ',"vol_high":' + (bearVolConf ? "true" : "false") +
      ',"vol_ratio":' + str.tostring(volRatio, "#.##") +
      ',"rsi":' + str.tostring(rsiValue, "#.#") +

@@ -73,6 +73,7 @@ def _scanner_item(*, side="LONG", confluence=5, extended="normal", rsi=40.0,
 def setup_function(_):
     # Hora Madrid fija (10h = London, AUDUSD en fire) para determinismo.
     zse._madrid_hour = lambda: 10  # type: ignore[assignment]
+    zse._STRENGTH_STATE.clear()
 
 
 # ─── Casos ──────────────────────────────────────────────────────────────────
@@ -144,6 +145,38 @@ def test_noticia_degrada_operar_a_esperar():
     # La noticia es gate blando: no aparece como fallo duro.
     noticia = next(g for g in con["gates"] if g["key"] == "noticia")
     assert noticia["hard"] is False and noticia["passed"] is False
+
+
+def test_histeresis_strength_en_frontera():
+    # AUDUSD: min_score_strong=10. Un score oscilando 10↔9 no debe hacer
+    # flip-flop fuerte↔normal (re-dispararía la alerta sonora en cada poll):
+    # una vez fuerte, se mantiene mientras score >= min_strong - 1.
+    real = zse._score_signal
+    scores = iter([10, 9, 8, 9])
+    zse._score_signal = lambda **kw: (next(scores), [], [])  # type: ignore[assignment]
+    try:
+        args = (_zone_item(), _scanner_item())
+        assert generate_zone_marco(*args)["strength"] == "fuerte"   # 10 → entra en fuerte
+        assert generate_zone_marco(*args)["strength"] == "fuerte"   # 9 → histéresis: sigue fuerte
+        assert generate_zone_marco(*args)["strength"] == "normal"   # 8 → pierde fuerte
+        assert generate_zone_marco(*args)["strength"] == "normal"   # 9 sin estado previo → normal
+    finally:
+        zse._score_signal = real  # type: ignore[assignment]
+
+
+def test_histeresis_se_resetea_con_gate_duro():
+    real = zse._score_signal
+    scores = iter([10, 9])
+    zse._score_signal = lambda **kw: (next(scores), [], [])  # type: ignore[assignment]
+    try:
+        assert generate_zone_marco(_zone_item(), _scanner_item())["strength"] == "fuerte"
+        # Un gate duro fallado (mercado cerrado) limpia el estado del par...
+        m = generate_zone_marco(_zone_item(market_closed=True), _scanner_item())
+        assert m["decision"] == "NO_OPERAR"
+        # ...así que un 9 posterior ya no hereda el "fuerte".
+        assert generate_zone_marco(_zone_item(), _scanner_item())["strength"] == "normal"
+    finally:
+        zse._score_signal = real  # type: ignore[assignment]
 
 
 if __name__ == "__main__":

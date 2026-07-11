@@ -555,6 +555,13 @@ def _gate(key: str, label: str, passed: bool, hard: bool, detail: str = "") -> d
     return {"key": key, "label": label, "passed": passed, "hard": hard, "detail": detail}
 
 
+# Histéresis del strength por par: una vez FUERTE, sigue siéndolo mientras el
+# score no caiga más de 1 punto bajo min_score_strong. Sin esto, un score
+# oscilando en la frontera (p.ej. 9↔10 AUDUSD) hace flip-flop normal↔fuerte
+# y re-dispara la alerta sonora del frontend en cada poll.
+_STRENGTH_STATE: dict[str, str] = {}
+
+
 def generate_zone_marco(
     zone_item: dict,
     scanner_item: Optional[dict],
@@ -768,6 +775,7 @@ def generate_zone_marco(
     }
 
     if hard_failed:
+        _STRENGTH_STATE.pop(pair, None)
         return {
             **base,
             "decision": "NO_OPERAR",
@@ -792,9 +800,10 @@ def generate_zone_marco(
 
     min_strong = cfg["min_score_strong"]
     min_normal = cfg["min_score_normal"]
+    strong_floor = min_strong - 1 if _STRENGTH_STATE.get(pair) == "fuerte" else min_strong
     if score >= min_normal:
         decision = "OPERAR"
-        strength = "fuerte" if score >= min_strong else "normal"
+        strength = "fuerte" if score >= strong_floor else "normal"
         reason = (
             f"Setup {strength} {scanner_side} — {score}/{MAX_SCORE} de confluencia, "
             "gates superados."
@@ -812,6 +821,11 @@ def generate_zone_marco(
         decision = "ESPERAR"
         strength = None
         reason = "Noticia high-impact en ventana — esperar a que pase antes de entrar."
+
+    if strength:
+        _STRENGTH_STATE[pair] = strength
+    else:
+        _STRENGTH_STATE.pop(pair, None)
 
     return {
         **base,

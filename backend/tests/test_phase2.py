@@ -249,6 +249,17 @@ def test_fresh_signal_enters(kz_ok):
     assert r.plan is not None and r.plan.trigger_type == "IMMEDIATE"
 
 
+def test_ifvg_scores_plus_one(kz_ok):
+    base = decision_engine.analyze(_sig()).score
+    con = decision_engine.analyze(_sig(ifvg=True)).score
+    assert con == base + 1
+
+
+def test_parser_legacy_ifvg():
+    out = parse_payload(_LEGACY + "\nIFVG: SI")
+    assert out["ifvg"] is True
+
+
 def test_conf_no_longer_double_counted(kz_ok):
     low_conf = decision_engine.analyze(_sig(conf=10))
     high_conf = decision_engine.analyze(_sig(conf=19))
