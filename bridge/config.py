@@ -58,13 +58,15 @@ class Config:
     max_total_loss_usd: float = float(_get("MAX_TOTAL_LOSS_USD", "5000"))
     initial_balance: float = float(_get("INITIAL_BALANCE", "50000"))
 
-    # Qué se opera y cuándo (ventanas en hora Madrid, del playbook)
+    # Qué se opera y cuándo (ventanas en hora Madrid, del playbook).
+    # Solo AUDUSD y USDCAD van a MT5: las señales del Pine (EURUSD) se registran
+    # en el log pero NO se ejecutan salvo que se añada EURUSD a la whitelist.
     allowed_symbols: tuple = tuple(
         s.strip().upper()
-        for s in _get("ALLOWED_SYMBOLS", "EURUSD,AUDUSD,USDCAD").split(",") if s.strip()
+        for s in _get("ALLOWED_SYMBOLS", "AUDUSD,USDCAD").split(",") if s.strip()
     )
     symbol_windows: dict = field(default_factory=lambda: _parse_windows(
-        _get("SYMBOL_WINDOWS", "EURUSD=9-21,AUDUSD=9-14,USDCAD=14-21")))
+        _get("SYMBOL_WINDOWS", "AUDUSD=9-14,USDCAD=14-21")))
     symbol_suffix: str = _get("SYMBOL_SUFFIX", "")   # brokers con sufijo (EURUSD.r etc.)
 
     # Ejecución

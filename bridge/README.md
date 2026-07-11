@@ -1,9 +1,9 @@
 # Bridge MT5 (FTMO)
 
-Proceso local (Windows) que ejecuta en MetaTrader 5 las decisiones del backend:
+Proceso local (Windows) que ejecuta en MetaTrader 5 las decisiones del backend. **Solo opera AUDUSD y USDCAD** (whitelist por defecto):
 
-- **Señales del Pine con decision ENTER** → orden a mercado con el SL/TP del motor (vía SSE `/signals/stream`, latencia ~2s).
-- **Marco de Zonas S/R en OPERAR + fuerte** (AUDUSD/USDCAD) → orden a mercado con el entry/SL/TP del marco (poll `/api/zones` cada 5 min, misma cache que el frontend).
+- **Marco de Zonas S/R en OPERAR + fuerte** (AUDUSD/USDCAD) → orden a mercado con el entry/SL/TP del marco (poll `/api/zones` cada 5 min, misma cache que el frontend). Es la fuente ejecutora principal.
+- **Señales del Pine con decision ENTER** (vía SSE `/signals/stream`, latencia ~2s) → se registran en el log, pero como el Pine opera EURUSD (fuera de la whitelist) **no se ejecutan**. Para activarlas: añadir EURUSD a `ALLOWED_SYMBOLS` y su ventana a `SYMBOL_WINDOWS`.
 - **Auto-resolución**: cuando MT5 cierra un trade del bridge (TP/SL/manual), reporta WIN/LOSS/BE + exit_price a `POST /signals/{id}/result` → alimenta `/stats` y `scripts/calibrate.py` sin marcar nada a mano.
 
 ## Requisitos
@@ -31,8 +31,8 @@ MAX_DAILY_LOSS_USD=2500      # límite FTMO 50k (5%)
 MAX_TOTAL_LOSS_USD=5000      # límite FTMO 50k (10%)
 INITIAL_BALANCE=50000
 
-ALLOWED_SYMBOLS=EURUSD,AUDUSD,USDCAD
-SYMBOL_WINDOWS=EURUSD=9-21,AUDUSD=9-14,USDCAD=14-21   # hora Madrid, [inicio, fin)
+ALLOWED_SYMBOLS=AUDUSD,USDCAD                  # añadir EURUSD para ejecutar el Pine
+SYMBOL_WINDOWS=AUDUSD=9-14,USDCAD=14-21        # hora Madrid, [inicio, fin)
 SYMBOL_SUFFIX=               # solo si el broker usa sufijos (p.ej. ".r")
 
 MT5_LOGIN=                   # vacíos = usa la sesión ya logueada en el terminal
