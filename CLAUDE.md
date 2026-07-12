@@ -146,6 +146,9 @@ Filosofía pro-scalper: nunca entrar en la vela de señal extendida; los pros es
 | GET | `/signals?limit=&symbol=` | Lista paginada filtrable |
 | GET | `/signals/stream` | **SSE**: `event: signal` al llegar señal nueva (chequeo cada 2s del max id; keep-alive 30s). Frontend lo usa para load inmediato; polling 5s queda de fallback |
 | GET | `/symbols` | Símbolos únicos vistos |
+| POST | `/bridge/trades` | El bridge MT5 registra una apertura (real o dry-run). Token opcional vía `WEBHOOK_TOKEN` |
+| POST | `/bridge/trades/{ticket}/close` | Cierre por mt5_ticket: `{result, exit_price?, pnl_usd?}`. 404 si no hay fila abierta |
+| GET | `/bridge/trades?limit=&offset=` | Historial de trades del bridge (contexto + resultado) |
 | POST | `/signals/{id}/result` | `{result, exit_price?, journal_*?}` |
 | DELETE | `/signals/{id}` | Borrar (limpiar data sucia) |
 | GET | `/stats` | Overall + by_symbol/decision/source/quality/side/zona/mtf/pattern/**score/conf** + taken/rated/execution_rate |
@@ -190,6 +193,14 @@ stocks_watchlist (
 
 ohlc_cache (  -- persistencia del cache OHLC (Fase 3): rehidrata tras cold start
   key PK ("PAIR:interval:outputsize"), fetched_at (epoch float), payload (JSON raw de TD)
+)
+
+bridge_trades (  -- historial del bridge MT5: contexto de la señal + resultado real del broker
+  id PK, opened_at, symbol, side (LONG|SHORT), source (marco|pine),
+  lots, entry_price, sl_price, tp_price, risk_usd, rrr,
+  signal_id (NULL salvo trades del Pine), mt5_ticket (NULL en dry-run),
+  dry_run (1|0), context_json (score/nivel/sesión/cross),
+  result (WIN|LOSS|BE|NULL), exit_price, pnl_usd, closed_at
 )
 ```
 
@@ -363,7 +374,7 @@ Proceso **local Windows** (el paquete `MetaTrader5` no funciona en Render/Linux)
 - **Fuentes**: (A) señales del Pine con `decision=ENTER` vía SSE `/signals/stream` + catch-up por id, orden a mercado con SL/TP del motor; (B) marco de Zonas en OPERAR+fuerte vía poll `/api/zones` 5 min (misma semántica de transición+cooldown que las alertas del frontend, y skip si `data_age_minutes>10`). **Whitelist default: solo AUDUSD+USDCAD** (decisión del usuario jul-2026) → en la práctica ejecuta el marco de Zonas; las señales del Pine (EURUSD) se loguean pero no se ejecutan salvo añadir EURUSD a `ALLOWED_SYMBOLS`.
 - **Sizing**: riesgo fijo `RISK_PCT` (default 0.5%) del equity contra la distancia del SL, usando tick_value/volume_step reales del broker; si el lote mínimo excede el presupuesto → no opera.
 - **Guardas** (`risk.py`, puro y testeado en `test_bridge.py`): kill switch (archivo `bridge/STOP`), máx 2 trades/día, y límites diario $2500/total $5000 evaluados **asumiendo el SL completo del trade nuevo** (nunca coloca una orden cuyo peor caso breachearía FTMO). PnL diario = cuenta completa (realizado desde medianoche Europe/Prague + flotante) — aproximación; el dashboard FTMO manda.
-- **Auto-resolución**: al cerrar un trade del bridge (magic 20260711), reporta WIN/LOSS/BE + exit_price a `POST /signals/{id}/result` (mapa position_ticket→signal_id en `bridge_state.json`) → alimenta `/stats` y `calibrate.py` sin journal manual. Los trades del marco no tienen signal_id → no se reportan.
+- **Historial en DB**: cada apertura (real o dry-run) se registra en la tabla `bridge_trades` vía `POST /bridge/trades` con el contexto de la señal (score, nivel, sesión, cross) — best-effort, un fallo del POST no frena la operativa. Al cerrar (magic 20260711), el reporter actualiza la fila vía `POST /bridge/trades/{ticket}/close` con WIN/LOSS/BE + exit + PnL real, y si el trade vino del Pine además hace `POST /signals/{id}/result` → base para calibrar el marco con resultados reales.
 - **Estado** en `bridge/bridge_state.json` (baseline de ids — nunca ejecuta señales históricas —, cooldowns, contador diario, open_map). Config en `bridge/.env` (ver `bridge/README.md`). Ventanas por símbolo en hora Madrid: EURUSD 9-21, AUDUSD 9-14, USDCAD 14-21 (playbook).
 
 ## News warnings (ForexFactory)

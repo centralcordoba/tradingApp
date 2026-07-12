@@ -4,7 +4,8 @@ Proceso local (Windows) que ejecuta en MetaTrader 5 las decisiones del backend. 
 
 - **Marco de Zonas S/R en OPERAR + fuerte** (AUDUSD/USDCAD) → orden a mercado con el entry/SL/TP del marco (poll `/api/zones` cada 5 min, misma cache que el frontend). Es la fuente ejecutora principal.
 - **Señales del Pine con decision ENTER** (vía SSE `/signals/stream`, latencia ~2s) → se registran en el log, pero como el Pine opera EURUSD (fuera de la whitelist) **no se ejecutan**. Para activarlas: añadir EURUSD a `ALLOWED_SYMBOLS` y su ventana a `SYMBOL_WINDOWS`.
-- **Auto-resolución**: cuando MT5 cierra un trade del bridge (TP/SL/manual), reporta WIN/LOSS/BE + exit_price a `POST /signals/{id}/result` → alimenta `/stats` y `scripts/calibrate.py` sin marcar nada a mano.
+- **Historial en base de datos**: cada apertura (real o dry-run) se guarda en la tabla `bridge_trades` (Supabase en prod) con el contexto de la señal — score de confluencia, nivel usado, sesión, estado del cross. Al cerrar el trade (TP/SL/manual), el reporter completa la fila con WIN/LOSS/BE, precio de salida y PnL real del broker. Consultable en `GET /bridge/trades`.
+- **Auto-resolución para señales del Pine**: si el trade vino de una señal con id, además reporta a `POST /signals/{id}/result` → alimenta `/stats` y `scripts/calibrate.py` sin marcar nada a mano.
 
 ## Requisitos
 
@@ -78,5 +79,5 @@ rm bridge\STOP              # desactivar
 
 - El cálculo del PnL diario (medianoche Europe/Prague, realizado + flotante) es una **aproximación** del cómputo de FTMO — el dashboard de FTMO es la fuente autoritativa. Los límites por defecto llevan el margen de que ninguna orden nueva puede llevarte al límite ni en su peor caso.
 - El PC debe estar encendido con el terminal MT5 abierto durante las ventanas operativas. Si eso falla a menudo, considerar un VPS Windows.
-- Los trades del marco de Zonas no tienen `signal_id`, así que no se auto-reportan a `/stats` (solo quedan en el historial de MT5 y en `bridge.log`).
+- Los trades del marco de Zonas no tienen `signal_id`, así que no aparecen en `/stats` (que es del flujo del Pine) — pero sí quedan completos en `bridge_trades` con contexto y resultado, además del historial de MT5.
 - FTMO permite trading algorítmico, pero revisa sus términos vigentes — la responsabilidad del cumplimiento es del titular de la cuenta.

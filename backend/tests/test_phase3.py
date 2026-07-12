@@ -129,6 +129,36 @@ def test_ohlc_cache_roundtrip():
     assert row[1] == payload
 
 
+# ─── storage: historial de trades del bridge MT5 ─────────────────────────────
+
+def test_bridge_trades_roundtrip():
+    storage.init_db()
+    ticket = f"T{int(time.time() * 1000)}"  # único por corrida
+    tid = storage.add_bridge_trade({
+        "symbol": "AUDUSD", "side": "SHORT", "source": "marco",
+        "lots": 1.5, "entry_price": 0.695, "sl_price": 0.697, "tp_price": 0.691,
+        "risk_usd": 250.0, "rrr": 2.0, "mt5_ticket": ticket, "dry_run": False,
+        "context": {"score": 11, "session_status": "fire"},
+    })
+    assert isinstance(tid, int) and tid > 0
+
+    abierto = storage.get_bridge_trade(tid)
+    assert abierto["result"] is None and abierto["closed_at"] is None
+    assert abierto["context"]["score"] == 11
+    assert abierto["dry_run"] is False
+
+    cerrado = storage.close_bridge_trade(ticket, "WIN", exit_price=0.691, pnl_usd=498.5)
+    assert cerrado is not None and cerrado["result"] == "WIN"
+    assert cerrado["pnl_usd"] == pytest.approx(498.5)
+    assert cerrado["closed_at"] is not None
+
+    # Cerrar dos veces el mismo ticket no matchea (closed_at ya está set)
+    assert storage.close_bridge_trade(ticket, "LOSS") is None
+
+    items = storage.list_bridge_trades(limit=5)
+    assert any(it["id"] == tid for it in items)
+
+
 # ─── indicators: implementación única ────────────────────────────────────────
 
 def test_ema_series_seed_and_length():

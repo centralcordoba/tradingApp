@@ -136,6 +136,29 @@ def init_db() -> None:
                     payload TEXT NOT NULL
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bridge_trades (
+                    id SERIAL PRIMARY KEY,
+                    opened_at TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    lots DOUBLE PRECISION,
+                    entry_price DOUBLE PRECISION,
+                    sl_price DOUBLE PRECISION,
+                    tp_price DOUBLE PRECISION,
+                    risk_usd DOUBLE PRECISION,
+                    rrr DOUBLE PRECISION,
+                    signal_id INTEGER,
+                    mt5_ticket TEXT,
+                    dry_run INTEGER NOT NULL DEFAULT 1,
+                    context_json TEXT,
+                    result TEXT,
+                    exit_price DOUBLE PRECISION,
+                    pnl_usd DOUBLE PRECISION,
+                    closed_at TEXT
+                )
+            """)
     else:
         with _db() as cur:
             cur.execute("""
@@ -193,6 +216,29 @@ def init_db() -> None:
                     payload TEXT NOT NULL
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bridge_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    opened_at TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    lots REAL,
+                    entry_price REAL,
+                    sl_price REAL,
+                    tp_price REAL,
+                    risk_usd REAL,
+                    rrr REAL,
+                    signal_id INTEGER,
+                    mt5_ticket TEXT,
+                    dry_run INTEGER NOT NULL DEFAULT 1,
+                    context_json TEXT,
+                    result TEXT,
+                    exit_price REAL,
+                    pnl_usd REAL,
+                    closed_at TEXT
+                )
+            """)
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +275,82 @@ def save_ohlc_cache(key: str, fetched_at: float, payload: dict) -> None:
     except Exception:
         import logging
         logging.getLogger(__name__).warning("save_ohlc_cache falló para %s", key, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Bridge MT5: historial de trades ejecutados (o simulados en dry-run).
+# El bridge local hace POST al abrir y al cerrar; queda cruzado el contexto de
+# la señal (score, nivel, sesión) con el resultado real del broker.
+# ---------------------------------------------------------------------------
+
+def add_bridge_trade(t: dict) -> int:
+    ph = _PH
+    context = t.get("context")
+    sql = (
+        "INSERT INTO bridge_trades (opened_at, symbol, side, source, lots, entry_price, "
+        "sl_price, tp_price, risk_usd, rrr, signal_id, mt5_ticket, dry_run, context_json) "
+        f"VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})"
+    )
+    params = (
+        datetime.utcnow().isoformat(),
+        t.get("symbol"), t.get("side"), t.get("source", "marco"),
+        t.get("lots"), t.get("entry_price"), t.get("sl_price"), t.get("tp_price"),
+        t.get("risk_usd"), t.get("rrr"), t.get("signal_id"), t.get("mt5_ticket"),
+        1 if t.get("dry_run", True) else 0,
+        json.dumps(context) if context is not None else None,
+    )
+    with _db() as cur:
+        if DATABASE_URL:
+            cur.execute(sql + " RETURNING id", params)
+            return cur.fetchone()["id"]
+        cur.execute(sql, params)
+        return cur.lastrowid
+
+
+def close_bridge_trade(mt5_ticket: str, result: str,
+                       exit_price: Optional[float] = None,
+                       pnl_usd: Optional[float] = None) -> Optional[dict]:
+    if result not in ("WIN", "LOSS", "BE"):
+        raise ValueError("result debe ser WIN, LOSS o BE")
+    ph = _PH
+    with _db() as cur:
+        _exec(cur, (
+            f"SELECT id FROM bridge_trades WHERE mt5_ticket = {ph} AND closed_at IS NULL "
+            "ORDER BY id DESC"
+        ), (mt5_ticket,))
+        row = _fetchone(cur)
+        if not row:
+            return None
+        tid = row["id"]
+        _exec(cur, (
+            f"UPDATE bridge_trades SET result = {ph}, exit_price = {ph}, pnl_usd = {ph}, "
+            f"closed_at = {ph} WHERE id = {ph}"
+        ), (result, exit_price, pnl_usd, datetime.utcnow().isoformat(), tid))
+    return get_bridge_trade(tid)
+
+
+def get_bridge_trade(trade_id: int) -> Optional[dict]:
+    with _db() as cur:
+        _exec(cur, f"SELECT * FROM bridge_trades WHERE id = {_PH}", (trade_id,))
+        row = _fetchone(cur)
+    return _bridge_row_to_dict(row) if row else None
+
+
+def list_bridge_trades(limit: int = 100, offset: int = 0) -> List[dict]:
+    with _db() as cur:
+        _exec(cur, (
+            f"SELECT * FROM bridge_trades ORDER BY id DESC LIMIT {_PH} OFFSET {_PH}"
+        ), (limit, offset))
+        rows = _fetchall(cur)
+    return [_bridge_row_to_dict(r) for r in rows]
+
+
+def _bridge_row_to_dict(r) -> dict:
+    d = dict(r)
+    ctx = d.pop("context_json", None)
+    d["context"] = json.loads(ctx) if ctx else None
+    d["dry_run"] = bool(d.get("dry_run"))
+    return d
 
 
 # ---------------------------------------------------------------------------

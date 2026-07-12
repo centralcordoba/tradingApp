@@ -7,6 +7,7 @@ ejecutar en real sin conexión verificada.
 from __future__ import annotations
 
 import logging
+import time as _time
 from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -82,12 +83,18 @@ class Mt5Client:
         return _STATIC_SPECS.get(base.upper())
 
     def current_price(self, symbol: str, side: str) -> Optional[float]:
+        """Precio actual válido o None. Un símbolo recién añadido al Market Watch
+        puede devolver ticks con ask/bid=0 durante un instante — 0 NO es precio."""
         if not self.connected:
             return None
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            return None
-        return tick.ask if side == "LONG" else tick.bid
+        for attempt in range(3):
+            tick = mt5.symbol_info_tick(symbol)
+            price = (tick.ask if side == "LONG" else tick.bid) if tick else 0.0
+            if price > 0:
+                return price
+            mt5.symbol_select(symbol, True)
+            _time.sleep(0.4)
+        return None
 
     def our_positions(self, symbol: str) -> int:
         if not self.connected:
@@ -112,12 +119,17 @@ class Mt5Client:
 
     def market_order(self, symbol: str, side: str, lots: float,
                      sl: float, tp: Optional[float], comment: str) -> tuple:
-        """(ok, detalle, position_ticket|None)."""
+        """(ok, detalle, position_ticket|None). Exige SL válido: una orden sin
+        stop (sl=0) es inaceptable en una cuenta con límites FTMO."""
         if not self.connected:
             return False, "MT5 no conectado", None
+        if sl is None or sl <= 0:
+            return False, f"SL invalido ({sl}) — no se opera sin stop", None
         price = self.current_price(symbol, side)
         if price is None:
-            return False, f"sin tick para {symbol}", None
+            return False, f"sin tick valido para {symbol}", None
+        if (side == "LONG" and sl >= price) or (side == "SHORT" and sl <= price):
+            return False, f"SL {sl} del lado equivocado del precio {price}", None
         base = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,

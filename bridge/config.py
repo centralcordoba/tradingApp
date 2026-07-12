@@ -48,6 +48,7 @@ def _parse_windows(raw: str) -> dict:
 @dataclass(frozen=True)
 class Config:
     api_base: str = _get("API_BASE", "https://tradingapp-2glz.onrender.com").rstrip("/")
+    api_token: str = _get("API_TOKEN", "")   # requerido solo si WEBHOOK_TOKEN está set en Render
     dry_run: bool = _get("DRY_RUN", "1") == "1"
     magic: int = int(_get("MAGIC", "20260711"))
 

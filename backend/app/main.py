@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from datetime import datetime, timezone
 
-from .schemas import TVSignal, AnalyzeResponse
+from .schemas import TVSignal, AnalyzeResponse, BridgeTradeIn, BridgeTradeClose
 from .decision_engine import analyze
 from .tv_parser import parse_payload
 from . import storage, ai_client, news_client, scanner, radar, stocks_client, correlations, zones, cross_verdict, zone_signal_engine, td_client
@@ -194,6 +194,36 @@ def list_signals(limit: int = 10, offset: int = 0, symbol: str | None = None):
 def list_symbols():
     """Devuelve los símbolos únicos vistos hasta ahora (para el filtro del frontend)."""
     return storage.distinct_symbols()
+
+
+# ─── Bridge MT5: historial de trades ejecutados ──────────────────────────────
+# El bridge local (bridge/main.py) reporta aquí cada apertura y cierre. Token
+# opcional: si WEBHOOK_TOKEN está configurada, los POST la exigen (?token=).
+
+def _check_bridge_token(token: str | None):
+    if WEBHOOK_TOKEN and token != WEBHOOK_TOKEN:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+
+@app.post("/bridge/trades")
+def bridge_trade_open(trade: BridgeTradeIn, token: str | None = None):
+    _check_bridge_token(token)
+    tid = storage.add_bridge_trade(trade.model_dump())
+    return {"ok": True, "id": tid}
+
+
+@app.post("/bridge/trades/{ticket}/close")
+def bridge_trade_close(ticket: str, body: BridgeTradeClose, token: str | None = None):
+    _check_bridge_token(token)
+    row = storage.close_bridge_trade(ticket, body.result, body.exit_price, body.pnl_usd)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Sin trade abierto con ticket {ticket}")
+    return {"ok": True, "trade": row}
+
+
+@app.get("/bridge/trades")
+def bridge_trades_list(limit: int = 100, offset: int = 0):
+    return {"items": storage.list_bridge_trades(limit=limit, offset=offset)}
 
 
 @app.get("/scanner/debug")

@@ -83,6 +83,8 @@ def _get_json(path: str, timeout: float = 30) -> dict:
 
 
 def _post_json(path: str, body: dict, timeout: float = 30) -> dict:
+    if cfg.api_token:
+        path += ("&" if "?" in path else "?") + "token=" + cfg.api_token
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(cfg.api_base + path, data=data, method="POST",
                                  headers={"Content-Type": "application/json"})
@@ -90,10 +92,20 @@ def _post_json(path: str, body: dict, timeout: float = 30) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _report_trade_open(trade: dict):
+    """Registra la apertura (o simulación) en la DB del backend. Best-effort:
+    un fallo aquí nunca debe frenar la operativa."""
+    try:
+        _post_json("/bridge/trades", trade)
+    except Exception as e:
+        log.warning("No se pudo registrar el trade en DB (%s) — sigue en bridge.log", e)
+
+
 # ─── Ejecución con guardas ──────────────────────────────────────────────────
 
 def _execute(symbol: str, side: str, sl: float, tp, comment: str,
-             signal_id, source: str, entry_hint: float):
+             signal_id, source: str, entry_hint: float,
+             context: dict | None = None, rrr=None):
     """Todas las guardas + sizing + orden (o log en DRY_RUN)."""
     if symbol not in cfg.allowed_symbols:
         log.info("[%s] %s fuera de whitelist — skip", source, symbol)
@@ -139,18 +151,29 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
     desc = (f"{side} {symbol} {lots:.2f} lots @ ~{price:.5f} SL {sl:.5f}"
             + (f" TP {tp:.5f}" if tp else " sin TP")
             + f" (riesgo ~{risk_usd:.0f} USD, {source})")
+    trade_record = {
+        "symbol": symbol, "side": side, "source": source, "lots": lots,
+        "entry_price": price, "sl_price": sl, "tp_price": tp,
+        "risk_usd": round(risk_usd, 2), "rrr": rrr, "signal_id": signal_id,
+        "dry_run": cfg.dry_run, "context": context,
+    }
     if cfg.dry_run:
         log.info("[DRY-RUN] %s", desc)
         _bump_trades()  # simular también el contador diario
+        _report_trade_open(trade_record)
         return
 
     ok, detail, ticket = mt5c.market_order(broker_symbol, side, lots, sl, tp, comment)
     if ok:
         log.info("EJECUTADO %s — %s", desc, detail)
         _bump_trades()
-        if signal_id is not None and ticket is not None:
+        if ticket is not None:
+            # signal_id puede ser None (trades del marco): el reporter cierra
+            # el registro en bridge_trades igualmente vía el ticket.
             _state["open_map"][str(ticket)] = signal_id
             _save_state()
+            trade_record["mt5_ticket"] = str(ticket)
+        _report_trade_open(trade_record)
     else:
         log.error("FALLO al ejecutar %s — %s", desc, detail)
 
@@ -196,9 +219,14 @@ def _handle_pine_signal(s: dict):
     if sl is None:
         log.warning("[pine] senal %s sin stop_loss — skip", s["id"])
         return
+    context = {
+        "score": resp.get("score"), "quality": sig.get("quality"),
+        "conf": sig.get("conf"), "kz": sig.get("kz"),
+        "plan": (resp.get("plan") or {}).get("trigger_type"),
+    }
     _execute(symbol, side, float(sl), float(tp) if tp is not None else None,
              comment=f"sig:{s['id']}", signal_id=s["id"], source="pine",
-             entry_hint=float(sig.get("price", 0.0)))
+             entry_hint=float(sig.get("price", 0.0)), context=context)
 
 
 def _sse_loop():
@@ -282,9 +310,17 @@ def _handle_marco(pair: str, item: dict, marco: dict):
         log.warning("[marco] %s sin sl_price/entry_price — skip", pair)
         return
     tp = marco.get("tp_price")
+    confluence = marco.get("confluence") or {}
+    context = {
+        "score": confluence.get("score"), "score_max": confluence.get("max"),
+        "level_used": marco.get("level_used"),
+        "session_status": marco.get("session_status"),
+        "cross_state": (item.get("cross") or {}).get("state"),
+        "reason": marco.get("reason"),
+    }
     _execute(pair, marco["side"], float(sl), float(tp) if tp is not None else None,
              comment=f"marco:{pair}", signal_id=None, source="marco",
-             entry_hint=float(entry))
+             entry_hint=float(entry), context=context, rrr=marco.get("rrr"))
 
 
 # ─── Auto-resolución: cierres MT5 → /signals/{id}/result ────────────────────
@@ -298,19 +334,30 @@ def _reporter_loop():
             since = datetime.now(timezone.utc) - timedelta(days=7)
             for d in mt5c.closed_deals_since(since):
                 ticket = str(d.position_id)
-                sid = _state["open_map"].get(ticket)
-                if sid is None:
+                if ticket not in _state["open_map"]:
                     continue
+                sid = _state["open_map"][ticket]  # None en trades del marco
                 profit = d.profit + d.swap + d.commission
                 result = classify_result(profit, cfg.be_threshold_usd)
                 try:
-                    _post_json(f"/signals/{sid}/result",
-                               {"result": result, "exit_price": d.price})
-                    del _state["open_map"][ticket]
-                    _save_state()
-                    log.info("Resultado reportado: senal %s → %s (%.2f USD)", sid, result, profit)
+                    _post_json(f"/bridge/trades/{ticket}/close",
+                               {"result": result, "exit_price": d.price,
+                                "pnl_usd": round(profit, 2)})
                 except urllib.error.HTTPError as e:
-                    log.warning("POST result senal %s fallo: %s", sid, e)
+                    if e.code != 404:  # 404 = fila inexistente; no reintentar para siempre
+                        log.warning("POST close trade %s fallo: %s", ticket, e)
+                        continue
+                    log.warning("Trade %s sin fila en bridge_trades (404) — se descarta", ticket)
+                if sid is not None:
+                    try:
+                        _post_json(f"/signals/{sid}/result",
+                                   {"result": result, "exit_price": d.price})
+                    except urllib.error.HTTPError as e:
+                        log.warning("POST result senal %s fallo: %s", sid, e)
+                        continue
+                del _state["open_map"][ticket]
+                _save_state()
+                log.info("Cierre reportado: ticket %s → %s (%.2f USD)", ticket, result, profit)
         except Exception as e:
             log.warning("reporter: %s", e)
 

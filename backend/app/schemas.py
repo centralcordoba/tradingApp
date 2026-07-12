@@ -76,3 +76,26 @@ class StoredSignal(BaseModel):
     received_at: datetime
     signal: TVSignal
     response: AnalyzeResponse
+
+
+class BridgeTradeIn(BaseModel):
+    """Trade abierto (o simulado en dry-run) por el bridge MT5 local."""
+    symbol: str
+    side: Literal["LONG", "SHORT"]
+    source: str = "marco"            # marco | pine
+    lots: Optional[float] = None
+    entry_price: Optional[float] = None
+    sl_price: Optional[float] = None
+    tp_price: Optional[float] = None
+    risk_usd: Optional[float] = None
+    rrr: Optional[float] = None
+    signal_id: Optional[int] = None  # solo trades originados en señal del Pine
+    mt5_ticket: Optional[str] = None # None en dry-run
+    dry_run: bool = True
+    context: Optional[dict] = None   # score, nivel, sesión, cross... para calibrar
+
+
+class BridgeTradeClose(BaseModel):
+    result: Literal["WIN", "LOSS", "BE"]
+    exit_price: Optional[float] = None
+    pnl_usd: Optional[float] = None
