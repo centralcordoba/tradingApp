@@ -70,10 +70,13 @@ PAIR_CONFIG: dict[str, dict] = {
         "atr_max_pips": 22.0,
 
         # ── Nivel cercano ────────────────────────────────────────────
-        "max_entry_distance_pips": 12.0,
+        # Ampliado 12→20: en tendencia el pullback al nivel coherente cae más lejos;
+        # 12p dejaba fuera casi todos los soportes/resistencias operables.
+        "max_entry_distance_pips": 20.0,
         "min_level_strength": 2,
 
         # ── Sesiones (hora Madrid, formato [start, end) 24h) ─────────
+        # Sin ventana horaria: la sesión SOLO puntúa (fire/ok/avoid), nunca veta.
         # AUD opera bien en apertura Tokyo (02-09 Madrid) y London (09-13).
         # El overlap LDN-NY (14-17) también tiene buena liquidez.
         "sessions": {
@@ -94,7 +97,10 @@ PAIR_CONFIG: dict[str, dict] = {
         "veto_range_in_trend": True,
 
         # ── Scanner bloque ───────────────────────────────────────────
-        "veto_bloque2_in_trend": True,      # Bloque 2 = "sin edge" → veto en setup tendencia
+        # Bloque 2 = "sin edge" en M5. Ya NO veta bajo cross A: si el M30 y el M5
+        # coinciden en dirección (cross A FAVOR), un M5 tibio no debe bloquear el
+        # setup — la tendencia de 2 timeframes ya es la confirmación. Solo puntúa.
+        "veto_bloque2_in_trend": False,
     },
 
     "USDCAD": {
@@ -111,18 +117,19 @@ PAIR_CONFIG: dict[str, dict] = {
         "atr_max_pips": 28.0,
 
         # ── Nivel cercano ────────────────────────────────────────────
-        "max_entry_distance_pips": 10.0,   # Más estricto que AUDUSD
+        "max_entry_distance_pips": 18.0,   # Ampliado 10→18 (ver AUDUSD)
         "min_level_strength": 3,           # USDCAD: siempre necesita nivel ≥ 3★
 
         # ── Sesiones ─────────────────────────────────────────────────
+        # Sin ventana horaria: la sesión NY solo puntúa, ya NO veta (antes fuera
+        # de NY era veto duro y USDCAD no operaba nunca en la práctica).
         # USDCAD es más activo en la sesión NY (CAD data + USD flows).
-        # Fuera de NY el spread es mayor y el movimiento menos predecible.
         "sessions": {
             "fire":  [(14, 21)],           # NY completa: +2 pts
             "ok":    [(13, 14), (21, 22)], # Pre-NY + cierre NY: +1 pt
-            "avoid": [(0, 13), (22, 24)],  # Todo fuera de NY: veto
+            "avoid": [(0, 13), (22, 24)],  # Fuera de NY: sin puntos, ya no veta
         },
-        "veto_avoid_session": True,        # USDCAD: FUERA DE NY → VETO DURO
+        "veto_avoid_session": False,       # USDCAD: sesión desfavorable penaliza, no bloquea
 
         # ── Wick ────────────────────────────────────────────────────
         "wick_min_for_normal": 1.5,        # Umbral más alto que AUDUSD
@@ -134,7 +141,7 @@ PAIR_CONFIG: dict[str, dict] = {
         "veto_range_in_trend": True,
 
         # ── Scanner bloque ───────────────────────────────────────────
-        "veto_bloque2_in_trend": True,     # Bloque 2 = veto duro en USDCAD
+        "veto_bloque2_in_trend": False,    # Ya no veta bajo cross A (ver AUDUSD)
     },
 }
 
@@ -190,8 +197,12 @@ def _best_level_for_side(
     cfg: dict,
 ) -> Optional[dict]:
     """
-    Selecciona el nivel activo más adecuado para el side dado.
-    Filtra por distancia máxima y fuerza mínima del par.
+    Selecciona el nivel más adecuado para el side dado.
+    Filtra por tipo (soporte para LONG / resistencia para SHORT), distancia
+    máxima y fuerza mínima del par. NO exige el flag `active`: la proximidad
+    (distance ≤ max_entry_distance) es la restricción operativa real; el flag
+    `active` (within_range ∧ coherent_with_bias) dejaba fuera pullbacks válidos
+    en tendencia cuando el precio se alejaba del nivel coherente.
     Prioriza: wick confirmado > fuerza > cercanía.
     """
     target_type = "support" if scanner_side == "LONG" else "resistance"
@@ -201,7 +212,6 @@ def _best_level_for_side(
     candidates = [
         lv for lv in levels
         if lv.get("type") == target_type
-        and lv.get("active")
         and lv.get("distance_pips", 999.0) <= max_dist
         and lv.get("strength", 0) >= min_str
     ]
@@ -562,6 +572,54 @@ def _gate(key: str, label: str, passed: bool, hard: bool, detail: str = "") -> d
 _STRENGTH_STATE: dict[str, str] = {}
 
 
+# ─── Telemetría de gates (diagnóstico) ──────────────────────────────────────
+# Acumulador en memoria: por par, cuántas veces se evaluó, qué decisión salió,
+# qué gate DURO bloqueó primero (el que se reporta) y con qué frecuencia falló
+# cada gate duro. Se resetea en cada cold start de Render — es un muestreo
+# rodante para calibrar, no una métrica persistente. Expuesto en
+# GET /api/zones/gate-stats.
+_GATE_STATS: dict[str, dict] = {}
+
+
+def _record_gate_stats(pair: str, gates: list[dict], decision: str, reason: str) -> None:
+    st = _GATE_STATS.setdefault(pair, {
+        "evals": 0,
+        "decisions": {},        # OPERAR / ESPERAR / NO_OPERAR → count
+        "blocking_gate": {},    # primer gate duro fallado (el reportado) → count
+        "hard_fail": {},        # cualquier gate duro fallado → count
+        "last": None,
+    })
+    st["evals"] += 1
+    st["decisions"][decision] = st["decisions"].get(decision, 0) + 1
+    hard_failed = [g for g in gates if g["hard"] and not g["passed"]]
+    if hard_failed:
+        first = hard_failed[0]["key"]
+        st["blocking_gate"][first] = st["blocking_gate"].get(first, 0) + 1
+    for g in hard_failed:
+        st["hard_fail"][g["key"]] = st["hard_fail"].get(g["key"], 0) + 1
+    st["last"] = {"decision": decision, "reason": reason}
+
+
+def gate_stats_snapshot() -> dict:
+    """Copia del acumulador para el endpoint de diagnóstico."""
+    return {
+        pair: {
+            "evals": s["evals"],
+            "decisions": dict(s["decisions"]),
+            "blocking_gate": dict(sorted(s["blocking_gate"].items(),
+                                         key=lambda kv: -kv[1])),
+            "hard_fail": dict(sorted(s["hard_fail"].items(),
+                                     key=lambda kv: -kv[1])),
+            "last": s["last"],
+        }
+        for pair, s in _GATE_STATS.items()
+    }
+
+
+def reset_gate_stats() -> None:
+    _GATE_STATS.clear()
+
+
 def generate_zone_marco(
     zone_item: dict,
     scanner_item: Optional[dict],
@@ -776,6 +834,8 @@ def generate_zone_marco(
 
     if hard_failed:
         _STRENGTH_STATE.pop(pair, None)
+        _record_gate_stats(pair, gates, "NO_OPERAR",
+                           hard_failed[0]["detail"] or hard_failed[0]["label"])
         return {
             **base,
             "decision": "NO_OPERAR",
@@ -826,6 +886,8 @@ def generate_zone_marco(
         _STRENGTH_STATE[pair] = strength
     else:
         _STRENGTH_STATE.pop(pair, None)
+
+    _record_gate_stats(pair, gates, decision, reason)
 
     return {
         **base,

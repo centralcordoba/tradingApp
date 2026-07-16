@@ -347,6 +347,23 @@ def zones_sr(
     return response
 
 
+@app.get("/api/zones/gate-stats")
+def zones_gate_stats():
+    """Diagnóstico del marco: por par, cuántas veces se evaluó, qué decisión
+    salió y qué gate DURO bloqueó (para calibrar los filtros con datos).
+
+    Acumulador en memoria — se resetea en cada cold start de Render. Muestreo
+    rodante, no métrica persistente. Para limpiarlo: /api/zones/gate-stats?reset=1
+    """
+    return zone_signal_engine.gate_stats_snapshot()
+
+
+@app.post("/api/zones/gate-stats/reset")
+def zones_gate_stats_reset():
+    zone_signal_engine.reset_gate_stats()
+    return {"ok": True}
+
+
 @app.get("/correlations")
 def correlations_matrix():
     """Matriz estática de correlaciones entre los 6 pares operables.

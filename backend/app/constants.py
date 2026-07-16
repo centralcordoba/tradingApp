@@ -212,8 +212,11 @@ ZONES_MERGE_DISTANCE_PIPS = 8.0
 # Mínimo de velas entre pivots del mismo tipo (evita ruido en consolidación)
 ZONES_MIN_BARS_BETWEEN_PEAKS = 3
 
-# Rango activo: niveles dentro de X pips del precio actual son operables (scalp M5)
-ZONES_ACTIVE_RANGE_PIPS = 25.0
+# Rango activo: niveles dentro de X pips del precio actual son operables (scalp M5).
+# Ampliado 25→40: en tendencia el precio se aleja del soporte/resistencia coherente
+# y con 25p casi ningún nivel quedaba "activo" (todos active:false) → el gate de
+# nivel del marco nunca pasaba. 40p da margen al pullback sin volverse ruido.
+ZONES_ACTIVE_RANGE_PIPS = 40.0
 
 # Tolerancia para contar un "toque" en un nivel (pips)
 ZONES_TOUCH_TOLERANCE_PIPS = 3.0

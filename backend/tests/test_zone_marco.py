@@ -179,6 +179,47 @@ def test_histeresis_se_resetea_con_gate_duro():
         zse._score_signal = real  # type: ignore[assignment]
 
 
+def test_bloque2_en_tendencia_ya_no_veta():
+    # Cross A FAVOR + scanner Bloque 2: antes era veto duro (estructura_impulso);
+    # ahora el gate pasa — la tendencia de 2 timeframes ya confirma.
+    m = generate_zone_marco(_zone_item(), _scanner_item(bloque="2"))
+    est = next(g for g in m["gates"] if g["key"] == "estructura_impulso")
+    assert est["passed"] is True
+    assert m["decision"] in ("OPERAR", "ESPERAR")
+
+
+def test_nivel_operable_sin_flag_active():
+    # Nivel de pullback en tendencia: active=False y fuera del rango de 12p viejo,
+    # pero dentro de los 20p nuevos y con fuerza suficiente → ahora es operable.
+    levels = [
+        _level(0.71550, "support", strength=3, dist=15.0, active=False, within=False),
+        _level(0.71900, "resistance", strength=4, dist=20.0, wick_ratio=0),
+    ]
+    m = generate_zone_marco(_zone_item(levels=levels), _scanner_item())
+    nivel = next(g for g in m["gates"] if g["key"] == "nivel_operable")
+    # El gate de nivel selecciona el soporte pese a active=False (antes lo excluía).
+    assert nivel["passed"] is True
+    assert "support 0.7155" in nivel["detail"]
+
+
+def test_sesion_avoid_no_veta_usdcad():
+    # USDCAD a las 10h Madrid (fuera de NY = sesión avoid). Antes era veto duro;
+    # ahora la sesión solo puntúa: el gate pasa y es blando.
+    m = generate_zone_marco(
+        _zone_item(pair="USDCAD", price=1.36000,
+                   levels=[_level(1.35950, "support", strength=3, wick_ratio=2.5),
+                           _level(1.36300, "resistance", strength=4, dist=30.0, wick_ratio=0)]),
+        _scanner_item(),
+    )
+    ses = next(g for g in m["gates"] if g["key"] == "sesion_operable")
+    assert m["session_status"] == "avoid"     # 10h Madrid, fuera de NY
+    assert ses["hard"] is False               # ya no es gate duro
+    assert not (ses["hard"] and not ses["passed"])  # avoid ya no bloquea
+    # La sesión avoid no aparece entre los gates duros que causarían NO_OPERAR.
+    hard_blockers = [g["key"] for g in m["gates"] if g["hard"] and not g["passed"]]
+    assert "sesion_operable" not in hard_blockers
+
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

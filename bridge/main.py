@@ -279,10 +279,15 @@ def _zones_loop():
             for item in data.get("items", []):
                 pair = str(item.get("pair", "")).upper()
                 marco = item.get("marco") or {}
-                strong = (marco.get("decision") == "OPERAR"
-                          and marco.get("strength") == "fuerte"
-                          and marco.get("side") in ("LONG", "SHORT"))
-                cur = marco.get("side") if strong else None
+                # "normal" acepta cualquier OPERAR; "fuerte" exige strength fuerte.
+                strength_ok = (
+                    marco.get("strength") == "fuerte"
+                    if cfg.marco_min_strength == "fuerte" else True
+                )
+                operable = (marco.get("decision") == "OPERAR"
+                            and strength_ok
+                            and marco.get("side") in ("LONG", "SHORT"))
+                cur = marco.get("side") if operable else None
                 last = _prev_strong.get(pair)
                 _prev_strong[pair] = cur
                 if not cur or cur == last:

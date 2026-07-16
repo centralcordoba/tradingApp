@@ -59,15 +59,21 @@ class Config:
     max_total_loss_usd: float = float(_get("MAX_TOTAL_LOSS_USD", "5000"))
     initial_balance: float = float(_get("INITIAL_BALANCE", "50000"))
 
-    # Qué se opera y cuándo (ventanas en hora Madrid, del playbook).
-    # Solo AUDUSD y USDCAD van a MT5: las señales del Pine (EURUSD) se registran
-    # en el log pero NO se ejecutan salvo que se añada EURUSD a la whitelist.
+    # Qué se opera y cuándo. Solo AUDUSD y USDCAD van a MT5: las señales del Pine
+    # (EURUSD) se registran en el log pero NO se ejecutan salvo añadir EURUSD a la
+    # whitelist. Ventanas horarias DESACTIVADAS (0-24): sin restricción de sesión
+    # — el marco filtra por confluencia, no por hora. Para re-activar una ventana,
+    # setear SYMBOL_WINDOWS en el entorno (ej: "AUDUSD=9-14,USDCAD=14-21").
     allowed_symbols: tuple = tuple(
         s.strip().upper()
         for s in _get("ALLOWED_SYMBOLS", "AUDUSD,USDCAD").split(",") if s.strip()
     )
     symbol_windows: dict = field(default_factory=lambda: _parse_windows(
-        _get("SYMBOL_WINDOWS", "AUDUSD=9-14,USDCAD=14-21")))
+        _get("SYMBOL_WINDOWS", "AUDUSD=0-24,USDCAD=0-24")))
+
+    # Barra mínima del marco para ejecutar: "normal" acepta cualquier OPERAR,
+    # "fuerte" solo OPERAR+fuerte. Bajado a "normal" para no exigir lo casi-perfecto.
+    marco_min_strength: str = _get("MARCO_MIN_STRENGTH", "normal").strip().lower()
     symbol_suffix: str = _get("SYMBOL_SUFFIX", "")   # brokers con sufijo (EURUSD.r etc.)
 
     # Ejecución
