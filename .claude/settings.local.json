@@ -9,7 +9,9 @@
       "Bash(npx -y tsx lib/alerts.test.ts)",
       "Bash(/c/repositories/tradingApp/backend/.venv/Scripts/python.exe -m pytest test_bridge.py -q)",
       "Bash(/c/repositories/tradingApp/backend/.venv/Scripts/python.exe *)",
-      "Bash(PYTHONIOENCODING=utf-8 /c/repositories/tradingApp/backend/.venv/Scripts/python.exe *)"
+      "Bash(PYTHONIOENCODING=utf-8 /c/repositories/tradingApp/backend/.venv/Scripts/python.exe *)",
+      "Bash(python -m scripts.replay_marco --days 7)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }

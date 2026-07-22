@@ -86,6 +86,7 @@ class Config:
     # Cadencias
     zones_poll_sec: int = int(_get("ZONES_POLL_SEC", "300"))
     reporter_poll_sec: int = int(_get("REPORTER_POLL_SEC", "60"))
+    manage_poll_sec: int = int(_get("MANAGE_POLL_SEC", "15"))  # gestión parcial/BE del marco
 
     # MT5 (vacíos = usar la sesión ya logueada en el terminal abierto)
     mt5_login: int = int(_get("MT5_LOGIN", "0"))

@@ -114,6 +114,8 @@ def _fetch_chart(pair: str, interval: str = SCANNER_INTERVAL, outputsize: int = 
             "interval": interval,
             "outputsize": str(outputsize),
             "order": "ASC",  # oldest first, los indicadores calculan sobre series cronológicas
+            "timezone": "UTC",  # sin esto TD devuelve en su tz default (~UTC+10 Sídney):
+                                # data_age_minutes salía negativo → market_closed/staleness rotos
             "apikey": TWELVEDATA_API_KEY,
         }
         url = f"{TWELVEDATA_BASE}?{urllib.parse.urlencode(params)}"

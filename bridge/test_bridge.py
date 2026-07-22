@@ -1,7 +1,8 @@
 """Tests de las reglas puras del bridge. Sin dependencias: python test_bridge.py
 (también los recoge pytest si se corre desde bridge/).
 """
-from risk import classify_result, guard_reason, in_window, lots_for_risk
+from risk import (classify_result, guard_reason, half_volume, in_window,
+                  lots_for_risk, management_action)
 
 
 def test_lots_for_risk_eurusd():
@@ -41,6 +42,30 @@ def test_classify_result():
     assert classify_result(-80.0, 5.0) == "LOSS"
     assert classify_result(3.2, 5.0) == "BE"
     assert classify_result(-4.9, 5.0) == "BE"
+
+
+def test_management_action_long():
+    # LONG entry 0.7000, tp1 (1R) 0.7020
+    assert management_action("LONG", 0.7000, 0.7020, 0.7019, False)["take_partial"] is False
+    a = management_action("LONG", 0.7000, 0.7020, 0.7021, False)
+    assert a["take_partial"] and a["move_be"]
+    # ya tomado el parcial → no vuelve a disparar
+    assert management_action("LONG", 0.7000, 0.7020, 0.7050, True)["take_partial"] is False
+    # sin tp1 → nada
+    assert management_action("LONG", 0.7000, None, 0.7050, False)["take_partial"] is False
+
+
+def test_management_action_short():
+    assert management_action("SHORT", 0.7000, 0.6980, 0.6981, False)["take_partial"] is False
+    a = management_action("SHORT", 0.7000, 0.6980, 0.6979, False)
+    assert a["take_partial"] and a["move_be"]
+
+
+def test_half_volume():
+    assert half_volume(1.00, 0.01, 0.01) == 0.50
+    assert half_volume(0.03, 0.01, 0.01) == 0.01   # floor 0.015 -> 0.01
+    assert half_volume(0.01, 0.01, 0.01) == 0.0    # mitad < mínimo → no partir
+    assert half_volume(0.10, 0.01, 0.01) == 0.05
 
 
 def _guards(**over):

@@ -889,6 +889,13 @@ def generate_zone_marco(
 
     _record_gate_stats(pair, gates, decision, reason)
 
+    entry_px = round(zone_item.get("price", best_level["price"]), 5) if best_level else None
+    # TP1 = objetivo parcial a 1R (entry ± riesgo). Se ejecuta como parcial + BE;
+    # tp_price (nivel opuesto) queda como target del runner. El replay mostró que
+    # tomar a 1R vuelve el FADE ganador (el nivel opuesto casi nunca se alcanza intradía).
+    tp1_price = (round(2 * entry_px - sl_tp["sl_price"], 5)
+                 if (sl_tp and entry_px is not None) else None)
+
     return {
         **base,
         "decision": decision,
@@ -899,9 +906,12 @@ def generate_zone_marco(
         },
         "criteria_met": met,
         "criteria_failed": failed,
-        "entry_price": round(zone_item.get("price", best_level["price"]), 5),
+        "entry_price": entry_px,
         "sl_price": sl_tp["sl_price"] if sl_tp else None,
         "tp_price": sl_tp["tp_price"] if sl_tp else None,
+        "tp1_price": tp1_price,
+        "manage": ({"partial_at_r": 1.0, "move_be_at_r": 1.0}
+                   if tp1_price is not None else None),
         "rrr": sl_tp["rrr"] if sl_tp else None,
         "risk_pips": sl_tp["risk_pips"] if sl_tp else None,
         "reward_pips": sl_tp["reward_pips"] if sl_tp else None,

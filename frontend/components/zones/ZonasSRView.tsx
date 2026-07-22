@@ -51,10 +51,14 @@ function sendStrongNotification(pair: string, marco: ZoneMarco, ageMin: number |
   sendNotification(title, lines.join("  |  "), `marco-${pair}`);
 }
 
-// Devuelve el lado si el marco es una señal FUERTE accionable, si no null.
-function strongSide(m?: ZoneMarco | null): "LONG" | "SHORT" | null {
+// Devuelve el lado si el marco es accionable (OPERAR con dirección), sea
+// "fuerte" o "normal". Coherente con la barra del bridge (MARCO_MIN_STRENGTH=normal:
+// cualquier OPERAR ejecuta) → si el bridge y la app están corriendo, la alerta
+// suena para lo mismo que el bridge intenta operar. La fuerza se distingue por la
+// duración del chime (fuerte = largo ~5s, normal = corto).
+function operableSide(m?: ZoneMarco | null): "LONG" | "SHORT" | null {
   if (!m) return null;
-  if (m.decision === "OPERAR" && m.strength === "fuerte" && (m.side === "LONG" || m.side === "SHORT")) {
+  if (m.decision === "OPERAR" && (m.side === "LONG" || m.side === "SHORT")) {
     return m.side;
   }
   return null;
@@ -803,7 +807,7 @@ export function ZonasSRView() {
     const now = Date.now();
     let dirty = false;
     for (const item of data.items) {
-      const cur = strongSide(item.marco);
+      const cur = operableSide(item.marco);
       const last = prev.get(item.pair) ?? null;
       prev.set(item.pair, cur);
       if (!cur || cur === last) continue;
@@ -814,7 +818,9 @@ export function ZonasSRView() {
       const age = item.data_age_minutes;
       if (age == null || age <= ALERT_MAX_AGE_MIN) {
         const ctx = audioCtxRef.current;
-        if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, cur); }
+        // fuerte = chime largo (default ~5s); normal = 2 motifs (~2s)
+        const repeats = item.marco?.strength === "fuerte" ? undefined : 2;
+        if (ctx) { ctx.resume().catch(() => {}); playChime(ctx, cur, repeats); }
       }
       if (item.marco) sendStrongNotification(item.pair, item.marco, age);
     }

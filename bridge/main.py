@@ -25,7 +25,8 @@ from zoneinfo import ZoneInfo
 
 from config import Config
 from mt5_client import Mt5Client
-from risk import classify_result, guard_reason, in_window, lots_for_risk
+from risk import (classify_result, guard_reason, half_volume, in_window,
+                  lots_for_risk, management_action)
 
 BASE_DIR = Path(__file__).parent
 STATE_FILE = BASE_DIR / "bridge_state.json"
@@ -42,6 +43,7 @@ _state: dict = {
     "marco": {},                     # pair → {"side": .., "at": epoch} (cooldown)
     "trades": {"date": "", "count": 0},
     "open_map": {},                  # position_ticket → signal_id (para reportar cierre)
+    "managed": {},                   # ticket → {symbol, side, entry, tp1, partial_done}
 }
 _prev_strong: dict = {}              # pair → side|None (transiciones del marco, en memoria)
 
@@ -105,7 +107,7 @@ def _report_trade_open(trade: dict):
 
 def _execute(symbol: str, side: str, sl: float, tp, comment: str,
              signal_id, source: str, entry_hint: float,
-             context: dict | None = None, rrr=None):
+             context: dict | None = None, rrr=None, tp1=None):
     """Todas las guardas + sizing + orden (o log en DRY_RUN)."""
     if symbol not in cfg.allowed_symbols:
         log.info("[%s] %s fuera de whitelist — skip", source, symbol)
@@ -150,6 +152,7 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
 
     desc = (f"{side} {symbol} {lots:.2f} lots @ ~{price:.5f} SL {sl:.5f}"
             + (f" TP {tp:.5f}" if tp else " sin TP")
+            + (f" TP1(1R) {tp1:.5f} → parcial+BE" if tp1 else "")
             + f" (riesgo ~{risk_usd:.0f} USD, {source})")
     trade_record = {
         "symbol": symbol, "side": side, "source": source, "lots": lots,
@@ -171,6 +174,12 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
             # signal_id puede ser None (trades del marco): el reporter cierra
             # el registro en bridge_trades igualmente vía el ticket.
             _state["open_map"][str(ticket)] = signal_id
+            if tp1 is not None:
+                # gestión parcial 1R + BE: usa el precio real de fill como entry
+                _state["managed"][str(ticket)] = {
+                    "symbol": broker_symbol, "side": side, "entry": price,
+                    "tp1": float(tp1), "partial_done": False,
+                }
             _save_state()
             trade_record["mt5_ticket"] = str(ticket)
         _report_trade_open(trade_record)
@@ -323,9 +332,53 @@ def _handle_marco(pair: str, item: dict, marco: dict):
         "cross_state": (item.get("cross") or {}).get("state"),
         "reason": marco.get("reason"),
     }
+    tp1 = marco.get("tp1_price")
     _execute(pair, marco["side"], float(sl), float(tp) if tp is not None else None,
              comment=f"marco:{pair}", signal_id=None, source="marco",
-             entry_hint=float(entry), context=context, rrr=marco.get("rrr"))
+             entry_hint=float(entry), context=context, rrr=marco.get("rrr"),
+             tp1=float(tp1) if tp1 is not None else None)
+
+
+# ─── Gestión de posición: parcial a 1R + SL a break-even ────────────────────
+
+def _manage_loop():
+    """Al alcanzar TP1 (1R) toma parcial y mueve el SL a BE; el resto corre al
+    nivel (tp_price). Solo en ejecución real: en DRY_RUN no hay posición que
+    gestionar (el plan TP1/BE se loguea al abrir)."""
+    while True:
+        time.sleep(cfg.manage_poll_sec)
+        if cfg.dry_run or not mt5c.connected or not _state["managed"]:
+            continue
+        try:
+            for ticket, m in list(_state["managed"].items()):
+                if m.get("partial_done"):
+                    continue
+                pos = mt5c.position_by_ticket(int(ticket))
+                if pos is None:  # ya cerrada (SL/TP): la limpia el reporter
+                    continue
+                price = mt5c.current_price(m["symbol"], m["side"])
+                if price is None:
+                    continue
+                act = management_action(m["side"], m["entry"], m.get("tp1"),
+                                        price, m["partial_done"])
+                if not act["take_partial"]:
+                    continue
+                specs = mt5c.symbol_specs(m["symbol"])
+                vol_min, vol_step = (specs[2], specs[4]) if specs else (0.01, 0.01)
+                half = half_volume(pos.volume, vol_min, vol_step)
+                if half > 0:
+                    ok, detail = mt5c.partial_close(int(ticket), m["side"], half)
+                    log.info("[manage] %s parcial 1R %s — %s",
+                             m["symbol"], "OK" if ok else "FALLO", detail)
+                else:
+                    log.info("[manage] %s lote mínimo: sin parcial, solo BE", m["symbol"])
+                ok_be, detail_be = mt5c.modify_sl(int(ticket), m["entry"])
+                log.info("[manage] %s SL->BE %s — %s",
+                         m["symbol"], "OK" if ok_be else "FALLO", detail_be)
+                m["partial_done"] = True
+                _save_state()
+        except Exception as e:
+            log.warning("manage: %s", e)
 
 
 # ─── Auto-resolución: cierres MT5 → /signals/{id}/result ────────────────────
@@ -337,16 +390,24 @@ def _reporter_loop():
             continue
         try:
             since = datetime.now(timezone.utc) - timedelta(days=7)
+            # Agrupa deals de salida por posición: un cierre parcial y el final
+            # comparten position_id → hay que sumar el PnL y solo finalizar cuando
+            # la posición ya no existe (si sigue abierta, fue solo el parcial).
+            by_pos: dict = {}
             for d in mt5c.closed_deals_since(since):
-                ticket = str(d.position_id)
+                by_pos.setdefault(str(d.position_id), []).append(d)
+            for ticket, deals in by_pos.items():
                 if ticket not in _state["open_map"]:
                     continue
+                if mt5c.position_by_ticket(int(ticket)) is not None:
+                    continue  # sigue abierta (se tomó el parcial) — aún no finalizar
                 sid = _state["open_map"][ticket]  # None en trades del marco
-                profit = d.profit + d.swap + d.commission
+                profit = sum(d.profit + d.swap + d.commission for d in deals)
+                exit_price = deals[-1].price
                 result = classify_result(profit, cfg.be_threshold_usd)
                 try:
                     _post_json(f"/bridge/trades/{ticket}/close",
-                               {"result": result, "exit_price": d.price,
+                               {"result": result, "exit_price": exit_price,
                                 "pnl_usd": round(profit, 2)})
                 except urllib.error.HTTPError as e:
                     if e.code != 404:  # 404 = fila inexistente; no reintentar para siempre
@@ -356,11 +417,12 @@ def _reporter_loop():
                 if sid is not None:
                     try:
                         _post_json(f"/signals/{sid}/result",
-                                   {"result": result, "exit_price": d.price})
+                                   {"result": result, "exit_price": exit_price})
                     except urllib.error.HTTPError as e:
                         log.warning("POST result senal %s fallo: %s", sid, e)
                         continue
                 del _state["open_map"][ticket]
+                _state["managed"].pop(ticket, None)
                 _save_state()
                 log.info("Cierre reportado: ticket %s → %s (%.2f USD)", ticket, result, profit)
         except Exception as e:
@@ -390,6 +452,19 @@ def main():
         log.error("Sin conexion MT5 y DRY_RUN=0 — abortando por seguridad")
         return
 
+    # Diagnóstico de símbolos: confirma que el broker expone cada par operable.
+    # Un símbolo sin especificaciones era lo que frenaba la ejecución del marco.
+    if connected:
+        for sym in cfg.allowed_symbols:
+            real = mt5c.resolve_symbol(sym)
+            specs = mt5c.symbol_specs(sym)
+            if real and specs:
+                log.info("Simbolo OK: %s -> %s  (tick_value=%.4f vol_min=%.2f step=%.2f)",
+                         sym, real, specs[0], specs[2], specs[4])
+            else:
+                log.warning("Simbolo NO operable: %s (resuelto=%s). Anadelo al Market Watch "
+                            "o setea SYMBOL_SUFFIX en bridge/.env", sym, real)
+
     # Baseline: en el primer arranque no ejecutar nada histórico
     if _state["last_signal_id"] is None:
         try:
@@ -402,7 +477,7 @@ def main():
             log.error("No se pudo establecer baseline (%s) — abortando", e)
             return
 
-    for target in (_sse_loop, _zones_loop, _reporter_loop):
+    for target in (_sse_loop, _zones_loop, _reporter_loop, _manage_loop):
         threading.Thread(target=target, daemon=True, name=target.__name__).start()
 
     try:

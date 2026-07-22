@@ -33,6 +33,7 @@ class Mt5Client:
     def __init__(self, cfg):
         self.cfg = cfg
         self.connected = False
+        self._resolved: dict = {}   # app symbol -> nombre real en el broker (o None)
 
     def connect(self) -> bool:
         if mt5 is None:
@@ -68,13 +69,48 @@ class Mt5Client:
         info = mt5.account_info()
         return info.equity if info else None
 
+    def resolve_symbol(self, symbol: str) -> Optional[str]:
+        """Nombre REAL del símbolo en el broker (maneja sufijos tipo AUDUSD.r,
+        AUDUSD.raw, AUDUSD-ECN...). Cachea el mapeo app->broker. None si el broker
+        no lo tiene — antes esto se traducía en 'sin especificaciones — skip'."""
+        if not self.connected:
+            return symbol
+        if symbol in self._resolved:
+            return self._resolved[symbol]
+        real = None
+        # 1) nombre exacto
+        if mt5.symbol_info(symbol) is not None:
+            real = symbol
+        # 2) nombre + sufijo configurado explícitamente
+        elif self.cfg.symbol_suffix and mt5.symbol_info(symbol + self.cfg.symbol_suffix) is not None:
+            real = symbol + self.cfg.symbol_suffix
+        # 3) buscar en la lista del broker: base seguido de un sufijo NO alfanumérico
+        #    (evita que AUDUSD matchee AUDUSDT u otras variantes con letra/dígito extra)
+        if real is None:
+            base = symbol.upper()
+            for s in (mt5.symbols_get() or []):
+                up = s.name.upper()
+                if up == base or (up.startswith(base) and len(up) > len(base)
+                                  and not up[len(base)].isalnum()):
+                    real = s.name
+                    break
+        self._resolved[symbol] = real
+        if real and real != symbol:
+            log.info("Simbolo %s resuelto a %s en el broker", symbol, real)
+        elif real is None:
+            log.warning("Simbolo %s NO encontrado en el broker — revisa Market Watch o SYMBOL_SUFFIX", symbol)
+        return real
+
     def symbol_specs(self, symbol: str) -> Optional[tuple]:
         """(tick_value, tick_size, vol_min, vol_max, vol_step) o None."""
         if self.connected:
-            si = mt5.symbol_info(symbol)
+            real = self.resolve_symbol(symbol)
+            if real is None:
+                return None
+            si = mt5.symbol_info(real)
             if si is not None and not si.visible:
-                mt5.symbol_select(symbol, True)
-                si = mt5.symbol_info(symbol)
+                mt5.symbol_select(real, True)
+                si = mt5.symbol_info(real)
             if si is None:
                 return None
             return (si.trade_tick_value, si.trade_tick_size,
@@ -87,19 +123,21 @@ class Mt5Client:
         puede devolver ticks con ask/bid=0 durante un instante — 0 NO es precio."""
         if not self.connected:
             return None
+        real = self.resolve_symbol(symbol) or symbol
         for attempt in range(3):
-            tick = mt5.symbol_info_tick(symbol)
+            tick = mt5.symbol_info_tick(real)
             price = (tick.ask if side == "LONG" else tick.bid) if tick else 0.0
             if price > 0:
                 return price
-            mt5.symbol_select(symbol, True)
+            mt5.symbol_select(real, True)
             _time.sleep(0.4)
         return None
 
     def our_positions(self, symbol: str) -> int:
         if not self.connected:
             return 0
-        positions = mt5.positions_get(symbol=symbol) or []
+        real = self.resolve_symbol(symbol) or symbol
+        positions = mt5.positions_get(symbol=real) or []
         return sum(1 for p in positions if p.magic == self.cfg.magic)
 
     def pnl_today(self) -> float:
@@ -125,6 +163,9 @@ class Mt5Client:
             return False, "MT5 no conectado", None
         if sl is None or sl <= 0:
             return False, f"SL invalido ({sl}) — no se opera sin stop", None
+        real = self.resolve_symbol(symbol)
+        if real is None:
+            return False, f"simbolo {symbol} no existe en el broker", None
         price = self.current_price(symbol, side)
         if price is None:
             return False, f"sin tick valido para {symbol}", None
@@ -132,7 +173,7 @@ class Mt5Client:
             return False, f"SL {sl} del lado equivocado del precio {price}", None
         base = {
             "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
+            "symbol": real,
             "volume": lots,
             "type": mt5.ORDER_TYPE_BUY if side == "LONG" else mt5.ORDER_TYPE_SELL,
             "price": price,
@@ -154,6 +195,57 @@ class Mt5Client:
             if result.retcode != _RETCODE_INVALID_FILL:
                 return False, f"retcode {result.retcode}: {result.comment}", None
         return False, "ningun type_filling aceptado por el broker", None
+
+    def position_by_ticket(self, ticket: int):
+        if not self.connected:
+            return None
+        positions = mt5.positions_get(ticket=ticket) or []
+        return positions[0] if positions else None
+
+    def modify_sl(self, ticket: int, new_sl: float) -> tuple:
+        """Mueve el SL de una posición abierta (para BE). Conserva el TP actual."""
+        if not self.connected:
+            return False, "MT5 no conectado"
+        pos = self.position_by_ticket(ticket)
+        if pos is None:
+            return False, "posicion no encontrada"
+        req = {"action": mt5.TRADE_ACTION_SLTP, "position": ticket,
+               "symbol": pos.symbol, "sl": new_sl, "tp": pos.tp, "magic": self.cfg.magic}
+        result = mt5.order_send(req)
+        if result is None:
+            return False, f"order_send None: {mt5.last_error()}"
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            return True, f"SL -> {new_sl}"
+        return False, f"retcode {result.retcode}: {result.comment}"
+
+    def partial_close(self, ticket: int, side: str, volume: float) -> tuple:
+        """Cierra `volume` lotes de una posición (orden opuesta con position=ticket)."""
+        if not self.connected:
+            return False, "MT5 no conectado"
+        pos = self.position_by_ticket(ticket)
+        if pos is None:
+            return False, "posicion no encontrada"
+        symbol = pos.symbol
+        close_type = mt5.ORDER_TYPE_SELL if side == "LONG" else mt5.ORDER_TYPE_BUY
+        tick = mt5.symbol_info_tick(symbol)
+        price = (tick.bid if side == "LONG" else tick.ask) if tick else 0.0
+        if price <= 0:
+            return False, "sin tick para cerrar parcial"
+        base = {
+            "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": volume,
+            "type": close_type, "position": ticket, "price": price,
+            "deviation": self.cfg.deviation_points, "magic": self.cfg.magic,
+            "comment": "partial_1R", "type_time": mt5.ORDER_TIME_GTC,
+        }
+        for filling in (mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
+            result = mt5.order_send({**base, "type_filling": filling})
+            if result is None:
+                return False, f"order_send None: {mt5.last_error()}"
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                return True, f"parcial {volume} @ {result.price}"
+            if result.retcode != _RETCODE_INVALID_FILL:
+                return False, f"retcode {result.retcode}: {result.comment}"
+        return False, "ningun type_filling aceptado por el broker"
 
     def closed_deals_since(self, since_utc: datetime) -> list:
         """Deals de SALIDA con nuestro magic desde since_utc (para auto-resolución)."""

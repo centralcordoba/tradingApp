@@ -42,6 +42,29 @@ def classify_result(profit_usd: float, be_threshold_usd: float) -> str:
     return "WIN" if profit_usd > 0 else "LOSS"
 
 
+def management_action(side: str, entry: float, tp1: Optional[float],
+                      current_price: float, partial_done: bool) -> dict:
+    """Decide la gestión de una posición abierta del marco: al alcanzar TP1 (1R),
+    tomar parcial y mover el SL a break-even. Pura y testeable.
+
+    {take_partial, move_be}. Una vez tomado el parcial no vuelve a disparar.
+    """
+    if partial_done or tp1 is None:
+        return {"take_partial": False, "move_be": False}
+    reached = (current_price >= tp1) if side == "LONG" else (current_price <= tp1)
+    return {"take_partial": reached, "move_be": reached}
+
+
+def half_volume(total: float, vol_min: float, vol_step: float) -> float:
+    """Mitad del volumen redondeada al step, o 0.0 si la mitad no llega al mínimo
+    (posición de lote mínimo: no se puede partir → se deja correr solo con BE)."""
+    if vol_step <= 0:
+        return 0.0
+    half = math.floor((total / 2.0) / vol_step) * vol_step
+    half = round(half, 8)
+    return half if half >= vol_min else 0.0
+
+
 def guard_reason(*, kill_switch: bool, trades_today: int, max_trades: int,
                  pnl_today_usd: float, next_trade_risk_usd: float,
                  max_daily_loss: float, drawdown_total_usd: float,

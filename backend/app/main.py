@@ -303,7 +303,7 @@ def zones_sr(
     Parámetros opcionales (override de defaults en constants.py):
     - window: velas a cada lado para detectar pivot (default 3)
     - merge_distance_pips: pips máx entre pivots del mismo nivel (default 8)
-    - active_range_pips: niveles dentro de X pips son operables (default 25)
+    - active_range_pips: niveles dentro de X pips son operables (default 40)
     - min_bars_between: mín. velas entre pivots del mismo tipo (default 3)
     - touch_tolerance_pips: tolerancia para contar un "toque" (default 3)
     - level_selector: 'median' o 'mean' para fijar el precio del cluster
