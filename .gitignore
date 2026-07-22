@@ -6,6 +6,7 @@ backend/signals.db
 bridge/bridge_state.json
 bridge/bridge.log
 bridge/STOP
+bridge/trades.csv
 node_modules/
 .next/
 out/

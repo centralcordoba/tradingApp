@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from config import Config
 from mt5_client import Mt5Client
+import trade_log
 from risk import (classify_result, guard_reason, half_volume, in_window,
                   lots_for_risk, management_action)
 
@@ -160,10 +161,23 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
         "risk_usd": round(risk_usd, 2), "rrr": rrr, "signal_id": signal_id,
         "dry_run": cfg.dry_run, "context": context,
     }
+    ctx = context or {}
+
+    def _csv_row(ticket) -> dict:
+        return {
+            "ticket": ticket, "symbol": symbol, "side": side, "source": source,
+            "lots": lots, "entry_price": round(price, 5), "sl_price": sl,
+            "tp_price": tp, "tp1_price": tp1, "risk_usd": round(risk_usd, 2),
+            "rrr": rrr, "strength": ctx.get("strength"), "score": ctx.get("score"),
+            "cross_state": ctx.get("cross_state"), "session": ctx.get("session_status"),
+            "dry_run": 1 if cfg.dry_run else 0,
+        }
+
     if cfg.dry_run:
         log.info("[DRY-RUN] %s", desc)
         _bump_trades()  # simular también el contador diario
         _report_trade_open(trade_record)
+        trade_log.log_open(_csv_row(f"dry-{int(time.time() * 1000)}"))
         return
 
     ok, detail, ticket = mt5c.market_order(broker_symbol, side, lots, sl, tp, comment)
@@ -183,6 +197,8 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
             _save_state()
             trade_record["mt5_ticket"] = str(ticket)
         _report_trade_open(trade_record)
+        trade_log.log_open(_csv_row(str(ticket) if ticket is not None
+                                    else f"noticket-{int(time.time() * 1000)}"))
     else:
         log.error("FALLO al ejecutar %s — %s", desc, detail)
 
@@ -327,6 +343,7 @@ def _handle_marco(pair: str, item: dict, marco: dict):
     confluence = marco.get("confluence") or {}
     context = {
         "score": confluence.get("score"), "score_max": confluence.get("max"),
+        "strength": marco.get("strength"),
         "level_used": marco.get("level_used"),
         "session_status": marco.get("session_status"),
         "cross_state": (item.get("cross") or {}).get("state"),
@@ -377,6 +394,7 @@ def _manage_loop():
                          m["symbol"], "OK" if ok_be else "FALLO", detail_be)
                 m["partial_done"] = True
                 _save_state()
+                trade_log.log_partial(ticket, be_moved=ok_be)
         except Exception as e:
             log.warning("manage: %s", e)
 
@@ -424,6 +442,7 @@ def _reporter_loop():
                 del _state["open_map"][ticket]
                 _state["managed"].pop(ticket, None)
                 _save_state()
+                trade_log.log_close(ticket, result, exit_price, round(profit, 2))
                 log.info("Cierre reportado: ticket %s → %s (%.2f USD)", ticket, result, profit)
         except Exception as e:
             log.warning("reporter: %s", e)

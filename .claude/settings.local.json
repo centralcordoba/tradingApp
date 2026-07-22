@@ -11,7 +11,9 @@
       "Bash(/c/repositories/tradingApp/backend/.venv/Scripts/python.exe *)",
       "Bash(PYTHONIOENCODING=utf-8 /c/repositories/tradingApp/backend/.venv/Scripts/python.exe *)",
       "Bash(python -m scripts.replay_marco --days 7)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(python -c \"import main; print\\('main.py importa OK'\\)\")",
+      "Bash(python test_bridge.py)"
     ]
   }
 }
