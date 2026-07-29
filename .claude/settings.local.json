@@ -13,7 +13,12 @@
       "Bash(python -m scripts.replay_marco --days 7)",
       "Bash(echo \"exit: $?\")",
       "Bash(python -c \"import main; print\\('main.py importa OK'\\)\")",
-      "Bash(python test_bridge.py)"
+      "Bash(python test_bridge.py)",
+      "Bash(curl.exe -s \"https://tradingapp-2glz.onrender.com/api/zones/gate-stats\")",
+      "Bash(curl.exe -s \"https://tradingapp-2glz.onrender.com/bridge/trades?limit=10\")",
+      "Bash(python -m py_compile main.py config.py)",
+      "Bash(python -m pytest -q test_bridge.py)",
+      "Bash(python -m pytest -q test_marco_pipeline.py test_bridge.py)"
     ]
   }
 }

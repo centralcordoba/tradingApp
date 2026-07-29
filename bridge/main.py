@@ -35,6 +35,11 @@ STOP_FILE = BASE_DIR / "STOP"
 MADRID = ZoneInfo("Europe/Madrid")
 
 log = logging.getLogger("bridge")
+# Log dedicado: SOLO órdenes realmente ejecutadas (real o dry-run), una línea por
+# trade con fecha. propagate=False → no hereda handlers de root, así que nada del
+# ruido de bridge.log (heartbeats, skips, SSE) entra acá. Ver _log_executed / main().
+exec_log = logging.getLogger("bridge.executed")
+exec_log.propagate = False
 cfg = Config()
 mt5c = Mt5Client(cfg)
 
@@ -47,6 +52,7 @@ _state: dict = {
     "managed": {},                   # ticket → {symbol, side, entry, tp1, partial_done}
 }
 _prev_strong: dict = {}              # pair → side|None (transiciones del marco, en memoria)
+_stale_logged: dict = {}             # pair → bool (dedupe del log de dato viejo)
 
 
 # ─── Estado persistido ──────────────────────────────────────────────────────
@@ -105,6 +111,36 @@ def _report_trade_open(trade: dict):
 
 
 # ─── Ejecución con guardas ──────────────────────────────────────────────────
+
+def _log_executed(*, ticket, symbol, side, lots, price, sl, tp, tp1,
+                  risk_usd, rrr, source, ctx: dict, dry_run: bool):
+    """Una línea limpia por orden ejecutada en executed.log. La fecha la pone el
+    formatter del handler; acá va solo el contenido operativo."""
+    parts = [
+        "DRY-RUN" if dry_run else "REAL",
+        f"{side} {symbol}",
+        f"{lots:.2f} lots",
+        f"@ {price:.5f}",
+        f"SL {sl:.5f}",
+        f"TP {tp:.5f}" if tp else "sin TP",
+    ]
+    if tp1:
+        parts.append(f"TP1 {tp1:.5f}")
+    if rrr:
+        parts.append(f"RRR {rrr:.2f}")
+    parts.append(f"riesgo {risk_usd:.0f} USD")
+    if ctx.get("score") is not None:
+        parts.append(f"score {ctx.get('score')}/{ctx.get('score_max')}")
+    if ctx.get("strength"):
+        parts.append(f"strength {ctx.get('strength')}")
+    if ctx.get("cross_state"):
+        parts.append(f"cross {ctx.get('cross_state')}")
+    if ctx.get("level_used"):
+        parts.append(f"nivel {ctx.get('level_used')}")
+    parts.append(f"fuente {source}")
+    parts.append(f"ticket {ticket}")
+    exec_log.info(" | ".join(parts))
+
 
 def _execute(symbol: str, side: str, sl: float, tp, comment: str,
              signal_id, source: str, entry_hint: float,
@@ -177,7 +213,11 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
         log.info("[DRY-RUN] %s", desc)
         _bump_trades()  # simular también el contador diario
         _report_trade_open(trade_record)
-        trade_log.log_open(_csv_row(f"dry-{int(time.time() * 1000)}"))
+        dry_ticket = f"dry-{int(time.time() * 1000)}"
+        trade_log.log_open(_csv_row(dry_ticket))
+        _log_executed(ticket=dry_ticket, symbol=symbol, side=side, lots=lots,
+                      price=price, sl=sl, tp=tp, tp1=tp1, risk_usd=risk_usd,
+                      rrr=rrr, source=source, ctx=ctx, dry_run=True)
         return
 
     ok, detail, ticket = mt5c.market_order(broker_symbol, side, lots, sl, tp, comment)
@@ -197,8 +237,12 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
             _save_state()
             trade_record["mt5_ticket"] = str(ticket)
         _report_trade_open(trade_record)
-        trade_log.log_open(_csv_row(str(ticket) if ticket is not None
-                                    else f"noticket-{int(time.time() * 1000)}"))
+        row_ticket = (str(ticket) if ticket is not None
+                      else f"noticket-{int(time.time() * 1000)}")
+        trade_log.log_open(_csv_row(row_ticket))
+        _log_executed(ticket=row_ticket, symbol=symbol, side=side, lots=lots,
+                      price=price, sl=sl, tp=tp, tp1=tp1, risk_usd=risk_usd,
+                      rrr=rrr, source=source, ctx=ctx, dry_run=False)
     else:
         log.error("FALLO al ejecutar %s — %s", desc, detail)
 
@@ -302,38 +346,73 @@ def _zones_loop():
             data = _get_json("/api/zones", timeout=60)
             now = time.time()
             for item in data.get("items", []):
-                pair = str(item.get("pair", "")).upper()
-                marco = item.get("marco") or {}
-                # "normal" acepta cualquier OPERAR; "fuerte" exige strength fuerte.
-                strength_ok = (
-                    marco.get("strength") == "fuerte"
-                    if cfg.marco_min_strength == "fuerte" else True
-                )
-                operable = (marco.get("decision") == "OPERAR"
-                            and strength_ok
-                            and marco.get("side") in ("LONG", "SHORT"))
-                cur = marco.get("side") if operable else None
-                last = _prev_strong.get(pair)
-                _prev_strong[pair] = cur
-                if not cur or cur == last:
-                    continue  # solo transiciones (misma semántica que las alertas del frontend)
-                seen = _state["marco"].get(pair) or {}
-                if seen.get("side") == cur and now - seen.get("at", 0) < cfg.cooldown_min * 60:
-                    log.info("[marco] %s %s en cooldown — skip", pair, cur)
-                    continue
-                _state["marco"][pair] = {"side": cur, "at": now}
-                _save_state()
-                _handle_marco(pair, item, marco)
+                _process_zone_item(item, now)
         except Exception as e:
             log.warning("zones poll: %s", e)
         time.sleep(cfg.zones_poll_sec)
 
 
-def _handle_marco(pair: str, item: dict, marco: dict):
-    age = item.get("data_age_minutes")
-    if age is not None and age > cfg.zones_max_age_min:
-        log.info("[marco] %s con dato de %.1f min — skip (viejo)", pair, age)
+def _process_zone_item(item: dict, now: float):
+    pair = str(item.get("pair", "")).upper()
+    marco = item.get("marco") or {}
+    # "normal" acepta cualquier OPERAR; "fuerte" exige strength fuerte.
+    strength_ok = (
+        marco.get("strength") == "fuerte"
+        if cfg.marco_min_strength == "fuerte" else True
+    )
+    operable = (marco.get("decision") == "OPERAR"
+                and strength_ok
+                and marco.get("side") in ("LONG", "SHORT"))
+    cur = marco.get("side") if operable else None
+    # El chequeo de edad va ANTES de tocar _prev_strong y el cooldown: un
+    # skip por dato viejo no debe quemar la señal. Al no registrar la
+    # transición, el próximo poll la vuelve a ver y la ejecuta en cuanto
+    # el cache de /api/zones se refresque.
+    if cur and _stale_zone_data(pair, item):
         return
+    last = _prev_strong.get(pair)
+    _prev_strong[pair] = cur
+    if not cur or cur == last:
+        return  # solo transiciones (misma semántica que las alertas del frontend)
+    seen = _state["marco"].get(pair) or {}
+    if seen.get("side") == cur and now - seen.get("at", 0) < cfg.cooldown_min * 60:
+        log.info("[marco] %s %s en cooldown — skip", pair, cur)
+        return
+    _state["marco"][pair] = {"side": cur, "at": now}
+    _save_state()
+    _handle_marco(pair, item, marco)
+
+
+def _zone_age_min(item: dict) -> float | None:
+    """Minutos desde el CIERRE de la última vela M15, calculados acá con el reloj
+    del bridge. No usar el data_age_minutes del backend: mide desde la APERTURA de
+    la vela (mínimo teórico 15 con M15) y además viaja congelado en la respuesta
+    cacheada — con umbral 10/18 descartaba prácticamente todo OPERAR."""
+    ts = item.get("last_candle_ts")
+    if ts:
+        try:
+            opened = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            closed = opened + timedelta(minutes=15)
+            return (datetime.now(timezone.utc) - closed).total_seconds() / 60
+        except ValueError:
+            pass
+    age = item.get("data_age_minutes")
+    return age - 15 if age is not None else None
+
+
+def _stale_zone_data(pair: str, item: dict) -> bool:
+    """True si el dato de /api/zones es demasiado viejo para entrar. Loguea una sola
+    vez por racha para no llenar el log mientras el par sigue OPERAR con dato añejo."""
+    age = _zone_age_min(item)
+    stale = age is not None and age > cfg.zones_max_age_min
+    if stale and not _stale_logged.get(pair):
+        log.info("[marco] %s con vela cerrada hace %.1f min — aplazado (reintenta al refrescar)",
+                 pair, age)
+    _stale_logged[pair] = stale
+    return stale
+
+
+def _handle_marco(pair: str, item: dict, marco: dict):
     sl = marco.get("sl_price")
     entry = marco.get("entry_price") or item.get("price")
     if sl is None or entry is None:
@@ -457,6 +536,11 @@ def main():
         handlers=[logging.StreamHandler(),
                   logging.FileHandler(BASE_DIR / "bridge.log", encoding="utf-8")],
     )
+    _exec_handler = logging.FileHandler(BASE_DIR / "executed.log", encoding="utf-8")
+    _exec_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s",
+                                                 datefmt="%Y-%m-%d %H:%M:%S"))
+    exec_log.addHandler(_exec_handler)
+    exec_log.setLevel(logging.INFO)
     log.info("=" * 60)
     log.info("Bridge MT5 — DRY_RUN=%s  API=%s", cfg.dry_run, cfg.api_base)
     log.info("Riesgo: %.2f%%/trade, max %d trades/dia, limite diario %.0f USD, total %.0f USD",

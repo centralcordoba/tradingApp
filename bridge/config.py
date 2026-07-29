@@ -80,7 +80,15 @@ class Config:
     deviation_points: int = int(_get("DEVIATION_POINTS", "10"))
     cooldown_min: int = int(_get("COOLDOWN_MIN", "15"))           # por símbolo+lado (marco)
     signal_max_age_min: float = float(_get("SIGNAL_MAX_AGE_MIN", "3"))
-    zones_max_age_min: float = float(_get("ZONES_MAX_AGE_MIN", "10"))
+    # Minutos desde el CIERRE de la última vela M15 (calculado en el bridge con
+    # last_candle_ts — ver _zone_age_min). La latencia estructural es cadencia M15
+    # (0-15) + cache OHLC (0-15) + cache zones (0-15): un dato "lo más fresco
+    # posible" llega típicamente con 10-25 min. 30 deja pasar la operación normal
+    # y veta la cola realmente añeja; el finde ya lo corta el gate market_closed
+    # del propio marco. Nota histórica: los defaults 10 y 18 comparaban contra el
+    # data_age_minutes del backend, que mide desde la APERTURA (mínimo teórico 15)
+    # → descartaban prácticamente el 100% de los OPERAR (el "0 trades" de jul-2026).
+    zones_max_age_min: float = float(_get("ZONES_MAX_AGE_MIN", "30"))
     be_threshold_usd: float = float(_get("BE_THRESHOLD_USD", "5"))
 
     # Cadencias
