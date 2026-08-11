@@ -174,7 +174,7 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
     if not values:
         return None
 
-    out_ts, out_o, out_c, out_h, out_l = [], [], [], [], []
+    out_ts, out_o, out_c, out_h, out_l, out_v = [], [], [], [], [], []
     for v in values:
         try:
             c = float(v["close"])
@@ -192,22 +192,28 @@ def _parse_ohlc(raw: dict) -> Optional[dict]:
             l = float(v.get("low", c))
         except (TypeError, ValueError):
             l = c
+        try:
+            vol = float(v.get("volume") or 0.0)
+        except (TypeError, ValueError):
+            vol = 0.0
         out_ts.append(v.get("datetime"))
         out_o.append(o)
         out_c.append(c)
         out_h.append(h)
         out_l.append(l)
+        out_v.append(vol)
 
     interval_min = _interval_minutes((raw.get("meta") or {}).get("interval")) if isinstance(raw, dict) else None
     if interval_min and out_ts:
         opened = _parse_ts_utc(out_ts[-1])
         if opened is not None and opened + timedelta(minutes=interval_min) > datetime.now(timezone.utc):
-            out_ts.pop(); out_o.pop(); out_c.pop(); out_h.pop(); out_l.pop()
+            out_ts.pop(); out_o.pop(); out_c.pop(); out_h.pop(); out_l.pop(); out_v.pop()
 
     if len(out_c) < SCANNER_MIN_CANDLES:
         return None
 
-    return {"ts": out_ts, "open": out_o, "close": out_c, "high": out_h, "low": out_l}
+    return {"ts": out_ts, "open": out_o, "close": out_c, "high": out_h, "low": out_l,
+            "volume": out_v}
 
 
 # ---------------------------------------------------------------------------

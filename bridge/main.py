@@ -167,6 +167,11 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
     equity = mt5c.equity() or cfg.initial_balance
     price = mt5c.current_price(broker_symbol, side) or entry_hint
     sl_distance = abs(price - sl)
+    if tp1 is not None:
+        # TP1 = 1R desde el fill REAL. El marco lo calcula desde su entry teórico
+        # (precio de la última vela M15 cacheada), que puede diferir varios pips
+        # del precio de ejecución — la parcial saltaba tarde o nunca.
+        tp1 = round(price + sl_distance, 5) if side == "LONG" else round(price - sl_distance, 5)
     lots = lots_for_risk(equity, cfg.risk_pct, sl_distance,
                          tick_value, tick_size, vol_min, vol_max, vol_step)
     if lots <= 0:

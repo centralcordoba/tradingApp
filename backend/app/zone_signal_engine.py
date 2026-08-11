@@ -73,7 +73,20 @@ PAIR_CONFIG: dict[str, dict] = {
         # Ampliado 12→20: en tendencia el pullback al nivel coherente cae más lejos;
         # 12p dejaba fuera casi todos los soportes/resistencias operables.
         "max_entry_distance_pips": 20.0,
+        # En FADE (cross B) la distancia manda: entrar a 9p del nivel fue el
+        # patrón de las pérdidas de ago-2026 (se compra el extremo, no el nivel).
+        "fade_max_entry_distance_pips": 5.0,
         "min_level_strength": 2,
+
+        # ── Ejecución ────────────────────────────────────────────────
+        # SL estructural mínimo: con SL < 6p el spread+slippage domina (trade
+        # 06-ago: SL 2p, pérdida real +32% sobre el riesgo presupuestado).
+        "sl_min_pips": 6.0,
+        # Coste round-trip estimado (spread + comisión + slippage) para el RRR neto.
+        "cost_pips": 1.4,
+        # Sesión AVOID: no veta, pero solo ejecuta setups fuertes (0/3 en avoid
+        # vs 1/2 en fire desde el aflojado del 16-jul).
+        "avoid_session_requires_strong": True,
 
         # ── Sesiones (hora Madrid, formato [start, end) 24h) ─────────
         # Sin ventana horaria: la sesión SOLO puntúa (fire/ok/avoid), nunca veta.
@@ -118,7 +131,13 @@ PAIR_CONFIG: dict[str, dict] = {
 
         # ── Nivel cercano ────────────────────────────────────────────
         "max_entry_distance_pips": 18.0,   # Ampliado 10→18 (ver AUDUSD)
+        "fade_max_entry_distance_pips": 5.0,
         "min_level_strength": 3,           # USDCAD: siempre necesita nivel ≥ 3★
+
+        # ── Ejecución ────────────────────────────────────────────────
+        "sl_min_pips": 7.0,
+        "cost_pips": 1.8,                  # spread CAD más ancho que AUD
+        "avoid_session_requires_strong": True,
 
         # ── Sesiones ─────────────────────────────────────────────────
         # Sin ventana horaria: la sesión NY solo puntúa, ya NO veta (antes fuera
@@ -132,8 +151,10 @@ PAIR_CONFIG: dict[str, dict] = {
         "veto_avoid_session": False,       # USDCAD: sesión desfavorable penaliza, no bloquea
 
         # ── Wick ────────────────────────────────────────────────────
-        "wick_min_for_normal": 1.5,        # Umbral más alto que AUDUSD
-        "wick_min_for_strong": 2.2,
+        # Bajado 1.5→1.2 / 2.2→2.0 (11-ago): con 1.5 el gate duro de rechazo
+        # falló 166/166 evaluaciones — USDCAD no operaba NUNCA en la práctica.
+        "wick_min_for_normal": 1.2,
+        "wick_min_for_strong": 2.0,
         "require_wick_for_normal": True,   # USDCAD: sin wick NO se emite señal normal
         "require_wick_for_strong": True,
 
@@ -151,8 +172,18 @@ _DEFAULT_CONFIG = PAIR_CONFIG["AUDUSD"]
 # Score máximo teórico (suma de todos los factores positivos)
 MAX_SCORE = 18
 
-# RRR mínimo global
+# RRR mínimo global (bruto: reward/risk contra niveles)
 MIN_RRR = 2.0
+
+# RRR neto mínimo: (reward − cost) / (risk + cost). Las 4 pérdidas de jul/ago-2026
+# excedieron el riesgo presupuestado un 8-32% — el 2:1 bruto era ~1.6-1.7 real.
+# 1.6 neto bloquea los casos degenerados (SL corto dominado por spread) sin volver
+# al régimen "0 trades": un 10p/20p con coste 1.4 da neto 1.63 y pasa justo.
+MIN_RRR_NET = 1.6
+
+# Buffer del veto de sweep asiático (pips): en fade, entrar a ≤ este margen del
+# extremo asiático recién barrido = comprar el techo / vender el suelo del sweep.
+ASIA_SWEEP_BUFFER_PIPS = 5.0
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
@@ -195,6 +226,7 @@ def _best_level_for_side(
     levels: list[dict],
     scanner_side: str,
     cfg: dict,
+    max_dist: Optional[float] = None,
 ) -> Optional[dict]:
     """
     Selecciona el nivel más adecuado para el side dado.
@@ -203,10 +235,12 @@ def _best_level_for_side(
     (distance ≤ max_entry_distance) es la restricción operativa real; el flag
     `active` (within_range ∧ coherent_with_bias) dejaba fuera pullbacks válidos
     en tendencia cuando el precio se alejaba del nivel coherente.
-    Prioriza: wick confirmado > fuerza > cercanía.
+    `max_dist` permite un límite más estricto (fades en rango: entrar EN el
+    nivel, no a media distancia). Prioriza: wick confirmado > fuerza > cercanía.
     """
     target_type = "support" if scanner_side == "LONG" else "resistance"
-    max_dist = cfg["max_entry_distance_pips"]
+    if max_dist is None:
+        max_dist = cfg["max_entry_distance_pips"]
     min_str  = cfg["min_level_strength"]
 
     candidates = [
@@ -465,13 +499,18 @@ def _calculate_sl_tp(
     SL: más allá del nivel ± max(0.5×ATR_M15, 3 pips) — estructural, SIN recortar
     al cap: si el SL que protege el nivel excede el cap, el gate 9 debe FALLAR
     (recortarlo lo dejaba dentro del nivel = stop-out garantizado en el retest).
+    Floor `sl_min_pips`: un SL más corto que el floor se EXTIENDE (alejándose del
+    nivel, nunca acercándose) — con SL de 2-5p el spread domina el trade.
     TP: nivel opuesto si existe (aunque dé RRR<2 — es el techo real del trade);
-    2×risk solo cuando no hay nivel opuesto que obstruya.
+    sin nivel opuesto se fabrica compensando el coste para dar RRR neto = 2.0.
+    RRR neto = (reward − cost) / (risk + cost) con cost_pips (spread+comisión).
     """
     atr_buffer = (atr_m15 * 0.5) if atr_m15 else (3 * pip_size)
     buffer = max(atr_buffer, 3 * pip_size)
     level_price = best_level["price"]
     max_sl_pips = cfg.get("sl_max_pips", 20.0)
+    min_sl_pips = cfg.get("sl_min_pips", 0.0)
+    cost_pips = cfg.get("cost_pips", 1.5)
 
     if scanner_side == "LONG":
         sl_price = level_price - buffer
@@ -479,32 +518,52 @@ def _calculate_sl_tp(
         sl_price = level_price + buffer
 
     risk_price = abs(entry_price - sl_price)
+    sl_floored = False
+    if risk_price < min_sl_pips * pip_size:
+        risk_price = min_sl_pips * pip_size
+        sl_price = (
+            entry_price - risk_price if scanner_side == "LONG"
+            else entry_price + risk_price
+        )
+        sl_floored = True
     risk_pips = round(risk_price / pip_size, 1)
 
     if opposite_level:
         # El nivel opuesto es el techo/suelo real: el TP honesto es ese nivel,
-        # no un 2×risk fabricado que lo atraviese. Si no alcanza RRR≥2, el
+        # no un 2×risk fabricado que lo atraviese. Si no alcanza el RRR, el
         # gate falla — exactamente la filosofía del RRR floor.
         tp_price = opposite_level["price"]
         reward_pips = round(abs(tp_price - entry_price) / pip_size, 1)
         tp_source = "nivel_sr"
     else:
+        # reward = 2×risk + 3×cost ⇒ (reward−cost)/(risk+cost) = 2.0 exacto:
+        # el TP fabricado compensa el coste en vez de fingir un 2:1 que no existe.
+        reward_pips = round(risk_pips * MIN_RRR + 3 * cost_pips, 1)
         tp_price = (
-            entry_price + risk_price * MIN_RRR if scanner_side == "LONG"
-            else entry_price - risk_price * MIN_RRR
+            entry_price + reward_pips * pip_size if scanner_side == "LONG"
+            else entry_price - reward_pips * pip_size
         )
-        reward_pips = round(risk_pips * MIN_RRR, 1)
-        tp_source = "2:1_sin_nivel_opuesto"
+        tp_source = "2:1_neto_sin_nivel_opuesto"
 
     rrr = round(reward_pips / risk_pips, 2) if risk_pips > 0 else None
+    rrr_net = (
+        round((reward_pips - cost_pips) / (risk_pips + cost_pips), 2)
+        if risk_pips > 0 else None
+    )
     return {
         "sl_price": round(sl_price, 5),
         "tp_price": round(tp_price, 5),
         "risk_pips": risk_pips,
         "reward_pips": reward_pips,
         "rrr": rrr,
-        "rrr_ok": rrr is not None and rrr >= MIN_RRR,
+        "rrr_net": rrr_net,
+        "cost_pips": cost_pips,
+        "rrr_ok": (
+            rrr is not None and rrr >= MIN_RRR
+            and rrr_net is not None and rrr_net >= MIN_RRR_NET
+        ),
         "sl_within_cap": risk_pips <= max_sl_pips,
+        "sl_floored": sl_floored,
         "tp_source": tp_source,
     }
 
@@ -716,9 +775,10 @@ def generate_zone_marco(
     if atr_m15_pips_val is None:
         vol_ok, vol_detail = True, "ATR M15 no disponible"
     elif atr_m15_pips_val < atr_min:
-        vol_ok, vol_detail = False, f"ATR M15 {atr_m15_pips_val:.1f}p < {atr_min}p — mercado muerto"
+        # 2 decimales: con 1 el mensaje podía decir "3.0p < 3.0p" (2.96 redondeado)
+        vol_ok, vol_detail = False, f"ATR M15 {atr_m15_pips_val:.2f}p < {atr_min}p — mercado muerto"
     elif atr_m15_pips_val > atr_max:
-        vol_ok, vol_detail = False, f"ATR M15 {atr_m15_pips_val:.1f}p > {atr_max}p — demasiado volátil"
+        vol_ok, vol_detail = False, f"ATR M15 {atr_m15_pips_val:.2f}p > {atr_max}p — demasiado volátil"
     else:
         vol_ok, vol_detail = True, f"ATR M15 {atr_m15_pips_val:.1f}p — útil para scalp"
     gates.append(_gate("volatilidad_util", "Volatilidad útil", vol_ok, True, vol_detail))
@@ -732,9 +792,71 @@ def generate_zone_marco(
         struct_ok, struct_detail = True, f"Estructura M5 {structure}"
     gates.append(_gate("estructura_impulso", "Estructura con impulso", struct_ok, True, struct_detail))
 
-    # GATE 7 — Nivel S/R operable en la dirección del trade (duro)
+    # GATE 6b — Sin sweep asiático en contra (duro, solo fades cross B).
+    # El trade del 11-ago compró EXACTAMENTE el high asiático recién barrido
+    # (entrada 0.70657 con asia high 0.70656 y swept_high=true): en rango, el
+    # extremo del sweep es donde el fade va en contra, no a favor.
+    asia = zone_item.get("asia_range") or {}
+    price_now = zone_item.get("price")
+    sweep_ok, sweep_detail = True, "Sin sweep asiático en contra"
+    if cross_state == "B" and asia and price_now is not None and pip_size > 0:
+        if scanner_side == "LONG" and asia.get("swept_high"):
+            dist_high = (asia["high"] - price_now) / pip_size
+            if dist_high <= ASIA_SWEEP_BUFFER_PIPS:
+                sweep_ok = False
+                sweep_detail = (
+                    f"LONG a {abs(dist_high):.1f}p del high asiático barrido "
+                    f"({asia['high']}) — comprando el techo del sweep"
+                )
+        elif scanner_side == "SHORT" and asia.get("swept_low"):
+            dist_low = (price_now - asia["low"]) / pip_size
+            if dist_low <= ASIA_SWEEP_BUFFER_PIPS:
+                sweep_ok = False
+                sweep_detail = (
+                    f"SHORT a {abs(dist_low):.1f}p del low asiático barrido "
+                    f"({asia['low']}) — vendiendo el suelo del sweep"
+                )
+    elif cross_state != "B":
+        sweep_detail = "No aplica (solo fades en rango)"
+    elif not asia:
+        sweep_detail = "Rango asiático no disponible"
+    gates.append(_gate("sweep_asiatico", "Sin sweep en contra", sweep_ok, True, sweep_detail))
+
+    # GATE 6c — VWAP del lado correcto (duro, solo fades cross B).
+    # En mean-reversion se compra barato y se vende caro respecto a la media de
+    # la sesión: LONG sobre el VWAP (o SHORT bajo él) es fade contra la media.
+    vwap = zone_item.get("vwap") or {}
+    vwap_val = vwap.get("value")
+    vwap_ok, vwap_detail = True, "VWAP no disponible"
+    if cross_state == "B" and vwap_val is not None and price_now is not None:
+        dist_v = vwap.get("distance_pips", 0.0)
+        if scanner_side == "LONG":
+            vwap_ok = price_now <= vwap_val
+            vwap_detail = (
+                f"Precio {abs(dist_v):.1f}p bajo VWAP {vwap_val}"
+                + (" (bajo banda −1σ)" if vwap.get("beyond_lower") else "")
+                if vwap_ok else
+                f"Precio {abs(dist_v):.1f}p SOBRE VWAP {vwap_val} — fade LONG comprando caro"
+            )
+        elif scanner_side == "SHORT":
+            vwap_ok = price_now >= vwap_val
+            vwap_detail = (
+                f"Precio {abs(dist_v):.1f}p sobre VWAP {vwap_val}"
+                + (" (sobre banda +1σ)" if vwap.get("beyond_upper") else "")
+                if vwap_ok else
+                f"Precio {abs(dist_v):.1f}p BAJO VWAP {vwap_val} — fade SHORT vendiendo barato"
+            )
+    elif cross_state != "B":
+        vwap_detail = "No aplica (solo fades en rango)"
+    gates.append(_gate("vwap_fade", "VWAP a favor del fade", vwap_ok, True, vwap_detail))
+
+    # GATE 7 — Nivel S/R operable en la dirección del trade (duro).
+    # En fade (cross B) la distancia máxima al nivel es mucho más estricta:
+    # el fade se entra EN el nivel, no persiguiendo el precio a media distancia.
+    fade_dist = cfg.get("fade_max_entry_distance_pips")
+    level_max_dist = fade_dist if (cross_state == "B" and fade_dist) else None
     best_level = (
-        _best_level_for_side(levels, scanner_side, cfg)
+        _best_level_for_side(levels, scanner_side, cfg, max_dist=level_max_dist)
         if scanner_side in ("LONG", "SHORT") else None
     )
     if best_level is not None:
@@ -744,9 +866,11 @@ def generate_zone_marco(
         )
     else:
         dir_str = "soporte" if scanner_side == "LONG" else "resistencia" if scanner_side == "SHORT" else "nivel"
+        eff_dist = level_max_dist if level_max_dist is not None else cfg["max_entry_distance_pips"]
         level_ok, level_detail = False, (
-            f"Sin {dir_str} activo a ≤{cfg['max_entry_distance_pips']}p con fuerza "
+            f"Sin {dir_str} activo a ≤{eff_dist}p con fuerza "
             f"≥{cfg['min_level_strength']}★"
+            + (" (límite de fade)" if level_max_dist is not None else "")
         )
     gates.append(_gate("nivel_operable", "Nivel S/R operable", level_ok, True, level_detail))
 
@@ -783,10 +907,22 @@ def generate_zone_marco(
         if not sl_tp["sl_within_cap"]:
             rrr_detail = f"SL {sl_tp['risk_pips']:.1f}p excede cap {cfg.get('sl_max_pips', 20.0):.0f}p"
         elif not sl_tp["rrr_ok"]:
-            rv = sl_tp.get("rrr")
-            rrr_detail = f"RRR {rv:.2f}:1 < {MIN_RRR:.1f}:1" if rv is not None else "RRR no calculable"
+            rv, rn = sl_tp.get("rrr"), sl_tp.get("rrr_net")
+            if rv is None:
+                rrr_detail = "RRR no calculable"
+            elif rv < MIN_RRR:
+                rrr_detail = f"RRR {rv:.2f}:1 < {MIN_RRR:.1f}:1"
+            else:
+                rrr_detail = (
+                    f"RRR neto {rn:.2f}:1 < {MIN_RRR_NET:.1f}:1 "
+                    f"(bruto {rv:.2f}, coste {sl_tp['cost_pips']:.1f}p)"
+                )
         else:
-            rrr_detail = f"RRR {sl_tp['rrr']:.2f}:1 · SL {sl_tp['risk_pips']:.1f}p"
+            rrr_detail = (
+                f"RRR {sl_tp['rrr']:.2f}:1 (neto {sl_tp['rrr_net']:.2f}) · "
+                f"SL {sl_tp['risk_pips']:.1f}p"
+                + (" (floor)" if sl_tp.get("sl_floored") else "")
+            )
     else:
         rrr_ok, rrr_detail = False, "Sin nivel para calcular SL/TP"
     gates.append(_gate("rrr_minimo", f"RRR ≥ {MIN_RRR:.0f}:1 y SL en cap", rrr_ok, True, rrr_detail))
@@ -876,6 +1012,18 @@ def generate_zone_marco(
             "Esperar mejor confirmación o precio en el nivel."
         )
 
+    # Sesión AVOID: no veta, pero solo deja pasar setups FUERTES (0/3 trades
+    # en avoid vs 1/2 en fire desde el aflojado del 16-jul).
+    if (decision == "OPERAR" and strength != "fuerte"
+            and session_status == "avoid"
+            and cfg.get("avoid_session_requires_strong", True)):
+        decision = "ESPERAR"
+        strength = None
+        reason = (
+            f"Setup normal en sesión AVOID ({score}/{MAX_SCORE}) — fuera de la "
+            "ventana de liquidez solo se ejecutan setups fuertes."
+        )
+
     # Degradación blanda por noticia
     if news_active and decision == "OPERAR":
         decision = "ESPERAR"
@@ -913,6 +1061,8 @@ def generate_zone_marco(
         "manage": ({"partial_at_r": 1.0, "move_be_at_r": 1.0}
                    if tp1_price is not None else None),
         "rrr": sl_tp["rrr"] if sl_tp else None,
+        "rrr_net": sl_tp["rrr_net"] if sl_tp else None,
+        "cost_pips": sl_tp["cost_pips"] if sl_tp else None,
         "risk_pips": sl_tp["risk_pips"] if sl_tp else None,
         "reward_pips": sl_tp["reward_pips"] if sl_tp else None,
         "tp_source": sl_tp["tp_source"] if sl_tp else None,

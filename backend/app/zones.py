@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -281,6 +281,61 @@ def _wick_ratio(ohlc: dict, idx: int = -1) -> dict:
         "body": round(body, 5),
         "ratio": round(ratio, 2),
         "direction": direction,
+    }
+
+
+# ---------------------------------------------------------------------------
+# VWAP de sesión (ancla 22:00 UTC = apertura del día forex) + bandas ±1σ.
+# Twelve Data trae tick volume en forex; si viene vacío/cero se degrada a
+# pesos iguales (TWAP) — sigue siendo un precio medio de sesión usable.
+# ---------------------------------------------------------------------------
+
+VWAP_ANCHOR_UTC_H = 22   # misma ancla que el session VWAP del Pine
+VWAP_MIN_BARS = 4        # sesión recién abierta: VWAP aún no representativo
+
+
+def _session_vwap(ohlc: dict, pip: float) -> Optional[dict]:
+    """VWAP desde la última apertura del día forex (22:00 UTC) + bandas ±1σ."""
+    if not ohlc.get("ts") or not ohlc.get("close"):
+        return None
+    times = [_parse_candle_ts(t) for t in ohlc["ts"]]
+    last_dt = next((t for t in reversed(times) if t is not None), None)
+    if last_dt is None:
+        return None
+    anchor = last_dt.replace(hour=VWAP_ANCHOR_UTC_H, minute=0, second=0, microsecond=0)
+    if last_dt.hour < VWAP_ANCHOR_UTC_H:
+        anchor -= timedelta(days=1)
+    idxs = [i for i, t in enumerate(times) if t is not None and t >= anchor]
+    if len(idxs) < VWAP_MIN_BARS:
+        return None
+
+    vols = ohlc.get("volume") or []
+    weights = [
+        (vols[i] if i < len(vols) and vols[i] and vols[i] > 0 else None) for i in idxs
+    ]
+    if any(w is None for w in weights):
+        weights = [1.0] * len(idxs)   # tick volume ausente → TWAP
+    tp = [(ohlc["high"][i] + ohlc["low"][i] + ohlc["close"][i]) / 3 for i in idxs]
+
+    w_sum = float(sum(weights))
+    vwap = sum(t * w for t, w in zip(tp, weights)) / w_sum
+    var = sum(t * t * w for t, w in zip(tp, weights)) / w_sum - vwap * vwap
+    std = float(np.sqrt(max(var, 0.0)))
+    upper = vwap + std
+    lower = vwap - std
+
+    price = ohlc["close"][-1]
+    return {
+        "value": round(vwap, 5),
+        "upper": round(upper, 5),
+        "lower": round(lower, 5),
+        "std_pips": round(std / pip, 1),
+        "distance_pips": round((price - vwap) / pip, 1),  # >0 = precio sobre VWAP
+        "position": "above" if price > vwap else "below" if price < vwap else "at",
+        "beyond_upper": price > upper,
+        "beyond_lower": price < lower,
+        "bars": len(idxs),
+        "anchor": anchor.isoformat().replace("+00:00", "Z"),
     }
 
 
@@ -614,6 +669,7 @@ def analyze_zones(pair: str, params: Optional[dict] = None) -> Optional[dict]:
         },
         "levels": levels,
         "asia_range": _asia_range(ohlc, pip),
+        "vwap": _session_vwap(ohlc, pip),
         "active_count": sum(1 for lv in levels if lv["active"]),
         "n_bars": n_bars,
         "last_candle_ts": _normalize_ts(last_ts),

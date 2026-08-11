@@ -179,6 +179,17 @@ def test_operar_fresco_ejecuta(env):
     assert len(env.reported) == 1 and env.reported[0]["dry_run"] is True
 
 
+def test_tp1_se_recalcula_desde_el_fill(env):
+    """TP1 = 1R desde el FILL real, no desde el entry teórico del marco (que es
+    el precio de la última vela M15 cacheada y puede diferir varios pips)."""
+    env.monkeypatch.setattr(main.mt5c, "current_price", lambda s, side: 0.65740)
+    main._process_zone_item(zone_item(), now=1000.0)
+    row = env.executed[0]
+    # SHORT: fill 0.65740, SL 0.65850 → riesgo 0.0011 → TP1 = 0.65740 − 0.0011
+    assert row["entry_price"] == pytest.approx(0.65740)
+    assert row["tp1_price"] == pytest.approx(0.65630)
+
+
 def test_stale_no_quema_la_senal_y_ejecuta_al_refrescar(env):
     """La propiedad clave del fix: OPERAR con dato viejo se APLAZA (no se registra
     la transición) y en cuanto el cache refresca, ese mismo OPERAR ejecuta."""

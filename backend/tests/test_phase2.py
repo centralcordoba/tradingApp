@@ -109,7 +109,9 @@ def test_gate9_no_opposite_level_uses_2to1():
         scanner_side="LONG", entry_price=1.0810,
         best_level={"price": 1.0800}, opposite_level=None, **_G9,
     )
-    assert r["tp_source"] == "2:1_sin_nivel_opuesto"
+    # Sin nivel opuesto, el TP fabricado compensa el coste: RRR neto = 2.0 exacto
+    assert r["tp_source"] == "2:1_neto_sin_nivel_opuesto"
+    assert r["rrr_net"] == pytest.approx(2.0)
     assert r["rrr_ok"] is True
     assert r["sl_within_cap"] is True
 
