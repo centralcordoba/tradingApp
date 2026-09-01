@@ -21,6 +21,7 @@ Gestión de riesgo:
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -84,6 +85,13 @@ PAIR_CONFIG: dict[str, dict] = {
         "sl_min_pips": 6.0,
         # Coste round-trip estimado (spread + comisión + slippage) para el RRR neto.
         "cost_pips": 1.4,
+        # ── Escenario B (continuation) ───────────────────────────────
+        # SL/TP fijos en pips desde la entrada: el nivel deja de anclar el stop.
+        # En el replay el stop estructural (nivel ± 3p) caía DENTRO del ruido
+        # (MAE 4h media 21p) y ninguna combinación anclada al nivel era rentable.
+        # 12/24 es el óptimo del barrido sobre las 12 marcas de AUDUSD.
+        "cont_sl_pips": 12.0,
+        "cont_tp_mult": 2.0,
         # Sesión AVOID: no veta, pero solo ejecuta setups fuertes (0/3 en avoid
         # vs 1/2 en fire desde el aflojado del 16-jul).
         "avoid_session_requires_strong": True,
@@ -137,6 +145,12 @@ PAIR_CONFIG: dict[str, dict] = {
         # ── Ejecución ────────────────────────────────────────────────
         "sl_min_pips": 7.0,
         "cost_pips": 1.8,                  # spread CAD más ancho que AUD
+        # ── Escenario B (continuation) ───────────────────────────────
+        # OJO: 12/24 está EXTRAPOLADO de AUDUSD. USDCAD aportó 1 solo trade al
+        # replay (muestra insuficiente) — sin validar en su propio histórico.
+        # Con cost_pips 1.8 el RRR neto queda en 1.61, justo sobre el mínimo 1.6.
+        "cont_sl_pips": 12.0,
+        "cont_tp_mult": 2.0,
         "avoid_session_requires_strong": True,
 
         # ── Sesiones ─────────────────────────────────────────────────
@@ -184,6 +198,44 @@ MIN_RRR_NET = 1.6
 # Buffer del veto de sweep asiático (pips): en fade, entrar a ≤ este margen del
 # extremo asiático recién barrido = comprar el techo / vender el suelo del sweep.
 ASIA_SWEEP_BUFFER_PIPS = 5.0
+
+# ─── Estrategia activa — ESCENARIO B (cambio del 2026-09-01) ───────────────
+# Hasta el 31-ago-2026 el motor corría en modo "reversion": el nivel S/R se leía
+# como zona de rebote y se entraba EN la dirección del scanner M5.
+# El replay de los 12 trades AUDUSD ejecutados (30-jul → 26-ago 2026) contra el
+# OHLC M15 real invalidó esa premisa:
+#   · señal tal cual                        → 1W/11L,  −10.40R
+#   · lanzamiento de moneda, mismas marcas   →           −1.40R  (solo coste)
+#   · señal INVERTIDA                        → 8W/4L,   +7.60R
+#   · MFE 4h media −3.7p contra MAE 4h media +21.0p; ratio MFE/MAE a 24h = 0.39
+#     idéntico en largos y en cortos → no es sesgo del período, es timing.
+#   · barrido completo de 63 combinaciones SL×TP ancladas al nivel: las 63 negativas.
+# Lectura: lo que el motor detecta no es un nivel que aguanta, es AGOTAMIENTO, y
+# el tramo operable son los 20-30 pips de sobre-recorrido que vienen después.
+# En modo "continuation" la CAPA DE DETECCIÓN (gates + score) se conserva intacta
+# —es lo que fija el MOMENTO— y solo se invierte el lado ejecutado, con SL/TP
+# fijos en pips desde la entrada en vez de anclados al nivel.
+# Volver al comportamiento anterior: ZONE_STRATEGY=reversion (requiere reinicio,
+# os.getenv se evalúa al import).
+STRATEGY_MODE = os.getenv("ZONE_STRATEGY", "continuation").strip().lower()
+STRATEGY_CHANGED_ON = "2026-09-01"
+STRATEGY_NOTE = (
+    "2026-09-01 · cambio de estrategia: reversion → continuation (Escenario B). "
+    "Se invierte el lado ejecutado respecto del detector y el SL/TP pasa a pips "
+    "fijos desde la entrada. Base: replay de 12 trades AUDUSD, señal −10.40R vs "
+    "invertida +7.60R, moneda −1.40R."
+)
+
+
+def _invert_side(side: str) -> str:
+    return "SHORT" if side == "LONG" else "LONG" if side == "SHORT" else side
+
+
+def _trade_side(signal_side: str) -> str:
+    """Lado realmente ejecutado. En 'continuation' es el contrario al detector."""
+    if STRATEGY_MODE == "continuation":
+        return _invert_side(signal_side)
+    return signal_side
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
@@ -494,6 +546,7 @@ def _calculate_sl_tp(
     opposite_level: Optional[dict],
     atr_m15: Optional[float],
     cfg: dict,
+    trade_side: Optional[str] = None,
 ) -> dict:
     """
     SL: más allá del nivel ± max(0.5×ATR_M15, 3 pips) — estructural, SIN recortar
@@ -505,12 +558,42 @@ def _calculate_sl_tp(
     sin nivel opuesto se fabrica compensando el coste para dar RRR neto = 2.0.
     RRR neto = (reward − cost) / (risk + cost) con cost_pips (spread+comisión).
     """
-    atr_buffer = (atr_m15 * 0.5) if atr_m15 else (3 * pip_size)
-    buffer = max(atr_buffer, 3 * pip_size)
-    level_price = best_level["price"]
     max_sl_pips = cfg.get("sl_max_pips", 20.0)
     min_sl_pips = cfg.get("sl_min_pips", 0.0)
     cost_pips = cfg.get("cost_pips", 1.5)
+    side = trade_side or scanner_side
+
+    if STRATEGY_MODE == "continuation":
+        # Escenario B: el nivel ya no ancla el stop — solo marcó el momento.
+        # Riesgo y objetivo fijos en pips desde la entrada, sobre el lado
+        # EJECUTADO (contrario al detector).
+        risk_pips = float(cfg.get("cont_sl_pips", 12.0))
+        reward_pips = round(risk_pips * float(cfg.get("cont_tp_mult", 2.0)), 1)
+        if side == "LONG":
+            sl_price = entry_price - risk_pips * pip_size
+            tp_price = entry_price + reward_pips * pip_size
+        else:
+            sl_price = entry_price + risk_pips * pip_size
+            tp_price = entry_price - reward_pips * pip_size
+        rrr = round(reward_pips / risk_pips, 2)
+        rrr_net = round((reward_pips - cost_pips) / (risk_pips + cost_pips), 2)
+        return {
+            "sl_price": round(sl_price, 5),
+            "tp_price": round(tp_price, 5),
+            "risk_pips": risk_pips,
+            "reward_pips": reward_pips,
+            "rrr": rrr,
+            "rrr_net": rrr_net,
+            "cost_pips": cost_pips,
+            "rrr_ok": rrr >= MIN_RRR and rrr_net >= MIN_RRR_NET,
+            "sl_within_cap": risk_pips <= max_sl_pips,
+            "sl_floored": False,
+            "tp_source": "continuation_pips_fijos",
+        }
+
+    atr_buffer = (atr_m15 * 0.5) if atr_m15 else (3 * pip_size)
+    buffer = max(atr_buffer, 3 * pip_size)
+    level_price = best_level["price"]
 
     if scanner_side == "LONG":
         sl_price = level_price - buffer
@@ -732,6 +815,13 @@ def generate_zone_marco(
         range_pos          = scanner_item.get("range_pos", 0.5)
         change_pct         = scanner_item.get("change_pct", 0.0)
 
+    # scanner_side = lado del DETECTOR (el que fija el momento y alimenta gates
+    # y score). trade_side = lado REALMENTE ejecutado: en Escenario B es el
+    # contrario, porque el tramo operable es el sobre-recorrido, no el rebote.
+    signal_side = scanner_side
+    trade_side = (_trade_side(scanner_side)
+                  if scanner_side in ("LONG", "SHORT") else scanner_side)
+
     gates: list[dict] = []
 
     # GATE 1 — Mercado abierto (duro)
@@ -799,7 +889,14 @@ def generate_zone_marco(
     asia = zone_item.get("asia_range") or {}
     price_now = zone_item.get("price")
     sweep_ok, sweep_detail = True, "Sin sweep asiático en contra"
-    if cross_state == "B" and asia and price_now is not None and pip_size > 0:
+    if STRATEGY_MODE != "reversion":
+        # El veto nació para el fade: entrar a ≤5p del extremo barrido era
+        # comprar el techo del sweep. Bajo continuación se ejecuta el lado
+        # contrario, así que ese mismo contexto ya no es adverso. Sin evidencia
+        # para una versión invertida (el gate no llegó a filtrar ninguna de las
+        # 12 marcas del replay: todas cross A), se deja inerte en vez de inventarla.
+        sweep_detail = "No aplica (premisa de continuación, no de fade)"
+    elif cross_state == "B" and asia and price_now is not None and pip_size > 0:
         if scanner_side == "LONG" and asia.get("swept_high"):
             dist_high = (asia["high"] - price_now) / pip_size
             if dist_high <= ASIA_SWEEP_BUFFER_PIPS:
@@ -828,7 +925,9 @@ def generate_zone_marco(
     vwap = zone_item.get("vwap") or {}
     vwap_val = vwap.get("value")
     vwap_ok, vwap_detail = True, "VWAP no disponible"
-    if cross_state == "B" and vwap_val is not None and price_now is not None:
+    if STRATEGY_MODE != "reversion":
+        vwap_detail = "No aplica (premisa de continuación, no de fade)"
+    elif cross_state == "B" and vwap_val is not None and price_now is not None:
         dist_v = vwap.get("distance_pips", 0.0)
         if scanner_side == "LONG":
             vwap_ok = price_now <= vwap_val
@@ -902,6 +1001,7 @@ def generate_zone_marco(
             pair=pair, pip_size=pip_size, scanner_side=scanner_side,
             entry_price=entry_price, best_level=best_level,
             opposite_level=opp_level, atr_m15=atr_m15, cfg=cfg,
+            trade_side=trade_side,
         )
         rrr_ok = sl_tp["sl_within_cap"] and sl_tp["rrr_ok"]
         if not sl_tp["sl_within_cap"]:
@@ -954,10 +1054,14 @@ def generate_zone_marco(
 
     # ── Decisión ────────────────────────────────────────────────────
     hard_failed = [g for g in gates if g["hard"] and not g["passed"]]
-    side = scanner_side if scanner_side in ("LONG", "SHORT") else None
+    side = trade_side if trade_side in ("LONG", "SHORT") else None
 
     base = {
+        # `side` es SIEMPRE el lado a ejecutar (el bridge y la UI leen este).
+        # `signal_side` expone el lado del detector para poder auditar la inversión.
         "side": side,
+        "signal_side": signal_side if signal_side in ("LONG", "SHORT") else None,
+        "strategy": STRATEGY_MODE,
         "gates": gates,
         "session_status": session_status,
         "session_hour_madrid": hour,
@@ -1001,14 +1105,17 @@ def generate_zone_marco(
         decision = "OPERAR"
         strength = "fuerte" if score >= strong_floor else "normal"
         reason = (
-            f"Setup {strength} {scanner_side} — {score}/{MAX_SCORE} de confluencia, "
+            f"Setup {strength} {trade_side} — {score}/{MAX_SCORE} de confluencia, "
             "gates superados."
+            + (f" Continuación: el detector marcó {signal_side} en el nivel y se "
+               f"opera el sobre-recorrido {trade_side}."
+               if STRATEGY_MODE == "continuation" else "")
         )
     else:
         decision = "ESPERAR"
         strength = None
         reason = (
-            f"Dirección {scanner_side} válida pero confluencia floja ({score}/{MAX_SCORE}). "
+            f"Dirección {trade_side} válida pero confluencia floja ({score}/{MAX_SCORE}). "
             "Esperar mejor confirmación o precio en el nivel."
         )
 
@@ -1038,11 +1145,14 @@ def generate_zone_marco(
     _record_gate_stats(pair, gates, decision, reason)
 
     entry_px = round(zone_item.get("price", best_level["price"]), 5) if best_level else None
-    # TP1 = objetivo parcial a 1R (entry ± riesgo). Se ejecuta como parcial + BE;
-    # tp_price (nivel opuesto) queda como target del runner. El replay mostró que
-    # tomar a 1R vuelve el FADE ganador (el nivel opuesto casi nunca se alcanza intradía).
+    # TP1 = objetivo parcial a 1R (entry ± riesgo), ejecutado como parcial + BE.
+    # DESACTIVADO en continuation: la parcial a 1R + BE es justamente lo que
+    # hundió el payoff real a 0.93:1 (ganancia media +0.95R contra pérdida media
+    # −1.03R ⇒ WR de equilibrio 52% en un sistema diseñado para 33%). El replay
+    # de Escenario B se midió sin parcial: TP completo 2R o SL.
     tp1_price = (round(2 * entry_px - sl_tp["sl_price"], 5)
-                 if (sl_tp and entry_px is not None) else None)
+                 if (STRATEGY_MODE != "continuation"
+                     and sl_tp and entry_px is not None) else None)
 
     return {
         **base,

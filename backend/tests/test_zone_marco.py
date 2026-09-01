@@ -78,15 +78,78 @@ def setup_function(_):
     zse._STRENGTH_STATE.clear()
 
 
+class _reversion:
+    """Fija el modo legacy 'reversion'. Los tests de geometría anclada al nivel
+    describen la estrategia anterior al cambio del 2026-09-01, que sigue siendo
+    seleccionable con ZONE_STRATEGY=reversion. Implementado como context manager
+    y no como fixture de pytest para que el runner de `__main__` siga andando."""
+
+    def __enter__(self):
+        self.prev = zse.STRATEGY_MODE
+        zse.STRATEGY_MODE = "reversion"
+
+    def __exit__(self, *_exc):
+        zse.STRATEGY_MODE = self.prev
+        return False
+
+
 # ─── Casos ──────────────────────────────────────────────────────────────────
 
 def test_operar_tendencia_a_favor():
+    # Escenario B: el detector marca LONG en el soporte y se ejecuta el SHORT
+    # del sobre-recorrido. La CAPA DE DETECCIÓN (gates + score) no cambia.
     m = generate_zone_marco(_zone_item(), _scanner_item())
     assert m["decision"] == "OPERAR"
-    assert m["side"] == "LONG"
+    assert m["strategy"] == "continuation"
+    assert m["signal_side"] == "LONG"
+    assert m["side"] == "SHORT"
     assert m["confluence"]["score"] >= 10
     assert m["entry_price"] is not None and m["rrr"] is not None
     assert all(g["passed"] for g in m["gates"] if g["hard"])
+
+
+def test_continuation_sl_tp_fijos_sobre_el_lado_ejecutado():
+    m = generate_zone_marco(_zone_item(price=0.71700), _scanner_item())
+    assert m["side"] == "SHORT"
+    assert m["risk_pips"] == 12.0
+    assert m["reward_pips"] == 24.0
+    assert m["rrr"] == 2.0
+    assert m["tp_source"] == "continuation_pips_fijos"
+    # SHORT: SL por encima de la entrada, TP por debajo. El nivel ya no ancla nada.
+    assert m["sl_price"] == round(0.71700 + 12 * 0.0001, 5)
+    assert m["tp_price"] == round(0.71700 - 24 * 0.0001, 5)
+
+
+def test_continuation_sin_parcial_ni_be():
+    # La parcial a 1R + BE hundía el payoff real a 0.93:1 — desactivada.
+    m = generate_zone_marco(_zone_item(), _scanner_item())
+    assert m["decision"] == "OPERAR"
+    assert m["tp1_price"] is None
+    assert m["manage"] is None
+
+
+def test_continuation_neutraliza_gates_de_fade():
+    # sweep_asiatico y vwap_fade codifican "el fade sale barato acá": bajo
+    # continuación se ejecuta el lado contrario, así que quedan inertes.
+    m = generate_zone_marco(
+        _zone_item(cross_state="B",
+                   asia_range={"high": 0.71705, "low": 0.71500,
+                               "swept_high": True, "swept_low": False},
+                   vwap={"value": 0.71600, "distance_pips": 10.0}),
+        _scanner_item(),
+    )
+    keys = {g["key"]: g for g in m["gates"]}
+    assert keys["sweep_asiatico"]["passed"] is True
+    assert keys["vwap_fade"]["passed"] is True
+    assert "continuación" in keys["sweep_asiatico"]["detail"]
+
+
+def test_reversion_sigue_seleccionable():
+    with _reversion():
+        m = generate_zone_marco(_zone_item(), _scanner_item())
+        assert m["strategy"] == "reversion"
+        assert m["side"] == "LONG" and m["signal_side"] == "LONG"
+        assert m["tp1_price"] is not None  # parcial 1R + BE vuelve con el modo legacy
 
 
 def test_no_operar_conflicto_mtf():
@@ -242,70 +305,78 @@ def test_fade_exige_nivel_en_el_nivel():
 
 
 def test_fade_veta_sweep_asiatico():
-    # Réplica del trade LOSS del 11-ago: LONG en rango comprando exactamente
-    # el high asiático recién barrido.
-    asia = {"high": 0.71705, "low": 0.71400, "swept_high": True, "swept_low": False}
-    m = generate_zone_marco(
-        _zone_item(cross_state="B", asia_range=asia), _scanner_item())
-    sweep = next(g for g in m["gates"] if g["key"] == "sweep_asiatico")
-    assert sweep["passed"] is False
-    assert m["decision"] == "NO_OPERAR"
-    # En tendencia (cross A) romper el high asiático es continuación — no aplica.
-    m2 = generate_zone_marco(
-        _zone_item(cross_state="A", asia_range=asia), _scanner_item())
-    assert next(g for g in m2["gates"] if g["key"] == "sweep_asiatico")["passed"] is True
-    # Fade lejos del extremo barrido (>5p) tampoco veta.
-    asia_far = {"high": 0.71800, "low": 0.71400, "swept_high": True, "swept_low": False}
-    m3 = generate_zone_marco(
-        _zone_item(cross_state="B", asia_range=asia_far), _scanner_item())
-    assert next(g for g in m3["gates"] if g["key"] == "sweep_asiatico")["passed"] is True
+    # Geometría/gates de la estrategia legacy (ver _reversion).
+    with _reversion():
+        # Réplica del trade LOSS del 11-ago: LONG en rango comprando exactamente
+        # el high asiático recién barrido.
+        asia = {"high": 0.71705, "low": 0.71400, "swept_high": True, "swept_low": False}
+        m = generate_zone_marco(
+            _zone_item(cross_state="B", asia_range=asia), _scanner_item())
+        sweep = next(g for g in m["gates"] if g["key"] == "sweep_asiatico")
+        assert sweep["passed"] is False
+        assert m["decision"] == "NO_OPERAR"
+        # En tendencia (cross A) romper el high asiático es continuación — no aplica.
+        m2 = generate_zone_marco(
+            _zone_item(cross_state="A", asia_range=asia), _scanner_item())
+        assert next(g for g in m2["gates"] if g["key"] == "sweep_asiatico")["passed"] is True
+        # Fade lejos del extremo barrido (>5p) tampoco veta.
+        asia_far = {"high": 0.71800, "low": 0.71400, "swept_high": True, "swept_low": False}
+        m3 = generate_zone_marco(
+            _zone_item(cross_state="B", asia_range=asia_far), _scanner_item())
+        assert next(g for g in m3["gates"] if g["key"] == "sweep_asiatico")["passed"] is True
 
 
 def test_fade_veta_long_sobre_vwap():
-    # Fade LONG con el precio SOBRE el VWAP de sesión = comprar caro contra la media.
-    vwap_bajo = {"value": 0.71600, "upper": 0.71680, "lower": 0.71520,
-                 "distance_pips": 10.0, "beyond_upper": True, "beyond_lower": False}
-    m = generate_zone_marco(_zone_item(cross_state="B", vwap=vwap_bajo), _scanner_item())
-    g = next(x for x in m["gates"] if x["key"] == "vwap_fade")
-    assert g["passed"] is False
-    assert m["decision"] == "NO_OPERAR"
-    # Precio bajo el VWAP → fade LONG comprando barato: pasa.
-    vwap_alto = {"value": 0.71800, "upper": 0.71880, "lower": 0.71720,
-                 "distance_pips": -10.0, "beyond_upper": False, "beyond_lower": True}
-    m2 = generate_zone_marco(_zone_item(cross_state="B", vwap=vwap_alto), _scanner_item())
-    assert next(x for x in m2["gates"] if x["key"] == "vwap_fade")["passed"] is True
-    # En tendencia no aplica (precio sobre VWAP es lo normal en un LONG de tendencia).
-    m3 = generate_zone_marco(_zone_item(cross_state="A", vwap=vwap_bajo), _scanner_item())
-    assert next(x for x in m3["gates"] if x["key"] == "vwap_fade")["passed"] is True
+    # Geometría/gates de la estrategia legacy (ver _reversion).
+    with _reversion():
+        # Fade LONG con el precio SOBRE el VWAP de sesión = comprar caro contra la media.
+        vwap_bajo = {"value": 0.71600, "upper": 0.71680, "lower": 0.71520,
+                     "distance_pips": 10.0, "beyond_upper": True, "beyond_lower": False}
+        m = generate_zone_marco(_zone_item(cross_state="B", vwap=vwap_bajo), _scanner_item())
+        g = next(x for x in m["gates"] if x["key"] == "vwap_fade")
+        assert g["passed"] is False
+        assert m["decision"] == "NO_OPERAR"
+        # Precio bajo el VWAP → fade LONG comprando barato: pasa.
+        vwap_alto = {"value": 0.71800, "upper": 0.71880, "lower": 0.71720,
+                     "distance_pips": -10.0, "beyond_upper": False, "beyond_lower": True}
+        m2 = generate_zone_marco(_zone_item(cross_state="B", vwap=vwap_alto), _scanner_item())
+        assert next(x for x in m2["gates"] if x["key"] == "vwap_fade")["passed"] is True
+        # En tendencia no aplica (precio sobre VWAP es lo normal en un LONG de tendencia).
+        m3 = generate_zone_marco(_zone_item(cross_state="A", vwap=vwap_bajo), _scanner_item())
+        assert next(x for x in m3["gates"] if x["key"] == "vwap_fade")["passed"] is True
 
 
 def test_sl_floor_extiende_sl_corto():
-    # Entrada pegada al nivel: SL estructural de 3p (buffer mínimo) se extiende
-    # al floor de 6p — con SL de 2-3p el spread domina (trade 06-ago, −32% extra).
-    cfg = zse.PAIR_CONFIG["AUDUSD"]
-    r = zse._calculate_sl_tp(
-        pair="AUDUSD", pip_size=0.0001, scanner_side="LONG",
-        entry_price=0.70346, best_level={"price": 0.70346},
-        opposite_level=None, atr_m15=0.0003, cfg=cfg,
-    )
-    assert r["sl_floored"] is True
-    assert r["risk_pips"] == 6.0
-    assert r["sl_price"] == 0.70286  # entry − 6p
+    # Geometría/gates de la estrategia legacy (ver _reversion).
+    with _reversion():
+        # Entrada pegada al nivel: SL estructural de 3p (buffer mínimo) se extiende
+        # al floor de 6p — con SL de 2-3p el spread domina (trade 06-ago, −32% extra).
+        cfg = zse.PAIR_CONFIG["AUDUSD"]
+        r = zse._calculate_sl_tp(
+            pair="AUDUSD", pip_size=0.0001, scanner_side="LONG",
+            entry_price=0.70346, best_level={"price": 0.70346},
+            opposite_level=None, atr_m15=0.0003, cfg=cfg,
+        )
+        assert r["sl_floored"] is True
+        assert r["risk_pips"] == 6.0
+        assert r["sl_price"] == 0.70286  # entry − 6p
 
 
 def test_rrr_neto_bloquea_trade_dominado_por_spread():
-    # RRR bruto 2:1 con SL corto: el neto cae bajo 1.6 y el gate falla.
-    cfg = {"sl_max_pips": 20.0, "sl_min_pips": 0.0, "cost_pips": 1.4}
-    r = zse._calculate_sl_tp(
-        pair="AUDUSD", pip_size=0.0001, scanner_side="LONG",
-        entry_price=0.70330, best_level={"price": 0.70345},
-        opposite_level={"price": 0.70370}, atr_m15=0.0002, cfg=cfg,
-    )
-    # risk = |0.70330 − (0.70345−0.0003)| = 1.5p · reward = 4p → bruto 2.67 pero
-    # neto = (4−1.4)/(1.5+1.4) = 0.9 → bloqueado
-    assert r["rrr"] is not None and r["rrr"] >= 2.0
-    assert r["rrr_net"] is not None and r["rrr_net"] < zse.MIN_RRR_NET
-    assert r["rrr_ok"] is False
+    # Geometría/gates de la estrategia legacy (ver _reversion).
+    with _reversion():
+        # RRR bruto 2:1 con SL corto: el neto cae bajo 1.6 y el gate falla.
+        cfg = {"sl_max_pips": 20.0, "sl_min_pips": 0.0, "cost_pips": 1.4}
+        r = zse._calculate_sl_tp(
+            pair="AUDUSD", pip_size=0.0001, scanner_side="LONG",
+            entry_price=0.70330, best_level={"price": 0.70345},
+            opposite_level={"price": 0.70370}, atr_m15=0.0002, cfg=cfg,
+        )
+        # risk = |0.70330 − (0.70345−0.0003)| = 1.5p · reward = 4p → bruto 2.67 pero
+        # neto = (4−1.4)/(1.5+1.4) = 0.9 → bloqueado
+        assert r["rrr"] is not None and r["rrr"] >= 2.0
+        assert r["rrr_net"] is not None and r["rrr_net"] < zse.MIN_RRR_NET
+        assert r["rrr_ok"] is False
 
 
 def test_sesion_avoid_exige_fuerte():

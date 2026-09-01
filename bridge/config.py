@@ -53,7 +53,11 @@ class Config:
     magic: int = int(_get("MAGIC", "20260711"))
 
     # Riesgo
-    risk_pct: float = float(_get("RISK_PCT", "0.5"))            # % de equity por trade
+    # 0.5 → 0.25 el 2026-09-01 junto al cambio a Escenario B (continuation).
+    # Motivo: la estrategia nueva entra en validación en vivo con 2.342 USD ya
+    # consumidos de los 5.000 de límite total FTMO (47% del colchón). A 0.25%
+    # el margen restante da ~21 trades de recorrido en vez de ~10.
+    risk_pct: float = float(_get("RISK_PCT", "0.25"))           # % de equity por trade
     max_trades_per_day: int = int(_get("MAX_TRADES_PER_DAY", "2"))
     max_daily_loss_usd: float = float(_get("MAX_DAILY_LOSS_USD", "2500"))
     max_total_loss_usd: float = float(_get("MAX_TOTAL_LOSS_USD", "5000"))

@@ -3,3 +3,23 @@
 2026-08-06 15:27:14 | REAL | LONG AUDUSD | 12.29 lots | @ 0.70336 | SL 0.70316 | TP 0.70412 | TP1 0.70380 | RRR 2.00 | riesgo 246 USD | score 8/18 | strength normal | cross B | nivel {'price': 0.70346, 'type': 'support', 'strength': 5, 'touches': 25, 'distance_pips': 0.2} | fuente marco | ticket 513878543
 2026-08-06 16:43:21 | REAL | SHORT AUDUSD | 3.21 lots | @ 0.70301 | SL 0.70377 | TP 0.70212 | TP1 0.70267 | RRR 2.00 | riesgo 244 USD | score 9/18 | strength normal | cross B | nivel {'price': 0.70347, 'type': 'resistance', 'strength': 5, 'touches': 24, 'distance_pips': 2.5} | fuente marco | ticket 513920873
 2026-08-11 11:13:24 | REAL | LONG AUDUSD | 2.51 lots | @ 0.70657 | SL 0.70558 | TP 0.70918 | TP1 0.70798 | RRR 2.00 | riesgo 249 USD | score 13/18 | strength fuerte | cross B | nivel {'price': 0.70588, 'type': 'support', 'strength': 5, 'touches': 25, 'distance_pips': 9.0} | fuente marco | ticket 516720107
+2026-08-13 13:29:55 | REAL | SHORT AUDUSD | 2.04 lots | @ 0.70553 | SL 0.70672 | TP 0.70276 | TP1 0.70434 | RRR 2.36 | riesgo 243 USD | score 10/18 | strength fuerte | cross A | nivel {'price': 0.70642, 'type': 'resistance', 'strength': 5, 'touches': 30, 'distance_pips': 8.8} | fuente marco | ticket 518957272
+2026-08-14 10:47:06 | REAL | LONG AUDUSD | 3.53 lots | @ 0.70915 | SL 0.70846 | TP 0.71068 | TP1 0.70984 | RRR 2.70 | riesgo 244 USD | score 10/18 | strength fuerte | cross A | nivel {'price': 0.70899, 'type': 'support', 'strength': 4, 'touches': 5, 'distance_pips': 0.7} | fuente marco | ticket 519671939
+2026-08-19 08:26:49 | REAL | SHORT AUDUSD | 1.82 lots | @ 0.70746 | SL 0.70883 | TP 0.70487 | TP1 0.70609 | RRR 2.36 | riesgo 250 USD | score 11/18 | strength fuerte | cross A | nivel {'price': 0.70853, 'type': 'resistance', 'strength': 5, 'touches': 20, 'distance_pips': 8.8} | fuente marco | ticket 522712005
+2026-08-21 08:52:54 | REAL | LONG AUDUSD | 2.97 lots | @ 0.71637 | SL 0.71552 | TP 0.71873 | TP1 0.71722 | RRR 2.45 | riesgo 253 USD | score 8/18 | strength normal | cross A | nivel {'price': 0.71582, 'type': 'support', 'strength': 2, 'touches': 2, 'distance_pips': 6.3} | fuente marco | ticket 524952937
+2026-08-21 12:25:06 | REAL | LONG AUDUSD | 2.48 lots | @ 0.71680 | SL 0.71578 | TP 0.71875 | TP1 0.71782 | RRR 2.49 | riesgo 253 USD | score 8/18 | strength normal | cross A | nivel {'price': 0.71608, 'type': 'support', 'strength': 2, 'touches': 4, 'distance_pips': 5.5} | fuente marco | ticket 525220666
+2026-08-24 05:44:22 | REAL | LONG USDCAD | 2.01 lots | @ 1.38416 | SL 1.38242 | TP 1.38801 | TP1 1.38590 | RRR 2.52 | riesgo 253 USD | score 12/18 | strength fuerte | cross A | nivel {'price': 1.38274, 'type': 'support', 'strength': 5, 'touches': 6, 'distance_pips': 12.7} | fuente marco | ticket 526102696
+2026-08-25 14:00:26 | REAL | SHORT AUDUSD | 1.83 lots | @ 0.71549 | SL 0.71685 | TP 0.71250 | TP1 0.71413 | RRR 2.32 | riesgo 250 USD | score 10/18 | strength fuerte | cross A | nivel {'price': 0.71655, 'type': 'resistance', 'strength': 5, 'touches': 32, 'distance_pips': 10.1} | fuente marco | ticket 527785409
+2026-08-26 05:31:51 | REAL | LONG AUDUSD | 1.39 lots | @ 0.71825 | SL 0.71644 | TP 0.72262 | TP1 0.72006 | RRR 2.22 | riesgo 252 USD | score 13/18 | strength fuerte | cross A | nivel {'price': 0.71674, 'type': 'support', 'strength': 5, 'touches': 15, 'distance_pips': 16.2} | fuente marco | ticket 528282501
+2026-09-01 00:00:00 | ===== CAMBIO DE ESTRATEGIA (2026-09-01) =====
+2026-09-01 00:00:00 | Estrategia anterior: REVERSION — el nivel S/R se leia como rebote y se entraba
+2026-09-01 00:00:00 |   EN la direccion del detector, con SL anclado al nivel (nivel +-3p) y parcial 1R+BE.
+2026-09-01 00:00:00 |   Resultado real 30-jul a 26-ago: 13 trades, 2W/11L, -2342 USD (WR 15.4%).
+2026-09-01 00:00:00 | Estrategia nueva: CONTINUATION (Escenario B) — el nivel marca AGOTAMIENTO, no rebote.
+2026-09-01 00:00:00 |   Se ejecuta el lado CONTRARIO al detector; SL/TP fijos 12p/24p desde la entrada;
+2026-09-01 00:00:00 |   parcial 1R+BE desactivada; riesgo 0.50% -> 0.25% por trade.
+2026-09-01 00:00:00 | Base: replay de las 12 marcas AUDUSD contra OHLC M15 real ->
+2026-09-01 00:00:00 |   senal tal cual -10.40R | moneda -1.40R | senal INVERTIDA +7.60R (8W/4L).
+2026-09-01 00:00:00 |   MFE 4h media -3.7p vs MAE 4h media +21.0p; 63/63 combinaciones SL x TP negativas.
+2026-09-01 00:00:00 | Todas las lineas POR ENCIMA son de la estrategia ANTERIOR. No mezclar cohortes.
+2026-09-01 00:00:00 | ============================================

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import urllib.error
@@ -534,6 +535,18 @@ def _reporter_loop():
 
 # ─── Arranque ───────────────────────────────────────────────────────────────
 
+# Marca de la estrategia activa. El backend es la fuente de verdad (el marco
+# llega ya invertido en `side`); acá solo se registra para que el log diga con
+# qué premisa se operó cada trade.
+STRATEGY_ACTIVE = os.getenv("ZONE_STRATEGY", "continuation").strip().lower()
+STRATEGY_CHANGED_ON = "2026-09-01"
+STRATEGY_NOTE = (
+    "Escenario B: el nivel S/R marca AGOTAMIENTO, no rebote. Se opera el "
+    "sobre-recorrido (lado contrario al detector) con SL/TP fijos 12p/24p y sin "
+    "parcial a 1R. En validacion en vivo: revisar tras 20-30 trades cerrados."
+)
+
+
 def main():
     logging.basicConfig(
         level=logging.INFO,
@@ -551,6 +564,13 @@ def main():
     log.info("Riesgo: %.2f%%/trade, max %d trades/dia, limite diario %.0f USD, total %.0f USD",
              cfg.risk_pct, cfg.max_trades_per_day, cfg.max_daily_loss_usd, cfg.max_total_loss_usd)
     log.info("Simbolos: %s  Ventanas Madrid: %s", cfg.allowed_symbols, cfg.symbol_windows)
+    log.info("ESTRATEGIA: %s (cambio aplicado el %s)", STRATEGY_ACTIVE, STRATEGY_CHANGED_ON)
+    log.info("%s", STRATEGY_NOTE)
+    # Una linea por arranque: deja constancia de con que premisa se ejecutaron
+    # los trades que vengan debajo. El bloque explicativo del cambio se escribio
+    # una sola vez en executed.log con fecha 2026-09-01 (marca historica).
+    exec_log.info("--- arranque | estrategia %s (desde %s) | riesgo %.2f%%/trade | DRY_RUN=%s ---",
+                  STRATEGY_ACTIVE.upper(), STRATEGY_CHANGED_ON, cfg.risk_pct, cfg.dry_run)
     if not cfg.dry_run:
         log.warning(">>> EJECUCION REAL ACTIVA <<<")
 

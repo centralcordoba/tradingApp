@@ -1266,3 +1266,16 @@
   letter-spacing: 0.05em;
   opacity: 0.6;
 }
+
+/* Aviso de inversión del Escenario B (continuation): el lado ejecutado no
+   coincide con el del detector, y sin este renglón la card parece incoherente. */
+.marco-strategy {
+  margin: 6px 0 2px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--accent);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}

@@ -81,7 +81,12 @@ def test_parse_ohlc_without_meta_keeps_all():
 _G9 = dict(pair="EURUSD", pip_size=0.0001, cfg={"sl_max_pips": 20.0}, atr_m15=0.0010)
 
 
-def test_gate9_sl_beyond_cap_fails_not_clamps():
+# Los tres tests de gate 9 describen la geometría ANCLADA AL NIVEL, que desde el
+# 2026-09-01 solo corre en modo "reversion" (ZONE_STRATEGY=reversion). El modo por
+# defecto pasó a "continuation" con SL/TP fijos — cubierto en test_zone_marco.py.
+
+def test_gate9_sl_beyond_cap_fails_not_clamps(monkeypatch):
+    monkeypatch.setattr(zone_signal_engine, "STRATEGY_MODE", "reversion")
     r = zone_signal_engine._calculate_sl_tp(
         scanner_side="LONG", entry_price=1.0850,
         best_level={"price": 1.0800}, opposite_level={"price": 1.0900}, **_G9,
@@ -92,7 +97,8 @@ def test_gate9_sl_beyond_cap_fails_not_clamps():
     assert r["sl_within_cap"] is False
 
 
-def test_gate9_insufficient_rrr_fails_not_fabricates():
+def test_gate9_insufficient_rrr_fails_not_fabricates(monkeypatch):
+    monkeypatch.setattr(zone_signal_engine, "STRATEGY_MODE", "reversion")
     # Nivel opuesto a 50p con riesgo 15p → RRR 3.3 OK; opuesto a 20p → RRR 1.3 falla
     r = zone_signal_engine._calculate_sl_tp(
         scanner_side="LONG", entry_price=1.0810,
@@ -104,7 +110,8 @@ def test_gate9_insufficient_rrr_fails_not_fabricates():
     assert r["rrr_ok"] is False
 
 
-def test_gate9_no_opposite_level_uses_2to1():
+def test_gate9_no_opposite_level_uses_2to1(monkeypatch):
+    monkeypatch.setattr(zone_signal_engine, "STRATEGY_MODE", "reversion")
     r = zone_signal_engine._calculate_sl_tp(
         scanner_side="LONG", entry_price=1.0810,
         best_level={"price": 1.0800}, opposite_level=None, **_G9,

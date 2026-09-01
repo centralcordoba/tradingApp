@@ -346,6 +346,17 @@ function MarcoCard({ marco }: { marco: ZoneMarco }) {
         )}
       </div>
 
+      {/* Escenario B: el lado ejecutado es el CONTRARIO al del detector. Sin este
+          aviso la card parece contradecirse (nivel = soporte, lado = SHORT). */}
+      {marco.strategy === "continuation" && marco.signal_side && marco.side && (
+        <div className="marco-strategy" title={
+          "Estrategia de continuación (desde el 2026-09-01): el nivel se lee como " +
+          "agotamiento, no como rebote. Se opera el sobre-recorrido."
+        }>
+          ⇄ Continuación · detector {marco.signal_side} → se opera {marco.side}
+        </div>
+      )}
+
       <div className="marco-reason">{marco.reason}</div>
 
       {/* Aviso de noticia (gate blando) */}

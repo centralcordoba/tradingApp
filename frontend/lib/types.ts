@@ -70,7 +70,12 @@ export type MarcoGate = {
 
 export type ZoneMarco = {
   decision: "OPERAR" | "ESPERAR" | "NO_OPERAR";
+  /** Lado a EJECUTAR. Con strategy="continuation" es el contrario a signal_side. */
   side: "LONG" | "SHORT" | null;
+  /** Lado del detector (nivel + wick + cross). Para auditar la inversión. */
+  signal_side?: "LONG" | "SHORT" | null;
+  /** "continuation" (Escenario B, desde 2026-09-01) | "reversion" (legacy). */
+  strategy?: "continuation" | "reversion";
   strength?: "fuerte" | "normal" | null;
   gates: MarcoGate[];
   confluence: { score: number; max: number; pct: number };
