@@ -247,10 +247,17 @@ class Mt5Client:
                 return False, f"retcode {result.retcode}: {result.comment}"
         return False, "ningun type_filling aceptado por el broker"
 
-    def closed_deals_since(self, since_utc: datetime) -> list:
-        """Deals de SALIDA con nuestro magic desde since_utc (para auto-resolución)."""
+    def account_login(self) -> Optional[int]:
+        if not self.connected:
+            return None
+        info = mt5.account_info()
+        return info.login if info else None
+
+    def closed_position_deals(self, ticket: int) -> list:
+        """Todos los deals de la posición (entrada, parciales, salida) si ya cerró;
+        [] si no tiene deal de salida o no existe en la cuenta conectada."""
         if not self.connected:
             return []
-        deals = mt5.history_deals_get(since_utc, datetime.now(timezone.utc) + timedelta(days=1)) or []
-        return [d for d in deals
-                if d.magic == self.cfg.magic and d.entry == mt5.DEAL_ENTRY_OUT]
+        deals = sorted(mt5.history_deals_get(position=ticket) or [], key=lambda d: d.time_msc)
+        closed = any(d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY) for d in deals)
+        return deals if closed else []

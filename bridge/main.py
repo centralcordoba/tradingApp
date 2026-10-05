@@ -27,8 +27,9 @@ from zoneinfo import ZoneInfo
 from config import Config
 from mt5_client import Mt5Client
 import trade_log
-from risk import (classify_result, guard_reason, half_volume, in_window,
-                  lots_for_risk, management_action)
+from risk import (classify_result, fill_geometry, guard_reason, half_volume,
+                  in_window, lots_for_risk, management_action, pip_size,
+                  rebase_to_fill)
 
 BASE_DIR = Path(__file__).parent
 STATE_FILE = BASE_DIR / "bridge_state.json"
@@ -51,9 +52,11 @@ _state: dict = {
     "trades": {"date": "", "count": 0},
     "open_map": {},                  # position_ticket → signal_id (para reportar cierre)
     "managed": {},                   # ticket → {symbol, side, entry, tp1, partial_done}
+    "open_accounts": {},             # position_ticket → login MT5 donde se abrió
 }
 _prev_strong: dict = {}              # pair → side|None (transiciones del marco, en memoria)
 _stale_logged: dict = {}             # pair → bool (dedupe del log de dato viejo)
+_unresolved_logged: set = set()      # tickets sin cierre localizable (dedupe del log)
 
 
 # ─── Estado persistido ──────────────────────────────────────────────────────
@@ -145,8 +148,15 @@ def _log_executed(*, ticket, symbol, side, lots, price, sl, tp, tp1,
 
 def _execute(symbol: str, side: str, sl: float, tp, comment: str,
              signal_id, source: str, entry_hint: float,
-             context: dict | None = None, rrr=None, tp1=None):
-    """Todas las guardas + sizing + orden (o log en DRY_RUN)."""
+             context: dict | None = None, rrr=None, tp1=None,
+             rebase: bool = False, cost_pips=None, enforce_rrr: bool = False):
+    """Todas las guardas + sizing + orden (o log en DRY_RUN).
+
+    rebase: desplaza SL/TP con el fill (geometría fija en pips del modo
+    continuation). enforce_rrr: re-verifica el RRR mínimo del marco contra el
+    fill — el marco lo evalúa sobre su entry teórico (cierre de la última M15
+    cacheada) y el fill llega hasta 30 min después.
+    """
     if symbol not in cfg.allowed_symbols:
         log.info("[%s] %s fuera de whitelist — skip", source, symbol)
         return
@@ -167,6 +177,16 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
 
     equity = mt5c.equity() or cfg.initial_balance
     price = mt5c.current_price(broker_symbol, side) or entry_hint
+    if rebase:
+        sl, tp = rebase_to_fill(price, entry_hint, sl, tp)
+    geo = fill_geometry(side, price, sl, tp, pip_size(symbol), cost_pips)
+    crossed = geo["risk_pips"] <= 0 or (geo["reward_pips"] is not None
+                                        and geo["reward_pips"] <= 0)
+    if geo["reason"] and (enforce_rrr or crossed):
+        log.info("[%s] %s %s: %s — skip", source, symbol, side, geo["reason"])
+        return
+    if geo["rrr"] is not None:
+        rrr = geo["rrr"]
     sl_distance = abs(price - sl)
     if tp1 is not None:
         # TP1 = 1R desde el fill REAL. El marco lo calcula desde su entry teórico
@@ -234,6 +254,7 @@ def _execute(symbol: str, side: str, sl: float, tp, comment: str,
             # signal_id puede ser None (trades del marco): el reporter cierra
             # el registro en bridge_trades igualmente vía el ticket.
             _state["open_map"][str(ticket)] = signal_id
+            _state.setdefault("open_accounts", {})[str(ticket)] = mt5c.account_login()
             if tp1 is not None:
                 # gestión parcial 1R + BE: usa el precio real de fill como entry
                 _state["managed"][str(ticket)] = {
@@ -438,7 +459,9 @@ def _handle_marco(pair: str, item: dict, marco: dict):
     _execute(pair, marco["side"], float(sl), float(tp) if tp is not None else None,
              comment=f"marco:{pair}", signal_id=None, source="marco",
              entry_hint=float(entry), context=context, rrr=marco.get("rrr"),
-             tp1=float(tp1) if tp1 is not None else None)
+             tp1=float(tp1) if tp1 is not None else None,
+             rebase=marco.get("strategy") == "continuation",
+             cost_pips=marco.get("cost_pips"), enforce_rrr=True)
 
 
 # ─── Gestión de posición: parcial a 1R + SL a break-even ────────────────────
@@ -492,45 +515,60 @@ def _reporter_loop():
         if not mt5c.connected or not _state["open_map"]:
             continue
         try:
-            since = datetime.now(timezone.utc) - timedelta(days=7)
-            # Agrupa deals de salida por posición: un cierre parcial y el final
-            # comparten position_id → hay que sumar el PnL y solo finalizar cuando
-            # la posición ya no existe (si sigue abierta, fue solo el parcial).
-            by_pos: dict = {}
-            for d in mt5c.closed_deals_since(since):
-                by_pos.setdefault(str(d.position_id), []).append(d)
-            for ticket, deals in by_pos.items():
-                if ticket not in _state["open_map"]:
-                    continue
-                if mt5c.position_by_ticket(int(ticket)) is not None:
-                    continue  # sigue abierta (se tomó el parcial) — aún no finalizar
-                sid = _state["open_map"][ticket]  # None en trades del marco
-                profit = sum(d.profit + d.swap + d.commission for d in deals)
-                exit_price = deals[-1].price
-                result = classify_result(profit, cfg.be_threshold_usd)
-                try:
-                    _post_json(f"/bridge/trades/{ticket}/close",
-                               {"result": result, "exit_price": exit_price,
-                                "pnl_usd": round(profit, 2)})
-                except urllib.error.HTTPError as e:
-                    if e.code != 404:  # 404 = fila inexistente; no reintentar para siempre
-                        log.warning("POST close trade %s fallo: %s", ticket, e)
-                        continue
-                    log.warning("Trade %s sin fila en bridge_trades (404) — se descarta", ticket)
-                if sid is not None:
-                    try:
-                        _post_json(f"/signals/{sid}/result",
-                                   {"result": result, "exit_price": exit_price})
-                    except urllib.error.HTTPError as e:
-                        log.warning("POST result senal %s fallo: %s", sid, e)
-                        continue
-                del _state["open_map"][ticket]
-                _state["managed"].pop(ticket, None)
-                _save_state()
-                trade_log.log_close(ticket, result, exit_price, round(profit, 2))
-                log.info("Cierre reportado: ticket %s → %s (%.2f USD)", ticket, result, profit)
+            _report_closes()
         except Exception as e:
             log.warning("reporter: %s", e)
+
+
+def _report_closes():
+    """Busca cada posición mapeada por su ticket en el historial de MT5 (sin
+    ventana de fechas: antes solo miraba 7 días y un cierre ocurrido con el
+    bridge apagado más tiempo se perdía). Una posición abierta en OTRA cuenta
+    (FTMO rota de cuenta) queda pendiente hasta volver a conectarla — la cuenta
+    actual no tiene su historial."""
+    login = mt5c.account_login()
+    accounts = _state.setdefault("open_accounts", {})
+    for ticket in list(_state["open_map"]):
+        owner = accounts.get(ticket)
+        if owner is not None and owner != login:
+            continue
+        if mt5c.position_by_ticket(int(ticket)) is not None:
+            continue  # sigue abierta (o solo se tomó el parcial)
+        deals = mt5c.closed_position_deals(int(ticket))
+        if not deals:
+            if ticket not in _unresolved_logged:
+                _unresolved_logged.add(ticket)
+                log.warning("Trade %s no esta abierto ni en el historial de la cuenta %s "
+                            "(¿abierto en otra cuenta?) — queda pendiente", ticket, login)
+            continue
+        sid = _state["open_map"][ticket]  # None en trades del marco
+        # Todos los deals de la posición: entrada (comisión), parciales y salida.
+        profit = sum(d.profit + d.swap + d.commission for d in deals)
+        exit_price = deals[-1].price
+        result = classify_result(profit, cfg.be_threshold_usd)
+        try:
+            _post_json(f"/bridge/trades/{ticket}/close",
+                       {"result": result, "exit_price": exit_price,
+                        "pnl_usd": round(profit, 2)})
+        except urllib.error.HTTPError as e:
+            if e.code != 404:  # 404 = fila inexistente; no reintentar para siempre
+                log.warning("POST close trade %s fallo: %s", ticket, e)
+                continue
+            log.warning("Trade %s sin fila en bridge_trades (404) — se descarta", ticket)
+        if sid is not None:
+            try:
+                _post_json(f"/signals/{sid}/result",
+                           {"result": result, "exit_price": exit_price})
+            except urllib.error.HTTPError as e:
+                log.warning("POST result senal %s fallo: %s", sid, e)
+                continue
+        del _state["open_map"][ticket]
+        accounts.pop(ticket, None)
+        _state["managed"].pop(ticket, None)
+        _unresolved_logged.discard(ticket)
+        _save_state()
+        trade_log.log_close(ticket, result, exit_price, round(profit, 2))
+        log.info("Cierre reportado: ticket %s → %s (%.2f USD)", ticket, result, profit)
 
 
 # ─── Arranque ───────────────────────────────────────────────────────────────

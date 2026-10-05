@@ -85,3 +85,55 @@ def guard_reason(*, kill_switch: bool, trades_today: int, max_trades: int,
         return (f"el SL de este trade podria breachear el limite total "
                 f"(drawdown {drawdown_total_usd:.0f} USD, limite {max_total_loss:.0f})")
     return None
+
+
+# Mínimos del gate 9 del marco (zone_signal_engine.MIN_RRR / MIN_RRR_NET).
+# Se re-verifican contra el FILL: el marco los evalúa sobre su entry teórico.
+MIN_RRR = 2.0
+MIN_RRR_NET = 1.6
+
+
+def pip_size(symbol: str) -> float:
+    return 0.01 if "JPY" in symbol.upper() else 0.0001
+
+
+def rebase_to_fill(fill: float, entry_hint: float, sl: float,
+                   tp: Optional[float]) -> tuple:
+    """Desplaza SL/TP con el fill para conservar la geometría en pips del marco
+    (modo continuation: SL/TP fijos desde la entrada, no anclados a un nivel)."""
+    shift = fill - entry_hint
+    return (round(sl + shift, 5),
+            round(tp + shift, 5) if tp is not None else None)
+
+
+def fill_geometry(side: str, fill: float, sl: float, tp: Optional[float],
+                  pip: float, cost_pips: Optional[float]) -> dict:
+    """Riesgo/beneficio REAL desde el precio de ejecución.
+
+    {risk_pips, reward_pips, rrr, rrr_net, reason}; reason=None si la geometría
+    es operable. rrr/rrr_net son None sin TP (no se puede exigir mínimo).
+    """
+    sgn = 1 if side == "LONG" else -1
+    risk_pips = (fill - sl) * sgn / pip
+    out = {"risk_pips": round(risk_pips, 1), "reward_pips": None,
+           "rrr": None, "rrr_net": None, "reason": None}
+    if risk_pips <= 0:
+        out["reason"] = f"el precio ({fill:.5f}) ya supero el SL ({sl:.5f})"
+        return out
+    if tp is None:
+        return out
+    reward_pips = (tp - fill) * sgn / pip
+    out["reward_pips"] = round(reward_pips, 1)
+    if reward_pips <= 0:
+        out["reason"] = f"el precio ({fill:.5f}) ya supero el TP ({tp:.5f})"
+        return out
+    out["rrr"] = round(reward_pips / risk_pips, 2)
+    if out["rrr"] < MIN_RRR:
+        out["reason"] = f"RRR real desde el fill {out['rrr']:.2f} < {MIN_RRR:.1f}"
+        return out
+    if cost_pips is not None:
+        out["rrr_net"] = round((reward_pips - cost_pips) / (risk_pips + cost_pips), 2)
+        if out["rrr_net"] < MIN_RRR_NET:
+            out["reason"] = (f"RRR neto real desde el fill {out['rrr_net']:.2f} "
+                             f"< {MIN_RRR_NET:.1f}")
+    return out

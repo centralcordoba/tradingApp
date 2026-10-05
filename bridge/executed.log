@@ -23,3 +23,39 @@
 2026-09-01 00:00:00 |   MFE 4h media -3.7p vs MAE 4h media +21.0p; 63/63 combinaciones SL x TP negativas.
 2026-09-01 00:00:00 | Todas las lineas POR ENCIMA son de la estrategia ANTERIOR. No mezclar cohortes.
 2026-09-01 00:00:00 | ============================================
+2026-09-02 09:40:05 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-02 10:13:01 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-02 10:48:57 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-02 14:06:33 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-02 20:42:08 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-03 09:16:35 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-03 14:55:53 | REAL | SHORT AUDUSD | 0.92 lots | @ 0.72050 | SL 0.72186 | TP 0.71826 | RRR 2.00 | riesgo 126 USD | score 11/18 | strength fuerte | cross A | nivel {'price': 0.72027, 'type': 'support', 'strength': 5, 'touches': 4, 'distance_pips': 3.8} | fuente marco | ticket 534884505
+2026-09-08 06:32:56 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-08 15:02:52 | REAL | SHORT AUDUSD | 1.07 lots | @ 0.72224 | SL 0.72343 | TP 0.71983 | RRR 2.00 | riesgo 127 USD | score 11/18 | strength fuerte | cross A | nivel {'price': 0.72045, 'type': 'support', 'strength': 5, 'touches': 22, 'distance_pips': 17.8} | fuente marco | ticket 537691027
+2026-09-09 09:11:09 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-09 09:12:03 | REAL | SHORT AUDUSD | 1.33 lots | @ 0.72252 | SL 0.72347 | TP 0.71987 | RRR 2.00 | riesgo 127 USD | score 12/18 | strength fuerte | cross A | nivel {'price': 0.72054, 'type': 'support', 'strength': 5, 'touches': 32, 'distance_pips': 17.2} | fuente marco | ticket 538310180
+2026-09-10 09:09:51 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-10 09:56:21 | REAL | LONG AUDUSD | 0.86 lots | @ 0.71648 | SL 0.71505 | TP 0.71865 | RRR 2.00 | riesgo 124 USD | score 11/18 | strength fuerte | cross A | nivel {'price': 0.71785, 'type': 'resistance', 'strength': 3, 'touches': 2, 'distance_pips': 16.0} | fuente marco | ticket 539445240
+2026-09-10 13:14:24 | REAL | LONG AUDUSD | 1.30 lots | @ 0.71668 | SL 0.71573 | TP 0.71933 | RRR 2.00 | riesgo 124 USD | score 10/18 | strength fuerte | cross A | nivel {'price': 0.71755, 'type': 'resistance', 'strength': 5, 'touches': 4, 'distance_pips': 6.2} | fuente marco | ticket 539686775
+2026-09-11 10:30:53 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-14 10:19:05 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-15 08:39:55 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-15 15:41:34 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-16 08:13:22 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-16 10:40:57 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-18 13:29:00 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-21 08:26:51 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-22 10:12:47 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-22 10:34:00 | REAL | LONG AUDUSD | 0.82 lots | @ 0.71103 | SL 0.70955 | TP 0.71315 | RRR 2.00 | riesgo 122 USD | score 13/18 | strength fuerte | cross A | nivel {'price': 0.71244, 'type': 'resistance', 'strength': 5, 'touches': 26, 'distance_pips': 16.9} | fuente marco | ticket 547638834
+2026-09-23 09:29:56 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-23 09:30:56 | REAL | LONG AUDUSD | 1.05 lots | @ 0.70648 | SL 0.70535 | TP 0.70895 | RRR 2.00 | riesgo 120 USD | score 7/18 | strength normal | cross A | nivel {'price': 0.70801, 'type': 'resistance', 'strength': 2, 'touches': 3, 'distance_pips': 14.6} | fuente marco | ticket 548495916
+2026-09-25 09:07:44 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-28 13:28:32 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-28 13:58:13 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-29 10:15:20 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-29 10:31:24 | REAL | LONG AUDUSD | 1.05 lots | @ 0.69873 | SL 0.69753 | TP 0.70113 | RRR 2.00 | riesgo 127 USD | score 7/18 | strength normal | cross A | nivel {'price': 0.69935, 'type': 'resistance', 'strength': 2, 'touches': 3, 'distance_pips': 3.3} | fuente marco | ticket 552823026
+2026-09-29 14:07:57 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-09-30 10:11:29 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-10-01 11:51:29 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-10-02 11:10:33 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---
+2026-10-05 08:09:35 | --- arranque | estrategia CONTINUATION (desde 2026-09-01) | riesgo 0.25%/trade | DRY_RUN=False ---

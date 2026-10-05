@@ -318,3 +318,107 @@ def test_fallo_del_reporte_a_db_no_frena_la_orden(env):
     env.monkeypatch.setattr(main, "_post_json", boom)
     main._process_zone_item(zone_item(), now=1000.0)
     assert len(env.executed) == 1
+
+
+# ─── Geometría desde el FILL (fix 28-sep) ────────────────────────────────────
+# El marco calcula SL/TP y valida RRR sobre su entry teórico (cierre de la última
+# M15 cacheada); el fill llega hasta 30 min después. En vivo esto dio SL reales de
+# 9.5-14.8p y RRR 1.43-2.79 con el log diciendo 2.00.
+
+def test_continuation_desplaza_sl_tp_con_el_fill(env):
+    item = zone_item()  # SHORT entry 0.65700, SL +15p, TP −30p
+    item["marco"]["strategy"] = "continuation"
+    env.monkeypatch.setattr(main.mt5c, "current_price", lambda s, side: 0.65730)
+    main._process_zone_item(item, now=1000.0)
+    row = env.executed[0]
+    assert row["sl_price"] == pytest.approx(0.65880)
+    assert row["tp_price"] == pytest.approx(0.65430)
+    assert row["rrr"] == pytest.approx(2.0)
+
+
+def test_reversion_no_desplaza_sl_estructural(env):
+    # SHORT con fill 2p mejor: SL/TP anclados se mantienen, RRR = 32/13
+    env.monkeypatch.setattr(main.mt5c, "current_price", lambda s, side: 0.65720)
+    main._process_zone_item(zone_item(), now=1000.0)
+    row = env.executed[0]
+    assert row["sl_price"] == 0.65850 and row["tp_price"] == 0.65400
+    assert row["rrr"] == pytest.approx(2.46, abs=0.01)
+
+
+def test_rrr_real_bajo_minimo_no_ejecuta(env):
+    # SHORT: el precio ya bajó 5p hacia el TP → riesgo 20p, beneficio 25p → 1.25
+    env.monkeypatch.setattr(main.mt5c, "current_price", lambda s, side: 0.65650)
+    main._process_zone_item(zone_item(), now=1000.0)
+    assert env.executed == []
+
+
+def test_rrr_neto_real_bajo_minimo_no_ejecuta(env):
+    item = zone_item()
+    item["marco"]["cost_pips"] = 4.0  # (30−4)/(15+4) = 1.37 < 1.6
+    main._process_zone_item(item, now=1000.0)
+    assert env.executed == []
+
+
+def test_precio_ya_supero_el_sl_no_ejecuta(env):
+    env.monkeypatch.setattr(main.mt5c, "current_price", lambda s, side: 0.65900)
+    main._process_zone_item(zone_item(), now=1000.0)
+    assert env.executed == []
+
+
+# ─── Reporter: cierre por ticket, sin ventana de 7 días (fix 28-sep) ────────
+
+class _Deal:
+    def __init__(self, price, profit, commission=0.0, swap=0.0):
+        self.price, self.profit, self.commission, self.swap = price, profit, commission, swap
+
+
+@pytest.fixture
+def rep(env):
+    posts, closes = [], []
+    env.monkeypatch.setattr(main, "_post_json", lambda path, body: posts.append((path, body)))
+    env.monkeypatch.setattr(trade_log, "log_close", lambda *a: closes.append(a))
+    env.monkeypatch.setattr(main, "_unresolved_logged", set())
+    env.monkeypatch.setattr(main.mt5c, "account_login", lambda: 111)
+    env.monkeypatch.setattr(main.mt5c, "position_by_ticket", lambda t: None)
+    env.posts, env.closes = posts, closes
+    return env
+
+
+def test_reporter_cierra_por_ticket_y_suma_comision_de_entrada(rep):
+    main._state["open_map"] = {"538310180": None}
+    main._state["open_accounts"] = {"538310180": 111}
+    rep.monkeypatch.setattr(main.mt5c, "closed_position_deals",
+                            lambda t: [_Deal(0.72252, 0.0, -3.3), _Deal(0.71987, 352.45, -3.3)])
+    main._report_closes()
+    path, body = rep.posts[0]
+    assert path == "/bridge/trades/538310180/close"
+    assert body == {"result": "WIN", "exit_price": 0.71987, "pnl_usd": 345.85}
+    assert main._state["open_map"] == {} and main._state["open_accounts"] == {}
+
+
+def test_reporter_posicion_de_otra_cuenta_queda_pendiente(rep):
+    main._state["open_map"] = {"539445240": None}
+    main._state["open_accounts"] = {"539445240": 999}
+    rep.monkeypatch.setattr(main.mt5c, "closed_position_deals",
+                            lambda t: pytest.fail("no debe consultar otra cuenta"))
+    main._report_closes()
+    assert rep.posts == [] and "539445240" in main._state["open_map"]
+
+
+def test_reporter_sin_historial_no_descarta_y_loguea_una_vez(rep, caplog):
+    main._state["open_map"] = {"1": None}
+    rep.monkeypatch.setattr(main.mt5c, "closed_position_deals", lambda t: [])
+    with caplog.at_level("WARNING", logger="bridge"):
+        main._report_closes()
+        main._report_closes()
+    assert rep.posts == [] and "1" in main._state["open_map"]
+    assert sum("queda pendiente" in r.message for r in caplog.records) == 1
+
+
+def test_reporter_posicion_abierta_no_se_cierra(rep):
+    main._state["open_map"] = {"2": None}
+    rep.monkeypatch.setattr(main.mt5c, "position_by_ticket", lambda t: object())
+    rep.monkeypatch.setattr(main.mt5c, "closed_position_deals",
+                            lambda t: pytest.fail("no debe buscar cierre de una abierta"))
+    main._report_closes()
+    assert rep.posts == []
