@@ -14,3 +14,4 @@ out/
 .env.local
 CLAUDE.md
 CLAUDE.md
+backend/scripts/.bt_cache/
